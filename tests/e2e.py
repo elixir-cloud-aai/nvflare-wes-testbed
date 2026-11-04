@@ -100,6 +100,10 @@ def main() -> None:
         kit_url = next(entry["url"] for entry in full["inputs"] if entry["name"] == "kit")
         status = requests.get(kit_url, timeout=30).status_code
         check(f"kit link of {task['name']} is dead after the run", status == 404, status)
+        data_prefix = os.environ.get("EXPECTED_DATA_PREFIX", "")
+        if data_prefix:
+            data_url = next(entry["url"] for entry in full["inputs"] if entry["name"] == "data")
+            check(f"{task['name']} fetched its data from the public URL", data_url.startswith(data_prefix), data_url)
         if gateway:
             backend = full["tags"].get("gateway.backend")
             check(f"{task['name']} ran at the TES of its site", backend == site_tes[task["name"]], backend)
