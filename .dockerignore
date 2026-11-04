@@ -1,0 +1,9 @@
+# Deny by default: only what the images need goes into the build context.
+# No site data, no secrets.
+*
+!wes
+!images
+!testset/job
+!testset/job_src
+!testset/evaluate.py
+!tests

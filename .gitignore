@@ -1,0 +1,15 @@
+# Never commit these: startup kits hold private keys
+.env
+.env.*
+!.env.example
+*.key
+kits/
+results/
+
+# Python and tools
+__pycache__/
+.venv/
+.ruff_cache/
+
+# Docs build
+site/
