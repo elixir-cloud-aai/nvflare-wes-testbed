@@ -66,6 +66,8 @@ jobs:
         run: |
           docker compose --profile test run --rm -T probe-site-1
           docker compose --profile test run --rm -T probe-site-2
+      - name: Probe a node
+        run: tests/probe-node.sh
       - name: Lose a site in the middle of a run (T6)
         run: tests/site-loss.sh
       - name: Run one WES run with public data URLs (T2)
