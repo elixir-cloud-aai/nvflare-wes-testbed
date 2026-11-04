@@ -43,6 +43,8 @@ services:
     environment:
       FL_SCHEME: ${FL_SCHEME:-grpc}
       FL_PORT: ${FL_PORT:-8002}
+      # The image of the tasks. Funnel here only looks for it locally
+      FL_IMAGE: ${FL_IMAGE:-nvflare-testbed:local}
       WES_SITES: >-
         {"site-1": {"tes": "http://funnel-site-1:8000", "data": "file:///data/site-1.csv"},
         "site-2": {"tes": "http://funnel-site-2:8000", "data": "file:///data/site-2.csv"}}

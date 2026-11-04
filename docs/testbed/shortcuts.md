@@ -90,7 +90,7 @@ All of them, in one place, each with the proper way. Their numbers are referred 
 
 ### H20
 
-**A loose image.** One image holds all participants, the WES and the tests, on Python 3.12, with version ranges for most packages. No scans, no provenance. **Proper way:** separate images, locked dependencies, and signing, as in the other repositories of the organization.
+**A loose image.** One image holds all participants, the WES and the tests, on Python 3.12, with version ranges for most packages. Pushed to Docker Hub without scans or signatures, with only the default build provenance. **Proper way:** separate images, locked dependencies, and signing, as in the other repositories of the organization.
 
 ### H21
 

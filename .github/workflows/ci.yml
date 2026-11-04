@@ -1,5 +1,7 @@
-# Everything that must pass on pull requests and pushes to `dev`. Needs no
-# secrets. No `paths:` filters, so that the gate always reports. The gate
+# Everything that must pass on pull requests and pushes to `dev`. Only `push`
+# needs secrets, and only runs on pushes to `dev`, so that pull requests from
+# forks need none. No
+# `paths:` filters, so that the gate always reports. The gate
 # `passed` ("CI passed") is the only check to require; add every new job to
 # its `needs`.
 name: CI
@@ -11,6 +13,11 @@ on:
 
 permissions:
   contents: read
+
+# The organization on Docker Hub can be changed with the repository variable
+# `DOCKERHUB_ORG`, e.g., for a fork
+env:
+  IMAGE_NAME: docker.io/${{ vars.DOCKERHUB_ORG || 'elixircloud' }}/nvflare-wes-testbed
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
@@ -47,6 +54,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Check that the image holds no site data or secrets
+        run: tests/image-contents.sh
       - name: Build images
         run: docker compose --profile test build
       - name: Run the job in the simulator (T1)
@@ -70,15 +79,55 @@ jobs:
         if: always()
         run: docker compose --profile test down -v
 
+  # The image of the participants, which real nodes pull. A sandbox image, so
+  # not signed or scanned (hack H20)
+  push:
+    name: Push image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: ${{ github.event_name == 'push' }}
+    needs: [docs, e2e]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Generate image tags and labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=dev
+            type=sha,format=long
+      - name: Log in to Docker Hub
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          username: ${{ secrets.DOCKERHUB_LOGIN }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and push image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: images/Dockerfile.flare
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
   passed:
     name: CI passed
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [docs, e2e]
+    needs: [docs, e2e, push]
     permissions: {}
     steps:
       - name: Check results of all jobs
         uses: elixir-cloud-aai/.github/actions/gate@743e82d290a53768454999e413756a924e383259 # v1.0.0
         with:
           needs: ${{ toJSON(needs) }}
+          # `push` is skipped on pull requests only
+          allow-skipped: ${{ github.event_name == 'pull_request' && 'push' || '' }}

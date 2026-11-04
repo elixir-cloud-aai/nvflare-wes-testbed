@@ -20,6 +20,8 @@
 | Fake identity provider | For proTES only (`tests/fake_idp.py`): [H10](shortcuts.md#h10) | Cut down from proTES's smoke test |
 | Site networks | Docker networks without a route out: tasks reach the hub only | `compose.yaml` |
 
+The FL server, FL clients, simulator and thin WES share one image, built from `images/Dockerfile.flare`. Locally it's built on your machine, and on [real sites](../setup/real-sites.md#the-image) it comes from Docker Hub.
+
 ## Test set
 
 One minimal job and tiny, made-up data: see [`testset/README.md`](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/blob/dev/testset/README.md).

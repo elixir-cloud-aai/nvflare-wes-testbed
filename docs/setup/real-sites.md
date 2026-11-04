@@ -28,6 +28,10 @@ With one site, use the first share. The holdout set isn't for sites: it stays wi
 
 The shares cover different parts of the feature space: give two sites different ones, or the [expected accuracies](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/blob/dev/testset/README.md) won't hold. `compose.public-data.yaml` runs [T2](../tests/t2-wes-to-tes.md) with these URLs, locally, in CI.
 
+## The image
+
+Nodes pull the one image for all participants: [`elixircloud/nvflare-wes-testbed`](https://hub.docker.com/r/elixircloud/nvflare-wes-testbed). CI builds and pushes it on every push to `dev`, once the tests have passed on a build of its own, as `dev` and as `sha-<commit>`. For a run on real sites, use `sha-<commit>`, as `dev` moves, and set it as `FL_IMAGE`. A fork that sets the repository variable `DOCKERHUB_ORG` uses that organization in place of `elixircloud`. Startup kits, keys and site data stay out of it through `.dockerignore`, which CI checks by file name, with decoys, on a local build. It's a sandbox image, neither signed nor scanned ([H20](../testbed/shortcuts.md#h20)).
+
 ## What to ask node operators
 
 1. May a TES task connect out to `<hub>:8002`, or `<hub>:443`? Through a proxy?
@@ -39,5 +43,5 @@ The shares cover different parts of the feature space: give two sites different 
 ## What changes in the setup
 
 - `WES_SITES` holds the real TES URLs, and the [data URLs](#the-test-set).
-- `FL_IMAGE` names the image in a registry.
+- `FL_IMAGE` names the [image](#the-image), at a fixed commit.
 - Only for [stretch goal 2](../testbed/index.md#goals): `compose/protes.yaml` lists the real TES instances, with their `auth`.
