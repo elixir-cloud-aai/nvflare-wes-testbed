@@ -13,7 +13,20 @@ It goes on [Rahti](https://docs.csc.fi/cloud/rahti/) if that can expose the FL p
 
 - A TES that the WES can call directly. The WES sends no credentials to a TES it calls directly, so for now that TES must accept tasks without them ([#4](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/4) adds a token per site). Only for [stretch goal 2](../testbed/index.md#goals): the TES is known to the proTES in use.
 - A task may open connections to the hub's FL port and HTTPS, may pull the public image, and may write to `/tmp`.
-- A URL for its share of the test set, which here may simply be public. **Public or synthetic data only: no clinical data and no data from Trusted Research Environments, ever.**
+- A way to fetch its share of the [test set](#the-test-set) from a public `https` URL.
+
+## The test set
+
+Sites fetch their share from raw files of this repository, at a fixed commit, so the data can't change under a run. These links are public on purpose, which only works because the data is synthetic and describes nobody: see [H13](../testbed/shortcuts.md#h13). **Public or synthetic data only: no clinical data and no data from Trusted Research Environments, ever.**
+
+| Site | `data` in `WES_SITES` | SHA-256 |
+|---|---|---|
+| First site | [`site-1.csv`](https://raw.githubusercontent.com/elixir-cloud-aai/nvflare-wes-testbed/b473b4b2d3246d6b5f74c31e209268e0c093e062/testset/data/site-1.csv) | `c578295a4bd973bb98fa2def75cffd50313dd9c7ab6b34f6548124a70103c001` |
+| Second site | [`site-2.csv`](https://raw.githubusercontent.com/elixir-cloud-aai/nvflare-wes-testbed/b473b4b2d3246d6b5f74c31e209268e0c093e062/testset/data/site-2.csv) | `e1ce32c53696909df438ce665fabe78f384b56ff4ce786d9ecb0101dc754ebca` |
+
+With one site, use the first share. The holdout set isn't for sites: it stays with whoever compares the models.
+
+The shares cover different parts of the feature space: give two sites different ones, or the [expected accuracies](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/blob/dev/testset/README.md) won't hold. `compose.public-data.yaml` runs [T2](../tests/t2-wes-to-tes.md) with these URLs, locally, in CI.
 
 ## What to ask node operators
 
@@ -25,6 +38,6 @@ It goes on [Rahti](https://docs.csc.fi/cloud/rahti/) if that can expose the FL p
 
 ## What changes in the setup
 
-- `WES_SITES` holds the real TES URLs and data URLs.
+- `WES_SITES` holds the real TES URLs, and the [data URLs](#the-test-set).
 - `FL_IMAGE` names the image in a registry.
 - Only for [stretch goal 2](../testbed/index.md#goals): `compose/protes.yaml` lists the real TES instances, with their `auth`.

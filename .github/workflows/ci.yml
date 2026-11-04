@@ -59,6 +59,10 @@ jobs:
           docker compose --profile test run --rm -T probe-site-2
       - name: Lose a site in the middle of a run (T6)
         run: tests/site-loss.sh
+      - name: Run one WES run with public data URLs (T2)
+        run: |
+          docker compose --profile test down -v
+          docker compose -f compose.yaml -f compose.public-data.yaml --profile test run --rm -T e2e
       - name: Show logs
         if: failure()
         run: docker compose logs fl-hub funnel-site-1 funnel-site-2

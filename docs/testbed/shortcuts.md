@@ -76,7 +76,7 @@ All of them, in one place, each with the proper way. Their numbers are referred 
 
 ### H13
 
-**A site's data is a `file://` URL into Funnel's container, or a public URL at the event, and the WES chooses it.** **Proper way:** an identifier that only resolves at the site, as with DRS, and access decided by the site.
+**A site's data is a `file://` URL into Funnel's container, or a [public URL](../setup/real-sites.md#the-test-set) at the event, and the WES chooses it.** **Proper way:** an identifier that only resolves at the site, as with DRS, and access decided by the site.
 
 ### H16
 
