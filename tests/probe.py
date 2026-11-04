@@ -3,16 +3,20 @@
 Usage:
     probe.py open=<host>:<port> closed=<host>:<port> ...
     probe.py node <input-path> <input-sha256> <host>:<port> ...
+    probe.py listen <port> ...
 
 The second form is what the probe task runs at a TES node (see `probe_submit.py`).
 It prints one line with what the node allows, and always ends with 0, as anything
-it finds is a result, not a failure of the task.
+it finds is a result, not a failure of the task. The third form runs on the hub,
+and accepts connections on ports that nothing else listens on: without it, a closed
+port on the hub can't be told from a firewall that rejects connections.
 """
 
 import hashlib
 import json
 import os
 import pathlib
+import selectors
 import socket
 import sys
 import tempfile
@@ -28,14 +32,13 @@ def connect(host: str, port: int) -> str:
         port: The port.
 
     Returns:
-        `open`, or else why not: `refused` (the host answered, so the way there
-        is free, but nothing listens), `timeout` (likely a firewall), `no-name`
-        or `unreachable`.
+        `open`, or else why not: `refused` (nothing listens, or a firewall rejects
+        the connection), `timeout` (likely a firewall), `no-name` or `unreachable`.
     """
     try:
         with socket.create_connection((host, port), timeout=5):
             return "open"
-    except socket.gaierror:
+    except (socket.gaierror, UnicodeError):
         return "no-name"
     except ConnectionRefusedError:
         return "refused"
@@ -129,8 +132,28 @@ def check_expected(arguments: list[str]) -> int:
     return failed
 
 
+def listen(ports: list[int]) -> None:
+    """Accept connections and close them right away, until stopped.
+
+    Args:
+        ports: The ports to listen on.
+    """
+    selector = selectors.DefaultSelector()
+    for port in ports:
+        server = socket.create_server(("", port))
+        selector.register(server, selectors.EVENT_READ)
+    print(f"Listening on {ports}", flush=True)
+    while True:
+        for key, _ in selector.select():
+            connection, _ = key.fileobj.accept()  # type: ignore[union-attr]
+            connection.close()
+
+
 def main() -> None:
     """Run the form of the probe that the arguments ask for."""
+    if sys.argv[1:2] == ["listen"]:
+        listen([int(port) for port in sys.argv[2:]])
+        return
     if sys.argv[1:2] == ["node"]:
         print(RESULT_PREFIX + json.dumps(node_report(sys.argv[2], sys.argv[3], sys.argv[4:])), flush=True)
         return

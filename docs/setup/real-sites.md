@@ -36,24 +36,38 @@ Nodes pull the one image for all participants: [`elixircloud/nvflare-wes-testbed
 
 The biggest risk of the plan is whether a task at a node may reach the hub. The probe task finds that out before anyone relies on it, and it decides whether [B1](../testbed/options.md#b1-server-beside-the-wes) works at that node at all. It runs the [image](#the-image), and reports through its log whether it can reach the hub's ports, whether an `https` input arrives, whether `env` is passed, who it runs as, and whether `/tmp` is writable. It handles only the public [test set](#the-test-set), and no keys.
 
-It needs only Docker, on any machine that can reach the TES. The FL port of a [hub](#what-the-hub-needs) only listens during a run. A port with nothing behind it reports `refused`, which still says that the way there is free.
+The FL port of a [hub](#what-the-hub-needs) only listens during a run, so start a listener on the machine of the hub first, with the same ports:
+
+```sh
+docker run --rm -p 8002:8002 elixircloud/nvflare-wes-testbed:dev python3 /app/tests/probe.py listen 8002
+```
+
+Then, on any machine with Docker that can reach the TES:
 
 ```sh
 docker run --rm -e TES_TOKEN elixircloud/nvflare-wes-testbed:dev \
-    python3 /app/tests/probe_submit.py --tes https://<tes> --hub <hub> --ports 8002,443
+    python3 /app/tests/probe_submit.py --tes https://<tes> --hub <hub> --fl-port 8002 --ports 443
 ```
+
+`--fl-port` is the port that decides. `--ports` lists others to try, for information, such as 443 or the port of a [hub on Rahti](#what-the-hub-needs).
 
 `TES_TOKEN` is taken from your environment, if the TES needs a token. Through proTES, use its URL as `--tes`, and add `--backend https://<tes>` to pin the task to that TES. proTES keeps no output of tasks, so the script reads it from that TES, which must be reachable with the same token.
 
 | Outcome for a port | Meaning |
 |---|---|
 | `open` | A task gets there |
-| `refused` | A task gets there, but nothing listens |
+| `refused` | Inconclusive: nothing listens, or a firewall rejects the connection |
 | `timeout` | Likely blocked by a firewall |
 | `unreachable` | No route |
 | `no-name` | The name doesn't resolve from the task |
 
-It ends with `[ok] the node can take part` if a port was `open`, and the input, `env` and `/tmp` work. If the log isn't in the task's record, it says so: ask the operator. Record results per node in [Results](../outcomes/results.md), without hostnames. Only local runs against Funnel have been tried, directly and through proTES: see [Tests](../tests/index.md#local-runs).
+| Last line | Exit code | Meaning |
+|---|---|---|
+| `[ok]` | 0 | The task completed and reached the FL port, and the input, `env` and `/tmp` work |
+| `[FAIL]` | 1 | The node can't take part, as shown above that line |
+| `[inconclusive]` | 2 | This doesn't tell: the FL port was `refused`, the log isn't in the task's record (the TES needn't keep it, so ask the operator), or the task ran elsewhere than asked for |
+
+The probe doesn't show that a node can fetch a startup kit from the hub, as its input comes from GitHub: a node with a strict allow-list may differ. That's what question 3 below is for. Record results per node in [Results](../outcomes/results.md), without hostnames. Only local runs against Funnel have been tried, directly and through proTES: see [Tests](../tests/index.md#local-runs).
 
 ## What to ask node operators
 

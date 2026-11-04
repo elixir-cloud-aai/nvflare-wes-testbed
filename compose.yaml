@@ -127,7 +127,8 @@ services:
       - /app/tests/probe_submit.py
       - --tes=http://funnel-site-1:8000
       - --hub=fl-hub
-      - --ports=8080,443
+      - --fl-port=8080
+      - --ports=443
       - --image=nvflare-testbed:local
     depends_on:
       funnel-site-1:
