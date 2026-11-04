@@ -1,0 +1,38 @@
+# Funnel as the TES of one site. Executors run as sibling containers on the
+# network of the site, which has no route to other sites (see compose.yaml).
+Database: boltdb
+Compute: local
+EventWriters:
+  - boltdb
+Logger:
+  Level: info
+Server:
+  HostName: localhost
+  HTTPPort: "8000"
+  RPCPort: "9090"
+BoltDB:
+  Path: /var/lib/funnel/funnel.db
+LocalStorage:
+  AllowedDirs:
+    - /data
+    - /tmp/nvflare-wes-testbed/site-1
+HTTPStorage:
+  Timeout:
+    duration: 60s
+Worker:
+  WorkDir: /tmp/nvflare-wes-testbed/site-1
+  PollingRate: 2s
+  LogUpdateRate: 2s
+  Container:
+    DriverCommand: docker
+    RunCommand: |
+      run -i --read-only --network nvflare-wes-testbed-site-1 --label nvflare-wes-testbed=task
+      --tmpfs /tmp
+      {{if .RemoveContainer}}--rm{{end}}
+      {{.GetEnvArgs}}
+      {{if .Name}}--name "{{.Name}}"{{end}}
+      {{if .Workdir}}--workdir "{{.Workdir}}"{{end}}
+      {{range .Volumes}}--volume "{{.HostPath}}:{{.ContainerPath}}:{{if .Readonly}}ro{{else}}rw{{end}}" {{end}}
+      {{.Image}} {{.Command}}
+    PullCommand: image inspect {{.Image}}
+    StopCommand: rm -f {{.Name}}

@@ -1,0 +1,6 @@
+# Funnel with the Docker CLI, to run the executors of tasks as sibling
+# containers through the Docker socket (hack H9 in docs/testbed/shortcuts.md).
+FROM docker:28.3-cli AS cli
+# v0.11.14, by its image label; the tag `latest` moves
+FROM quay.io/ohsu-comp-bio/funnel:latest@sha256:8e10ba4de436b058bed95427110d9fe947142162078274a6a91cfe3b3eb8d15a
+COPY --from=cli /usr/local/bin/docker /usr/local/bin/docker

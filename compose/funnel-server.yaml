@@ -1,0 +1,37 @@
+# Funnel as the TES of the FL server. Hack H6: the executor gets a fixed name on
+# the networks of all sites, which TES has no way to ask for.
+Database: boltdb
+Compute: local
+EventWriters:
+  - boltdb
+Logger:
+  Level: info
+Server:
+  HostName: localhost
+  HTTPPort: "8000"
+  RPCPort: "9090"
+BoltDB:
+  Path: /var/lib/funnel/funnel.db
+LocalStorage:
+  AllowedDirs:
+    - /tmp/nvflare-wes-testbed/hub
+HTTPStorage:
+  Timeout:
+    duration: 60s
+Worker:
+  WorkDir: /tmp/nvflare-wes-testbed/hub
+  PollingRate: 2s
+  LogUpdateRate: 2s
+  Container:
+    DriverCommand: docker
+    RunCommand: |
+      run -i --read-only --network name=nvflare-wes-testbed-site-1,alias=fl-server --network name=nvflare-wes-testbed-site-2,alias=fl-server --network name=nvflare-wes-testbed_control,alias=fl-server --label nvflare-wes-testbed=task
+      --tmpfs /tmp
+      {{if .RemoveContainer}}--rm{{end}}
+      {{.GetEnvArgs}}
+      {{if .Name}}--name "{{.Name}}"{{end}}
+      {{if .Workdir}}--workdir "{{.Workdir}}"{{end}}
+      {{range .Volumes}}--volume "{{.HostPath}}:{{.ContainerPath}}:{{if .Readonly}}ro{{else}}rw{{end}}" {{end}}
+      {{.Image}} {{.Command}}
+    PullCommand: image inspect {{.Image}}
+    StopCommand: rm -f {{.Name}}

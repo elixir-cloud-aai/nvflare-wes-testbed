@@ -1,0 +1,29 @@
+# Override: the FL server is a TES task too (test T5). This only works because
+# the TES of the server is configured to give its tasks a fixed name on the
+# networks of the sites (`compose/funnel-server.yaml`): no real TES does.
+#   docker compose -f compose.yaml -f compose.server-task.yaml ...
+services:
+  fl-hub:
+    environment:
+      FL_SERVER_MODE: tes
+      FL_SERVER_NAME: fl-server
+      FL_SERVER_TES: http://funnel-server:8000
+    depends_on:
+      funnel-server:
+        condition: service_healthy
+
+  funnel-server:
+    image: nvflare-testbed-funnel:local
+    command: ["server", "run", "--config", "/etc/funnel.yaml"]
+    user: "0:0"
+    healthcheck:
+      test: ["CMD", "/app/funnel", "task", "list", "--server", "http://localhost:8000"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 3s
+    volumes:
+      - ./compose/funnel-server.yaml:/etc/funnel.yaml:ro
+      - /tmp/nvflare-wes-testbed/hub:/tmp/nvflare-wes-testbed/hub
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [control]

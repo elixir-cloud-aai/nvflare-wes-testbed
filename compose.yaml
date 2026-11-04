@@ -1,0 +1,125 @@
+# The whole testbed on one machine, in containers. `docker compose run --rm e2e`
+# runs one WES run end to end. Nothing is published on the host. Sandbox only.
+#
+# Each site is one Funnel with a network of its own. The network is internal:
+# tasks reach the FL hub, and nothing else, not the other site, not the internet.
+name: nvflare-wes-testbed
+
+x-funnel: &funnel
+  image: nvflare-testbed-funnel:local
+  build:
+    context: .
+    dockerfile: images/Dockerfile.funnel
+  command: ["server", "run", "--config", "/etc/funnel.yaml"]
+  # Hack H9: root and the Docker socket, to start sibling containers
+  user: "0:0"
+  healthcheck:
+    test: ["CMD", "/app/funnel", "task", "list", "--server", "http://localhost:8000"]
+    interval: 3s
+    timeout: 5s
+    retries: 20
+    start_period: 3s
+
+services:
+  # Builds the image of the participants, which Funnel starts by name
+  flare-image:
+    image: nvflare-testbed:local
+    build:
+      context: .
+      dockerfile: images/Dockerfile.flare
+    command: ["true"]
+
+  # The thin WES, with the FL server of the active run as a child process
+  fl-hub:
+    image: nvflare-testbed:local
+    command: ["uvicorn", "wes.app:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "info"]
+    depends_on:
+      flare-image:
+        condition: service_completed_successfully
+      funnel-site-1:
+        condition: service_healthy
+      funnel-site-2:
+        condition: service_healthy
+    environment:
+      FL_SCHEME: ${FL_SCHEME:-grpc}
+      FL_PORT: ${FL_PORT:-8002}
+      WES_SITES: >-
+        {"site-1": {"tes": "http://funnel-site-1:8000", "data": "file:///data/site-1.csv"},
+        "site-2": {"tes": "http://funnel-site-2:8000", "data": "file:///data/site-2.csv"}}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://localhost:8080/ga4gh/wes/v1/service-info')"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+    networks: [control, site-1, site-2]
+
+  funnel-site-1:
+    <<: *funnel
+    volumes:
+      - ./compose/funnel-site-1.yaml:/etc/funnel.yaml:ro
+      - ./testset/data/site-1.csv:/data/site-1.csv:ro
+      - /tmp/nvflare-wes-testbed/site-1:/tmp/nvflare-wes-testbed/site-1
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [control, site-1]
+
+  funnel-site-2:
+    <<: *funnel
+    volumes:
+      - ./compose/funnel-site-2.yaml:/etc/funnel.yaml:ro
+      - ./testset/data/site-2.csv:/data/site-2.csv:ro
+      - /tmp/nvflare-wes-testbed/site-2:/tmp/nvflare-wes-testbed/site-2
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [control, site-2]
+
+  # Plays the user: one WES run, then checks of the outcome
+  e2e:
+    image: nvflare-testbed:local
+    profiles: [test]
+    command: ["python3", "/app/tests/e2e.py"]
+    depends_on:
+      fl-hub:
+        condition: service_healthy
+    environment:
+      WES_URL: http://fl-hub:8080/ga4gh/wes/v1
+    volumes:
+      # Only to compare with models trained at one site alone: the user has no
+      # business reading site data in real life (hack H12)
+      - ./testset/data:/testset-data:ro
+    networks: [control]
+
+  # The job in the simulator: no network, no TES, no WES (test T1)
+  simulator:
+    image: nvflare-testbed:local
+    profiles: [test]
+    working_dir: /app/testset/job_src
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        python job.py --workspace /tmp/sim --rounds 5
+        && python /app/testset/evaluate.py /tmp/sim/logreg-fedavg/server/simulate_job/models/server.npy
+        --data /data
+    volumes:
+      - ./testset/data:/data:ro
+    network_mode: none
+
+  # What a task can reach at site 1 and site 2 (test T3)
+  probe-site-1:
+    image: nvflare-testbed:local
+    profiles: [test]
+    command: ["python3", "/app/tests/probe.py", "open=fl-hub:8080", "closed=funnel-site-2:8000", "closed=1.1.1.1:443"]
+    networks: [site-1]
+
+  probe-site-2:
+    image: nvflare-testbed:local
+    profiles: [test]
+    command: ["python3", "/app/tests/probe.py", "open=fl-hub:8080", "closed=funnel-site-1:8000", "closed=1.1.1.1:443"]
+    networks: [site-2]
+
+networks:
+  control: {}
+  site-1:
+    name: nvflare-wes-testbed-site-1
+    internal: true
+  site-2:
+    name: nvflare-wes-testbed-site-2
+    internal: true

@@ -1,0 +1,75 @@
+# Override: tasks go through proTES, pinned to the TES of each site with the tag
+# `gateway.backends` (test T4). Use with:
+#   docker compose -f compose.yaml -f compose.protes.yaml ...
+x-protes: &protes
+  image: nvflare-testbed-protes:local
+  build:
+    context: https://github.com/elixir-cloud-aai/proTES.git#v0.4.0
+  environment: &protes-env
+    CELERY_BROKER_URL: pyamqp://protes:protes@rabbitmq:5672//
+    FOCA_CONFIG_OVERLAY: /etc/protes/testbed.yaml
+  volumes:
+    - ./compose/protes.yaml:/etc/protes/testbed.yaml:ro
+  depends_on:
+    mongodb:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+    fake-idp:
+      condition: service_started
+  networks: [control]
+
+services:
+  fl-hub:
+    environment:
+      TES_GATEWAY_URL: http://protes:8080
+      TES_GATEWAY_TOKEN_URL: http://fake-idp:8080/oidc/token?sub=fl-wes
+    depends_on:
+      protes:
+        condition: service_healthy
+      protes-worker:
+        condition: service_started
+
+  e2e:
+    environment:
+      TES_GATEWAY_URL: http://protes:8080
+      TES_GATEWAY_TOKEN_URL: http://fake-idp:8080/oidc/token?sub=fl-wes
+
+  protes:
+    <<: *protes
+
+  protes-worker:
+    <<: *protes
+    command: ["celery", "--app", "pro_tes.celery_worker", "worker", "--loglevel=info"]
+    healthcheck:
+      disable: true
+
+  fake-idp:
+    image: nvflare-testbed:local
+    command: ["python3", "/app/tests/fake_idp.py"]
+    depends_on:
+      flare-image:
+        condition: service_completed_successfully
+    networks: [control]
+
+  mongodb:
+    image: mongo:7.0
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+    networks: [control]
+
+  rabbitmq:
+    image: rabbitmq:4.1
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: protes
+      RABBITMQ_DEFAULT_PASS: protes
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "--quiet", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 20
+    networks: [control]

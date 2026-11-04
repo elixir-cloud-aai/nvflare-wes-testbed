@@ -1,0 +1,37 @@
+# proTES in the testbed: two TES instances over plain HTTP, a fake identity
+# provider, and tasks that may name their TES instance. Sandbox only.
+security:
+  auth:
+    issuers:
+      - http://fake-idp:8080/oidc/
+    audience:
+      - fl-wes
+    userinfo_claims:
+      - groups
+  access_control:
+    claim_groups: groups
+    group_mapping:
+      fl-users: user
+    require_admin: false
+custom:
+  tes:
+    backends:
+      - type: ga4gh-tes
+        url: http://funnel-site-1:8000
+        url_schemes: [http]
+        auth: none
+        labels: {tes.version: "1.1"}
+      - type: ga4gh-tes
+        url: http://funnel-site-2:8000
+        url_schemes: [http]
+        auth: none
+        labels: {tes.version: "1.1"}
+  controllers:
+    post_task:
+      polling:
+        wait: 1
+plugins:
+  pipeline:
+    - id: route
+      alternatives:
+        - plugin: foca.routing.ordered
