@@ -9,11 +9,23 @@ The question is whether a federated job fits WES and TES at all, as TES tasks ar
 !!! warning "Status: this has only run on one laptop"
     See [Home](../index.md#status). Results of the local runs are in [Tests](../tests/index.md#local-runs). Nothing has run on a real site.
 
+## Goals
+
+In this order, each one only after the one before:
+
+1. **Main goal: the direct run.** A WES run on real nodes, with the WES calling the TES of each site directly, and no gateway in between ([#10](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/10)). Fewer things can go wrong that way.
+2. **Stretch goal 1: integration with Conquest** ([#12](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/12), [#13](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/13)). See [option A](options.md#a-nvflare-inside-conquest).
+3. **Stretch goal 2: integration with proTES** ([#18](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/18)), perhaps with a dedicated plugin later. It already ran locally ([T4](../tests/t4-protes.md)), and isn't a must for the event.
+
+The hub goes on [Rahti](https://docs.csc.fi/cloud/rahti/) if that can expose the FL port, otherwise on a plain VM with Nebius credits ([#4](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/4), [Real sites](../setup/real-sites.md#what-the-hub-needs)).
+
+The session plan ([#8](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/8)) goes under [Order for a live session](../tests/index.md#order-for-a-live-session).
+
 ## Scope
 
 **In scope:**
 
-- A WES run that ends with a federated model, with FL participants as TES tasks, through a TES gateway.
+- A WES run that ends with a federated model, with FL participants as TES tasks, on the TES of each site.
 - The networking, startup kits, certificates and task lifetimes this takes.
 - One minimal job and tiny synthetic data.
 - Trying all that on real nodes ([T8](../tests/t8-real-sites.md)).
@@ -23,4 +35,4 @@ The question is whether a federated job fits WES and TES at all, as TES tasks ar
 - Production use, and any real data. **Public or synthetic data only, tiny, with its source and licence stated. No clinical data and no data from Trusted Research Environments, ever, not even as an example.**
 - Authentication and access control: the [token exchange testbed](https://github.com/elixir-cloud-aai/token-exchange-flow-testbed) is about that.
 - Models and training that are worth anything, and performance.
-- NVFlare work inside [Conquest](https://github.com/anuragxxd/conquest) upstream: [option A](options.md#a-nvflare-inside-conquest) is evaluated by reading its code only.
+- NVFlare work inside [Conquest](https://github.com/anuragxxd/conquest) upstream: [option A](options.md#a-nvflare-inside-conquest) is evaluated by reading its code only, and stretch goal 1 stays on a local branch.

@@ -8,7 +8,7 @@
 | A2 | TES nodes can pull a public image, and run it as a task for as long as a job lasts (minutes here) | That node can't take part |
 | A3 | A task can write to `/tmp`, with or without root | Clients don't start. Checked locally only, with a read-only root and as non-root |
 | A4 | TES nodes fetch inputs from `https` URLs without credentials | Kits can't get there |
-| A5 | proTES forwards tasks with such inputs, as it did for [T4](../tests/t4-protes.md), and nodes other than Funnel accept them | Direct TES calls, without proTES |
+| A5 | Nodes other than Funnel accept tasks with such inputs, called directly by the WES. For [stretch goal 2](index.md#goals), proTES forwards them as well, as it did for [T4](../tests/t4-protes.md) | That node can't take part. For proTES only: stretch goal 2 stays open, and the direct run isn't affected |
 | A6 | There's a machine for the hub, with a public address and an open port, for the time of the event | No hub, no B1 |
 
 ## Constraints

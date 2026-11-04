@@ -17,12 +17,12 @@ Effort is in hours for one person, for a first demonstration, as local work on t
 
 ## Recommendation
 
-**B1**, with C4 as the fallback, and A once Conquest can use an external TES.
+**B1**, with the WES calling the TES of each site directly, as [decided](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/9) for the event. C4 is the fallback, and A comes once Conquest can use an external TES. Going through proTES isn't part of the recommendation: it's [stretch goal 2](index.md#goals), and T4 shows that it works locally.
 
 - It's the only option that ran, across TES instances and through proTES, that needs nothing from a site beyond a task that can dial out to one port. FLARE clients only dial out ([T3](../tests/t3-isolation.md)), and that port can be 443 ([T7](../tests/t7-port-443.md)).
 - Everything it hacks is ours, and listed. It needs nothing from anyone else's roadmap, so it can be tried at the event.
 - Its logic is a port away from Conquest, should [option A](#a-nvflare-inside-conquest) become attractive: the steps of a run are the same, with a Go adapter and a runner image instead of a thin service.
-- Its risk is at the sites, not in the software: whether a task at a real node may reach the hub. So the first thing to do is to find that out, with a probe task ([ISSUES.md](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/blob/dev/ISSUES.md)). If nodes don't allow it, C4 still gets a federated model through the same services, but without NVFlare.
+- Its risk is at the sites, not in the software: whether a task at a real node may reach the hub. So the first thing to do is to find that out, with a probe task ([#2](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/2)). If nodes don't allow it, C4 still gets a federated model through the same services, but without NVFlare.
 
 **What this means for the M4.5 report:** it can point to a run through standard APIs across TES instances, with NVFlare, and to a clear list of what's missing. It can't claim that "ELIXIR Cloud is available" for this: there's no authentication, one run at a time, and keys travel in task records. A real-site run at the event would make it a demonstration on real nodes; without one, it's a local proof of concept and an architecture analysis.
 
@@ -79,11 +79,11 @@ Applies to both variants:
 
 ## B: A thin WES in front of NVFlare, with TES below
 
-**How it works, in both variants:** this repository's [thin WES](design.md). It takes a run of type `NVFLARE`, makes a federation for that run alone, then schedules participants through TES, through proTES if there is one, and gets the job done through the FLARE admin API.
+**How it works, in both variants:** this repository's [thin WES](design.md). It takes a run of type `NVFLARE`, makes a federation for that run alone, then schedules participants through the TES of each site, or through proTES if one is configured, and gets the job done through the FLARE admin API.
 
 ### B1: Server beside the WES
 
-**How it works:** the FL server runs next to the WES, at one reachable address: the hub. Clients are TES tasks, pinned to their site with the tag [`gateway.backends`](https://github.com/elixir-cloud-aai/proTES/blob/dev/docs/plugins.md#choices-of-clients) of proTES. They dial out.
+**How it works:** the FL server runs next to the WES, at one reachable address: the hub. Clients are TES tasks at the TES of their site, which the WES calls directly. They dial out. Through proTES ([stretch goal 2](index.md#goals)), the tag [`gateway.backends`](https://github.com/elixir-cloud-aai/proTES/blob/dev/docs/plugins.md#choices-of-clients) pins them to their site instead.
 
 **What's hacked:** [all of these](shortcuts.md). The worst: kits with private keys through task records ([H3](shortcuts.md#h3)), and no authentication ([H5](shortcuts.md#h5)).
 

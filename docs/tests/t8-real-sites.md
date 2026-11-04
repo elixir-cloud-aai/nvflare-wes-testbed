@@ -5,7 +5,7 @@
 
 ## Description
 
-[T2](t2-wes-to-tes.md) or [T4](t4-protes.md), with the hub on a reachable machine and clients on TES instances of real nodes. One node is worth having; two make it federated across organizations. **Test set only: public or synthetic data, no clinical data and no data from Trusted Research Environments, ever.**
+[T2](t2-wes-to-tes.md), with the hub on a reachable machine, and the WES calling the TES instances of real nodes directly: the [main goal](../testbed/index.md#goals). [T4](t4-protes.md) on real nodes is stretch goal 2, and only follows after that. One node is worth having; two make it federated across organizations. **Test set only: public or synthetic data, no clinical data and no data from Trusted Research Environments, ever.**
 
 ## Expectations
 
