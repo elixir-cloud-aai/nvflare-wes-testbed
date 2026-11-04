@@ -1,0 +1,80 @@
+# Everything that must pass on pull requests and pushes to `dev`. Needs no
+# secrets. No `paths:` filters, so that the gate always reports. The gate
+# `passed` ("CI passed") is the only check to require; add every new job to
+# its `needs`.
+name: CI
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Python version of Read the Docs (`.readthedocs.yaml`)
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: python -m pip install ".[docs]"
+      # Fails on warnings, e.g., of broken links and anchors
+      - name: Build documentation
+        run: mkdocs build --strict
+
+  # The README's quick start, and the other tests that need no extra services
+  e2e:
+    name: End-to-end tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build images
+        run: docker compose --profile test build
+      - name: Run the job in the simulator (T1)
+        run: docker compose --profile test run --rm -T simulator
+      - name: Run one WES run (T2)
+        run: docker compose --profile test run --rm -T e2e
+      - name: Check what tasks can reach (T3)
+        run: |
+          docker compose --profile test run --rm -T probe-site-1
+          docker compose --profile test run --rm -T probe-site-2
+      - name: Lose a site in the middle of a run (T6)
+        run: tests/site-loss.sh
+      - name: Show logs
+        if: failure()
+        run: docker compose logs fl-hub funnel-site-1 funnel-site-2
+      - name: Remove containers
+        if: always()
+        run: docker compose --profile test down -v
+
+  passed:
+    name: CI passed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    needs: [docs, e2e]
+    permissions: {}
+    steps:
+      - name: Check results of all jobs
+        uses: elixir-cloud-aai/.github/actions/gate@743e82d290a53768454999e413756a924e383259 # v1.0.0
+        with:
+          needs: ${{ toJSON(needs) }}
