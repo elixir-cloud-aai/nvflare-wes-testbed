@@ -30,7 +30,7 @@ The shares cover different parts of the feature space: give two sites different 
 
 ## The image
 
-Nodes pull the one image for all participants: [`elixircloud/nvflare-wes-testbed`](https://hub.docker.com/r/elixircloud/nvflare-wes-testbed). CI pushes it on every push to `dev`, once the tests have passed, as `dev` and as `sha-<commit>`. For a run on real sites, use `sha-<commit>`, as `dev` moves. It holds no startup kits, keys or site data, which CI checks. It's a sandbox image, neither signed nor scanned ([H20](../testbed/shortcuts.md#h20)).
+Nodes pull the one image for all participants: [`elixircloud/nvflare-wes-testbed`](https://hub.docker.com/r/elixircloud/nvflare-wes-testbed). CI builds and pushes it on every push to `dev`, once the tests have passed on a build of its own, as `dev` and as `sha-<commit>`. For a run on real sites, use `sha-<commit>`, as `dev` moves, and set it as `FL_IMAGE`. Startup kits, keys and site data stay out of it through `.dockerignore`, which CI checks by file name, with decoys, on a local build. It's a sandbox image, neither signed nor scanned ([H20](../testbed/shortcuts.md#h20)).
 
 ## What to ask node operators
 

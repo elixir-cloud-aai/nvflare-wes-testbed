@@ -1,5 +1,6 @@
 # Everything that must pass on pull requests and pushes to `dev`. Only `push`
-# needs secrets, and only runs on pushes to `dev`, so that forks need none. No
+# needs secrets, and only runs on pushes to `dev`, so that pull requests from
+# forks need none. No
 # `paths:` filters, so that the gate always reports. The gate
 # `passed` ("CI passed") is the only check to require; add every new job to
 # its `needs`.

@@ -12,6 +12,7 @@
 **/.env*
 **/*.key
 **/*.pem
+**/*.csv
 **/kits
 **/__pycache__
 **/*.py[cod]

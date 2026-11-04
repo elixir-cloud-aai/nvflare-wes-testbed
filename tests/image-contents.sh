@@ -3,7 +3,13 @@
 # the build context: `.dockerignore` must keep them out. Needs only Docker.
 set -euo pipefail
 
-decoys=(wes/.env wes/.env.local wes/decoy.key tests/kits/decoy.pem)
+# Names of their own, so as not to touch real local files
+decoys=(
+    wes/.env.image-contents-decoy
+    wes/image-contents-decoy.key
+    wes/image-contents-decoy.csv
+    tests/kits/image-contents-decoy.pem
+)
 cleanup() {
     rm -f "${decoys[@]}"
     rmdir tests/kits 2>/dev/null || true
@@ -18,7 +24,7 @@ done
 docker build -q -f images/Dockerfile.flare -t nvflare-testbed:contents . >/dev/null
 
 found="$(docker run --rm --network none --entrypoint find nvflare-testbed:contents /app /usr/local/bin \
-    \( -name '*.csv' -o -name '.env*' -o -name '*.key' -o -name '*.pem' -o -name 'kits' -o -name 'decoy*' \) -print)"
+    \( -name '*.csv' -o -name '.env*' -o -name '*.key' -o -name '*.pem' -o -name 'kits' -o -name '*decoy*' \) -print)"
 if [ -n "${found}" ]; then
     echo "[FAIL] found in the image:"
     echo "${found}"
