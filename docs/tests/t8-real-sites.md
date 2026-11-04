@@ -19,7 +19,7 @@ These are what we hope for. Anything else is a result.
 
 ## Steps
 
-1. Deploy the hub, following [Real sites](../setup/real-sites.md).
+1. Deploy the hub, following [Real sites](../setup/real-sites.md#deploying-the-hub).
 2. Run the probe task at each node.
 3. Start a run with one site, then with two:
 

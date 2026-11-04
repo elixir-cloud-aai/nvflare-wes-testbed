@@ -1,0 +1,11 @@
+{
+  "site-1": {
+    "tes": "https://tes.site-1.example.org",
+    "data": "https://raw.githubusercontent.com/elixir-cloud-aai/nvflare-wes-testbed/b473b4b2d3246d6b5f74c31e209268e0c093e062/testset/data/site-1.csv",
+    "token": "optional, if this TES needs one; never commit a real one"
+  },
+  "site-2": {
+    "tes": "https://tes.site-2.example.org",
+    "data": "https://raw.githubusercontent.com/elixir-cloud-aai/nvflare-wes-testbed/b473b4b2d3246d6b5f74c31e209268e0c093e062/testset/data/site-2.csv"
+  }
+}

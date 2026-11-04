@@ -13,3 +13,6 @@ __pycache__/
 
 # Docs build
 site/
+
+# Sites of the hub, with tokens for their TES
+sites.json

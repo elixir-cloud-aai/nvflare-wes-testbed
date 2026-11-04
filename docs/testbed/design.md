@@ -47,6 +47,7 @@ testset/                   data, job, comparison with local models
 compose.yaml               the testbed: hub, two sites, tests
 compose.protes.yaml        override: through proTES (T4)
 compose.server-task.yaml   override: server as a TES task (T5)
-compose/                   configs of Funnel and proTES
+compose.hub.yaml           the hub alone, for a machine with a public address
+compose/                   configs of Funnel, proTES and the hub's reverse proxy
 tests/                     e2e (T2, T4, T5, T7), probe (T3), site loss (T6), image contents, node probe
 ```

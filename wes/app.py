@@ -41,8 +41,12 @@ PUBLIC_URL = os.environ.get("WES_INTERNAL_URL", "http://fl-hub:8080")
 FL_HOST = os.environ.get("FL_SERVER_NAME", "fl-hub")
 IMAGE = os.environ.get("FL_IMAGE", "nvflare-testbed:local")
 JOBS = pathlib.Path(os.environ.get("FL_JOBS", "/app/testset/job"))
-# {"site-1": {"tes": "http://funnel-site-1:8000", "data": "file:///data/site-1.csv"}, ...}
-SITES: dict[str, dict[str, str]] = json.loads(os.environ.get("WES_SITES", "{}"))
+# {"site-1": {"tes": "http://funnel-site-1:8000", "data": "file:///data/site-1.csv"}, ...},
+# from a file if `WES_SITES_FILE` is set, as a site's optional `token` for its TES is a secret
+SITES_FILE = os.environ.get("WES_SITES_FILE", "")
+SITES: dict[str, dict[str, str]] = json.loads(
+    pathlib.Path(SITES_FILE).read_text() if SITES_FILE else os.environ.get("WES_SITES", "{}")
+)
 # If set, tasks go to this gateway (proTES), pinned to the TES of the site by tag
 TES_GATEWAY = os.environ.get("TES_GATEWAY_URL", "")
 TES_GATEWAY_TOKEN_URL = os.environ.get("TES_GATEWAY_TOKEN_URL", "")
@@ -199,16 +203,20 @@ def publish_kit(kits: pathlib.Path, site: str, run_dir: pathlib.Path) -> tuple[s
     return token, f"{PUBLIC_URL}/kits/{token}/{site}.tgz"
 
 
-def tes_headers() -> dict[str, str]:
-    """Get the headers for the TES gateway.
+def tes_headers(site: str) -> dict[str, str]:
+    """Get the headers for the TES of a site, or the gateway if there is one.
+
+    Args:
+        site: Name of the site, or `server` for the task of the FL server.
 
     Returns:
-        The headers: an access token if the gateway needs one, else none.
+        The headers: an access token if there's one, else none.
     """
-    if not TES_GATEWAY_TOKEN_URL:
-        return {}
-    token = requests.get(TES_GATEWAY_TOKEN_URL, timeout=10).json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
+    if TES_GATEWAY_TOKEN_URL:
+        token = requests.get(TES_GATEWAY_TOKEN_URL, timeout=10).json()["access_token"]
+    else:
+        token = SITES.get(site, {}).get("token", "")
+    return {"Authorization": f"Bearer {token}"} if token else {}
 
 
 def tes_base(site: str) -> str:
@@ -322,7 +330,7 @@ def update_tasks(run: dict[str, Any], wait: float = 0) -> None:
     while True:
         for task in run["tasks"]:
             reply = requests.get(
-                f"{task['base']}/tasks/{task['id']}", params={"view": "MINIMAL"}, headers=tes_headers(), timeout=30
+                f"{task['base']}/tasks/{task['id']}", params={"view": "MINIMAL"}, headers=tes_headers(task["site"]), timeout=30
             )
             if reply.ok:
                 task["state"] = reply.json().get("state", "UNKNOWN")
@@ -358,7 +366,7 @@ def cancel_tasks(run: dict[str, Any]) -> None:
     """
     for task in run["tasks"]:
         if task["state"] not in TERMINAL_TES:
-            requests.post(f"{task['base']}/tasks/{task['id']}:cancel", headers=tes_headers(), timeout=30)
+            requests.post(f"{task['base']}/tasks/{task['id']}:cancel", headers=tes_headers(task["site"]), timeout=30)
 
 
 def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
@@ -396,7 +404,7 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
             tokens.append(token)
             base = tes_base(site)
             reply = requests.post(
-                f"{base}/tasks", json=client_task(run_id, site, kit_url), headers=tes_headers(), timeout=60
+                f"{base}/tasks", json=client_task(run_id, site, kit_url), headers=tes_headers(site), timeout=60
             )
             reply.raise_for_status()
             run["tasks"].append({"site": site, "id": reply.json()["id"], "base": base, "state": "QUEUED"})
@@ -404,7 +412,9 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
         try:
             run["state"] = "RUNNING"
             wait_for_clients(session, run, sites, START_TIMEOUT)
-            job_id = session.submit_job(str(job_dir))
+            # FLARE signs a job in place, and the image may be read-only to this user
+            job_copy = shutil.copytree(job_dir, run_dir / "job" / job_dir.name)
+            job_id = session.submit_job(str(job_copy))
             run["flare_job_id"] = job_id
             code, meta = session.monitor_job_and_return_job_meta(job_id, JOB_TIMEOUT, 2, tasks_alive, run)
             status = (meta or {}).get("status", "UNKNOWN")
