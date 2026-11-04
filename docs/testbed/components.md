@@ -6,7 +6,7 @@
 |---|---|---|
 | Researcher | Plays the WES client, as `tests/e2e.py` | Whoever submits the run |
 | Node operator | None: local Funnel instances stand in | Allows a task's way out, tells what's different, and for stretch goal 2 registers the TES at proTES |
-| Hub operator | None | Runs the hub on a reachable machine |
+| Hub operator | None | Runs the [hub](../setup/real-sites.md#deploying-the-hub) on a reachable machine |
 
 ## Components
 

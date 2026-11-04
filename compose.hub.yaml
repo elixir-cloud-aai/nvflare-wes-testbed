@@ -1,0 +1,68 @@
+# The hub alone, for a machine with a public address (issue #4): the thin WES
+# with its FL server, and a reverse proxy for HTTPS. No Funnel, no Docker socket:
+# the sites are elsewhere. Sandbox only. See docs/setup/real-sites.md.
+#
+# The FL port goes straight to the FL server, as its TLS is mutual. The FLARE
+# admin port (8003) stays inside. The proxy lets anyone reach `/kits`, which nodes
+# need, and the WES only from `WES_ALLOWED_IPS`, as it has no authentication (H5).
+name: nvflare-wes-hub
+
+services:
+  hub:
+    image: ${FL_IMAGE:-elixircloud/nvflare-wes-testbed:dev}
+    # No access log, as links to kits are secrets while a run lasts (hack H3)
+    command: ["uvicorn", "wes.app:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "info", "--no-access-log"]
+    restart: unless-stopped
+    environment:
+      FL_SERVER_NAME: ${FL_SERVER_NAME:?the public name of the hub, which goes into the startup kits}
+      WES_INTERNAL_URL: ${WES_INTERNAL_URL:-https://${FL_SERVER_NAME}}
+      FL_IMAGE: ${FL_IMAGE:-elixircloud/nvflare-wes-testbed:dev}
+      FL_SCHEME: ${FL_SCHEME:-grpc}
+      FL_PORT: ${FL_PORT:-8002}
+      WES_SITES_FILE: /run/secrets/sites
+    # The WES talks to its FL server by the name in the kits, so that name has to
+    # lead back here, and not out through the public address
+    extra_hosts:
+      - "${FL_SERVER_NAME}:127.0.0.1"
+    ports:
+      - "${FL_PORT:-8002}:${FL_PORT:-8002}"
+    secrets: [sites]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://localhost:8080/ga4gh/wes/v1/service-info')"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+    networks: [hub]
+
+  proxy:
+    # 2.10-alpine
+    image: caddy@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    restart: unless-stopped
+    environment:
+      FL_SERVER_NAME: ${FL_SERVER_NAME}
+      # Addresses or ranges, separated by spaces. By default, nobody from outside
+      WES_ALLOWED_IPS: ${WES_ALLOWED_IPS:-127.0.0.1}
+      # For tests only: `tls internal`, as there's no public name to get a certificate for
+      HUB_TLS: ${HUB_TLS:-}
+    volumes:
+      - ./compose/Caddyfile:/etc/caddy/Caddyfile:ro
+      - proxy-data:/data
+    ports:
+      - "80:80"
+      # Another port if the FL port is 443: then set `WES_INTERNAL_URL` to match
+      - "${HUB_HTTPS_PORT:-443}:443"
+    depends_on:
+      hub:
+        condition: service_healthy
+    networks: [hub]
+
+secrets:
+  # What the sites are, and tokens for their TES: never commit it
+  sites:
+    file: ${WES_SITES_FILE:-./sites.json}
+
+volumes:
+  proxy-data: {}
+
+networks:
+  hub: {}

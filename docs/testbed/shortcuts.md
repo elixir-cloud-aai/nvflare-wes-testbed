@@ -18,7 +18,7 @@ All of them, in one place, each with the proper way. Their numbers are referred 
 
 ### H7
 
-**Plain HTTP between the WES, proTES and TES.** Only FLARE's own connections use TLS. **Proper way:** HTTPS everywhere, which real nodes have anyway.
+**Plain HTTP between the WES, proTES and TES, in the local testbed.** Only FLARE's own connections use TLS, there. On [real sites](../setup/real-sites.md#deploying-the-hub), links to kits go over HTTPS, through a reverse proxy. **Proper way:** HTTPS everywhere, which real nodes have anyway.
 
 ### H9
 

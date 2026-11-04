@@ -74,6 +74,10 @@ jobs:
         run: |
           docker compose --profile test down -v
           docker compose -f compose.yaml -f compose.public-data.yaml --profile test run --rm -T e2e
+      - name: Run the hub for real sites, with its reverse proxy
+        run: |
+          docker compose --profile test down -v
+          tests/hub.sh
       - name: Show logs
         if: failure()
         run: docker compose logs fl-hub funnel-site-1 funnel-site-2

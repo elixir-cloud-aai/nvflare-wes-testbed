@@ -1,0 +1,96 @@
+# Override for `tests/hub.sh`: the hub of `compose.hub.yaml`, with local sites and
+# nothing published on the host.
+x-funnel: &funnel
+  image: nvflare-testbed-funnel:local
+  command: ["server", "run", "--config", "/etc/funnel.yaml"]
+  user: "0:0"
+  healthcheck:
+    test: ["CMD", "/app/funnel", "task", "list", "--server", "http://localhost:8000"]
+    interval: 3s
+    timeout: 5s
+    retries: 20
+    start_period: 3s
+
+services:
+  hub:
+    depends_on:
+      funnel-site-1:
+        condition: service_healthy
+      funnel-site-2:
+        condition: service_healthy
+    ports: !reset []
+    environment:
+      FL_IMAGE: nvflare-testbed:local
+      HOME: /tmp
+    # An arbitrary user, as on OpenShift
+    user: "12345:0"
+    networks:
+      hub: {}
+      control:
+        aliases: ["${FL_SERVER_NAME}"]
+      site-1:
+        aliases: ["${FL_SERVER_NAME}"]
+      site-2:
+        aliases: ["${FL_SERVER_NAME}"]
+
+  proxy:
+    ports: !reset []
+    networks:
+      hub:
+        aliases: ["${FL_SERVER_NAME}"]
+
+  funnel-site-1:
+    <<: *funnel
+    volumes:
+      - ./compose/funnel-site-1.yaml:/etc/funnel.yaml:ro
+      - ./testset/data/site-1.csv:/data/site-1.csv:ro
+      - /tmp/nvflare-wes-testbed/site-1:/tmp/nvflare-wes-testbed/site-1
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [control, site-1]
+
+  funnel-site-2:
+    <<: *funnel
+    volumes:
+      - ./compose/funnel-site-2.yaml:/etc/funnel.yaml:ro
+      - ./testset/data/site-2.csv:/data/site-2.csv:ro
+      - /tmp/nvflare-wes-testbed/site-2:/tmp/nvflare-wes-testbed/site-2
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [control, site-2]
+
+  e2e:
+    image: nvflare-testbed:local
+    profiles: [test]
+    command: ["python3", "/app/tests/e2e.py"]
+    environment:
+      WES_URL: http://hub:8080/ga4gh/wes/v1
+    depends_on:
+      hub:
+        condition: service_healthy
+    volumes:
+      - ./testset/data:/testset-data:ro
+    networks: [control]
+
+  # Plays someone on the internet, in front of the proxy
+  proxy-check:
+    image: nvflare-testbed:local
+    profiles: [test]
+    command: ["python3", "/app/tests/proxy_check.py", "${FL_SERVER_NAME}"]
+    environment:
+      WES_EXPECTED: ${WES_EXPECTED:-403}
+    networks: [hub]
+
+  # Who may start runs, and which tokens go where: no network needed
+  site-config-check:
+    image: nvflare-testbed:local
+    profiles: [test]
+    command: ["python3", "/app/tests/site_config_check.py"]
+    network_mode: none
+
+networks:
+  control: {}
+  site-1:
+    name: nvflare-wes-testbed-site-1
+    internal: true
+  site-2:
+    name: nvflare-wes-testbed-site-2
+    internal: true

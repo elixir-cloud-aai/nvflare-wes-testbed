@@ -1,0 +1,22 @@
+# The reverse proxy of the hub. Everything but the listed paths gets a 403.
+{$FL_SERVER_NAME} {
+	{$HUB_TLS:}
+
+	# Nodes fetch startup kits from here, by unguessable links
+	handle /kits/* {
+		reverse_proxy hub:8080
+	}
+
+	# No authentication behind this (hack H5): only from the allowed addresses
+	@wes {
+		path /ga4gh/wes/v1/* /outputs/*
+		remote_ip {$WES_ALLOWED_IPS}
+	}
+	handle @wes {
+		reverse_proxy hub:8080
+	}
+
+	handle {
+		respond 403
+	}
+}
