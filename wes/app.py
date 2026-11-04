@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import pathlib
+import re
 import secrets
 import shutil
 import socket
@@ -44,9 +45,28 @@ JOBS = pathlib.Path(os.environ.get("FL_JOBS", "/app/testset/job"))
 # {"site-1": {"tes": "http://funnel-site-1:8000", "data": "file:///data/site-1.csv"}, ...},
 # from a file if `WES_SITES_FILE` is set, as a site's optional `token` for its TES is a secret
 SITES_FILE = os.environ.get("WES_SITES_FILE", "")
-SITES: dict[str, dict[str, str]] = json.loads(
-    pathlib.Path(SITES_FILE).read_text() if SITES_FILE else os.environ.get("WES_SITES", "{}")
-)
+
+
+def load_sites(text: str) -> dict[str, dict[str, str]]:
+    """Read the sites, and check their tokens, as a bad one would end up in errors and logs.
+
+    Args:
+        text: The sites, as JSON.
+
+    Returns:
+        The sites.
+
+    Raises:
+        ValueError: A token can't go into a header. The message doesn't hold it.
+    """
+    sites: dict[str, dict[str, str]] = json.loads(text)
+    for name, site in sites.items():
+        if "token" in site and not re.fullmatch(r"[\x21-\x7e]+", site["token"]):
+            raise ValueError(f"The token of site {name} has characters that can't go into a header")
+    return sites
+
+
+SITES = load_sites(pathlib.Path(SITES_FILE).read_text() if SITES_FILE else os.environ.get("WES_SITES", "{}"))
 # If set, tasks go to this gateway (proTES), pinned to the TES of the site by tag
 TES_GATEWAY = os.environ.get("TES_GATEWAY_URL", "")
 TES_GATEWAY_TOKEN_URL = os.environ.get("TES_GATEWAY_TOKEN_URL", "")
@@ -214,6 +234,9 @@ def tes_headers(site: str) -> dict[str, str]:
     """
     if TES_GATEWAY_TOKEN_URL:
         token = requests.get(TES_GATEWAY_TOKEN_URL, timeout=10).json()["access_token"]
+    elif TES_GATEWAY:
+        # The token of a site is for its TES alone, and never goes to a gateway
+        token = ""
     else:
         token = SITES.get(site, {}).get("token", "")
     return {"Authorization": f"Bearer {token}"} if token else {}
@@ -329,9 +352,17 @@ def update_tasks(run: dict[str, Any], wait: float = 0) -> None:
     deadline = time.monotonic() + wait
     while True:
         for task in run["tasks"]:
-            reply = requests.get(
-                f"{task['base']}/tasks/{task['id']}", params={"view": "MINIMAL"}, headers=tes_headers(task["site"]), timeout=30
-            )
+            # A TES out of reach must neither end a run's cleanup, nor look like a task's end
+            try:
+                reply = requests.get(
+                    f"{task['base']}/tasks/{task['id']}",
+                    params={"view": "MINIMAL"},
+                    headers=tes_headers(task["site"]),
+                    timeout=30,
+                )
+            except requests.RequestException:
+                logger.warning("TES of %s is out of reach", task["site"])
+                continue
             if reply.ok:
                 task["state"] = reply.json().get("state", "UNKNOWN")
         if all(task["state"] in TERMINAL_TES for task in run["tasks"]) or time.monotonic() >= deadline:
@@ -366,7 +397,12 @@ def cancel_tasks(run: dict[str, Any]) -> None:
     """
     for task in run["tasks"]:
         if task["state"] not in TERMINAL_TES:
-            requests.post(f"{task['base']}/tasks/{task['id']}:cancel", headers=tes_headers(task["site"]), timeout=30)
+            try:
+                requests.post(
+                    f"{task['base']}/tasks/{task['id']}:cancel", headers=tes_headers(task["site"]), timeout=30
+                )
+            except requests.RequestException:
+                logger.warning("Couldn't cancel the task of %s", task["site"])
 
 
 def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:

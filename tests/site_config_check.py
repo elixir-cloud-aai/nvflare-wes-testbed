@@ -22,7 +22,24 @@ def main() -> None:
         sys.path.insert(0, "/app")
         from wes import app as wes
 
+    # A TES out of reach must not break the cleanup of a run
+    run = {"tasks": [{"site": "site-2", "id": "x", "base": "http://127.0.0.1:9", "state": "RUNNING"}]}
+    wes.update_tasks(run)
+    wes.cancel_tasks(run)
+    try:
+        wes.load_sites('{"site-1": {"token": "decoy-token-3\\n"}}')
+        bad_token = "accepted"
+    except ValueError as error:
+        bad_token = str(error)
+    wes.TES_GATEWAY = "https://gateway.example.org"
+    gateway_headers = wes.tes_headers("site-1")
+    wes.TES_GATEWAY = ""
+
     checks = {
+        "a TES out of reach leaves the state of a task alone": run["tasks"][0]["state"] == "RUNNING",
+        "a bad token is refused": bad_token != "accepted",
+        "the refusal doesn't hold the token": "decoy-token" not in bad_token,
+        "the token of a site doesn't go to a gateway": gateway_headers == {},
         "the file wins over the environment": set(wes.SITES) == set(SITES),
         "a site with a token gets it": wes.tes_headers("site-1") == {"Authorization": "Bearer decoy-token-1"},
         "a site without a token gets none": wes.tes_headers("site-2") == {},

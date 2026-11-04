@@ -10,7 +10,8 @@ name: nvflare-wes-hub
 services:
   hub:
     image: ${FL_IMAGE:-elixircloud/nvflare-wes-testbed:dev}
-    command: ["uvicorn", "wes.app:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "info"]
+    # No access log, as links to kits are secrets while a run lasts (hack H3)
+    command: ["uvicorn", "wes.app:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "info", "--no-access-log"]
     restart: unless-stopped
     environment:
       FL_SERVER_NAME: ${FL_SERVER_NAME:?the public name of the hub, which goes into the startup kits}

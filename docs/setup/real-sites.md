@@ -100,7 +100,7 @@ What else differs on Rahti:
 
 - Compose doesn't run there: it takes a Deployment, the `LoadBalancer` Service with `allocateLoadBalancerNodePorts: false`, and a Secret for the sites file. None of it is written, as there's nothing to try it on.
 - **Name:** the kits contain the name of the hub, and it must lead to the address of the `LoadBalancer`. Names under `rahtiapp.fi` should lead to the routers instead, so this takes a name of your own, with an `A` record.
-- **Kits:** an edge Route with `path: /kits` exposes the links to kits, and nothing else of the WES. Reach the WES itself with `oc port-forward`, which needs no address list. To keep nodes out of the FL port by address, Rahti has a [NetworkPolicy](https://docs.csc.fi/cloud/rahti/configurations/loadbalancer-service/) with `externalTrafficPolicy: Local`.
+- **Kits:** an edge Route with `path: /kits` exposes the links to kits, and nothing else of the WES. Reach the WES itself with `oc port-forward`, which needs no address list. To limit the FL port to the addresses of nodes, Rahti has a [NetworkPolicy](https://docs.csc.fi/cloud/rahti/configurations/loadbalancer-service/) with `externalTrafficPolicy: Local`. That takes the node selector `rahti.csc.fi/local-load-balancer: ''` on the pod, an address that no other Service shares, and a policy that still lets the router reach the `/kits` Route.
 - **User:** pods run as an arbitrary user. The hub works that way, with `HOME=/tmp`: `tests/hub.sh` runs it so.
 - **Name inside the pod:** the WES talks to its FL server by the name in the kits, so that name must lead to the pod itself, with `hostAliases`, as `extra_hosts` does in `compose.hub.yaml`.
 
@@ -119,6 +119,7 @@ On a machine with Docker, and a name that leads to it:
 git clone https://github.com/elixir-cloud-aai/nvflare-wes-testbed.git
 cd nvflare-wes-testbed
 cp compose/sites.example.json sites.json    # edit it: never commit it
+chmod 600 sites.json
 export FL_SERVER_NAME=<name of the hub>
 export FL_IMAGE=elixircloud/nvflare-wes-testbed:sha-<commit>
 export WES_ALLOWED_IPS='<your address> <another>'
@@ -127,7 +128,7 @@ docker compose -f compose.hub.yaml up -d --wait
 
 (In Fish: `set -x FL_SERVER_NAME <name of the hub>`, and so on.)
 
-Caddy gets a certificate for that name, which needs ports 80 and 443 reachable. It only passes on `/kits`, which any node may fetch, and `/ga4gh/wes/v1` and `/outputs` from `WES_ALLOWED_IPS`; by default that's nobody from outside. Everything else gets a 403. That's an address list, not LS Login: see [H5](../testbed/shortcuts.md#h5) and [#5](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/5). Check on the machine that the proxy sees the real addresses of clients, as Docker's networking can hide them. The FLARE admin port stays inside.
+Caddy gets a certificate for that name, which needs ports 80 and 443 reachable. It only passes on `/kits`, which any node may fetch, and `/ga4gh/wes/v1` and `/outputs` from `WES_ALLOWED_IPS`; by default that's nobody from outside. Everything else gets a 403. That's an address list, not LS Login: see [H5](../testbed/shortcuts.md#h5) and [#5](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/5). Check on the machine that the proxy sees the real addresses of clients, as Docker's networking can hide them. The FLARE admin port stays inside. In this Compose file, the hub runs as root, which is what can read a `chmod 600` sites file. It has no access log, as links to kits are secrets while a run lasts.
 
 | Variable | Default | Meaning |
 |---|---|---|
