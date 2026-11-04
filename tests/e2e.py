@@ -92,12 +92,16 @@ def main() -> None:
         if task["name"] not in site_tes:
             continue
         full = requests.get(
+            # Plain HTTP on the private network of the testbed (hack H7)
+            # nosemgrep: python.lang.security.audit.insecure-transport.requests.request-with-http.request-with-http
             f"{gateway or site_tes[task['name']]}/ga4gh/tes/v1/tasks/{task['id']}",
             params={"view": "FULL"},
             headers=headers,
             timeout=30,
         ).json()
         kit_url = next(entry["url"] for entry in full["inputs"] if entry["name"] == "kit")
+        # Plain HTTP on the private network of the testbed (hack H7)
+        # nosemgrep: python.lang.security.audit.insecure-transport.requests.request-with-http.request-with-http
         status = requests.get(kit_url, timeout=30).status_code
         check(f"kit link of {task['name']} is dead after the run", status == 404, status)
         data_prefix = os.environ.get("EXPECTED_DATA_PREFIX", "")
