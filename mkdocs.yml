@@ -1,0 +1,93 @@
+site_name: NVFlare on WES and TES testbed
+site_description: >-
+  A sandbox for running federated learning jobs with NVIDIA FLARE through GA4GH
+  WES and TES
+# Read the Docs serves each version under its own path. No URL is assumed here:
+# the variable is set in its builds.
+site_url: !ENV [READTHEDOCS_CANONICAL_URL, ""]
+repo_url: https://github.com/elixir-cloud-aai/nvflare-wes-testbed
+repo_name: elixir-cloud-aai/nvflare-wes-testbed
+edit_uri: edit/dev/docs/
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.indexes
+    - navigation.sections
+    - navigation.top
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+nav:
+- Home: index.md
+- Background:
+  - Use case: background/use-case.md
+  - Requirements: background/requirements.md
+  - Design: background/design.md
+- Testbed:
+  - testbed/index.md
+  - Options: testbed/options.md
+  - Assumptions and constraints: testbed/assumptions.md
+  - Actors and components: testbed/components.md
+  - Testbed design: testbed/design.md
+  - Shortcuts and hacks: testbed/shortcuts.md
+- Setup:
+  - Requirements and installation: setup/installation.md
+  - Real sites: setup/real-sites.md
+- Tests:
+  - tests/index.md
+  - T1 Simulator: tests/t1-simulator.md
+  - T2 WES to TES: tests/t2-wes-to-tes.md
+  - T3 Isolation: tests/t3-isolation.md
+  - T4 Through proTES: tests/t4-protes.md
+  - T5 Server as a TES task: tests/t5-server-task.md
+  - T6 Losing a site: tests/t6-site-loss.md
+  - T7 Only port 443: tests/t7-port-443.md
+  - T8 Real sites: tests/t8-real-sites.md
+- Outcomes:
+  - Open questions: outcomes/open-questions.md
+  - Results: outcomes/results.md
+  - Gap analysis: outcomes/gap-analysis.md
+  - Proposals: outcomes/proposals.md
+- About:
+  - about/index.md
+  - Glossary: about/glossary.md
+  - References: about/references.md
