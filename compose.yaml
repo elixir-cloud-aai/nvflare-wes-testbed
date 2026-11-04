@@ -117,6 +117,26 @@ services:
     command: ["python3", "/app/tests/probe.py", "open=fl-hub:8080", "closed=funnel-site-1:8000", "closed=1.1.1.1:443"]
     networks: [site-2]
 
+  # The node probe, against the Funnel of site 1 (docs/setup/real-sites.md).
+  # Gets no data but the public test set, and needs no hub to be running a job
+  probe-node:
+    image: nvflare-testbed:local
+    profiles: [test]
+    command:
+      - python3
+      - /app/tests/probe_submit.py
+      - --tes=http://funnel-site-1:8000
+      - --hub=fl-hub
+      - --fl-port=8080
+      - --ports=443
+      - --image=nvflare-testbed:local
+    depends_on:
+      funnel-site-1:
+        condition: service_healthy
+      fl-hub:
+        condition: service_healthy
+    networks: [control]
+
 networks:
   control: {}
   site-1:

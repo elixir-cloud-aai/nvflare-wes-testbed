@@ -42,4 +42,5 @@ On 2026-11-04, on one laptop with Docker 28.3, with NVFlare 2.9.0 from PyPI, Fun
 | T5 | 8/8 checks, with the hacked TES |
 | T6 | Run ended `SYSTEM_ERROR` about 6 seconds after the kill. No task containers left |
 | T7 | 8/8 checks, with `http` (WebSocket) on port 443 |
+| Node probe (`tests/probe-node.sh`) | Ran against the local Funnel of site 1, directly and through proTES. Tells a node that can take part from one that can't |
 | T8 | Not run |
