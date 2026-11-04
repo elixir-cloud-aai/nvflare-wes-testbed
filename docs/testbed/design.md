@@ -48,5 +48,5 @@ compose.yaml               the testbed: hub, two sites, tests
 compose.protes.yaml        override: through proTES (T4)
 compose.server-task.yaml   override: server as a TES task (T5)
 compose/                   configs of Funnel and proTES
-tests/                     e2e (T2, T4, T5, T7), probe (T3), site loss (T6)
+tests/                     e2e (T2, T4, T5, T7), probe (T3), site loss (T6), image contents
 ```

@@ -7,3 +7,11 @@
 !testset/job_src
 !testset/evaluate.py
 !tests
+
+# Also not within the included paths: local secrets, startup kits, caches
+**/.env*
+**/*.key
+**/*.pem
+**/kits
+**/__pycache__
+**/*.py[cod]
