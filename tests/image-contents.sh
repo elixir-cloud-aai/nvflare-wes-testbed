@@ -8,6 +8,7 @@ decoys=(
     wes/.env.image-contents-decoy
     wes/image-contents-decoy.key
     wes/image-contents-decoy.csv
+    wes/image-contents-decoy_id_rsa
     tests/kits/image-contents-decoy.pem
 )
 cleanup() {
@@ -25,6 +26,9 @@ docker build -q -f images/Dockerfile.flare -t nvflare-testbed:contents . >/dev/n
 
 found="$(docker run --rm --network none --entrypoint find nvflare-testbed:contents /app /usr/local/bin \
     \( -name '*.csv' -o -name '.env*' -o -name '*.key' -o -name '*.pem' -o -name 'kits' -o -name '*decoy*' \) -print)"
+# Decoys anywhere in the image. The names above would match too many files of
+# Python packages there, such as the certificates of certifi
+found+="$(docker run --rm --network none --entrypoint find nvflare-testbed:contents / -xdev -name '*image-contents-decoy*' -print)"
 if [ -n "${found}" ]; then
     echo "[FAIL] found in the image:"
     echo "${found}"

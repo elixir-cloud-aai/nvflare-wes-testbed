@@ -1,12 +1,13 @@
 # Deny by default: only what the images need goes into the build context.
 # No site data, no secrets.
 *
-!wes
-!images
+!wes/*.py
+!images/*.sh
 !testset/job
-!testset/job_src
+!testset/job_src/*.py
 !testset/evaluate.py
-!tests
+!tests/*.py
+!tests/*.sh
 
 # Also not within the included paths: local secrets, startup kits, caches
 **/.env*
