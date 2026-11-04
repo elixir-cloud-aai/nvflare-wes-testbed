@@ -57,12 +57,20 @@ def load_sites(text: str) -> dict[str, dict[str, str]]:
         The sites.
 
     Raises:
-        ValueError: A token can't go into a header. The message doesn't hold it.
+        ValueError: A site is named `server`, which stands for the task of the FL
+            server, or a token can't go into a header, or only over plain HTTP.
+            The message doesn't hold the token.
     """
     sites: dict[str, dict[str, str]] = json.loads(text)
+    if "server" in sites:
+        raise ValueError("A site can't be named server")
     for name, site in sites.items():
-        if "token" in site and not re.fullmatch(r"[\x21-\x7e]+", site["token"]):
+        if "token" not in site:
+            continue
+        if not re.fullmatch(r"[\x21-\x7e]+", site["token"]):
             raise ValueError(f"The token of site {name} has characters that can't go into a header")
+        if not site.get("tes", "").startswith("https://"):
+            raise ValueError(f"The token of site {name} only goes to a TES over https")
     return sites
 
 

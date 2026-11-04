@@ -128,7 +128,7 @@ docker compose -f compose.hub.yaml up -d --wait
 
 (In Fish: `set -x FL_SERVER_NAME <name of the hub>`, and so on.)
 
-Caddy gets a certificate for that name, which needs ports 80 and 443 reachable. It only passes on `/kits`, which any node may fetch, and `/ga4gh/wes/v1` and `/outputs` from `WES_ALLOWED_IPS`; by default that's nobody from outside. Everything else gets a 403. That's an address list, not LS Login: see [H5](../testbed/shortcuts.md#h5) and [#5](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/5). Check on the machine that the proxy sees the real addresses of clients, as Docker's networking can hide them. The FLARE admin port stays inside. In this Compose file, the hub runs as root, which is what can read a `chmod 600` sites file. It has no access log, as links to kits are secrets while a run lasts.
+Caddy gets a certificate for that name, which needs ports 80 and 443 reachable. It only passes on `/kits`, which any node may fetch, and `/ga4gh/wes/v1` and `/outputs` from `WES_ALLOWED_IPS`; by default that's nobody from outside. Everything else gets a 403. That's an address list, not LS Login: see [H5](../testbed/shortcuts.md#h5) and [#5](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/5). Check on the machine that the proxy sees the real addresses of clients, as Docker's networking can hide them. The FLARE admin port stays inside. In this Compose file, the hub runs as root, which is what can read a `chmod 600` sites file. It has no access log, as links to kits are secrets while a run lasts. It keeps all state in memory, so a restart forgets runs ([H2](../testbed/shortcuts.md#h2)): check for tasks left at the sites after one.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -136,9 +136,9 @@ Caddy gets a certificate for that name, which needs ports 80 and 443 reachable. 
 | `FL_IMAGE` | `elixircloud/nvflare-wes-testbed:dev` | Image of the hub and the tasks. Use `sha-<commit>` |
 | `FL_PORT`, `FL_SCHEME` | `8002`, `grpc` | FL port. For 443, use `http`: see [T7](../tests/t7-port-443.md) |
 | `WES_ALLOWED_IPS` | `127.0.0.1` | Addresses or ranges that reach the WES, separated by spaces |
-| `WES_INTERNAL_URL` | `https://<FL_SERVER_NAME>` | Base of the links to kits |
-| `WES_SITES_FILE` | `./sites.json` | The sites file: name, `tes`, `data`, and optionally `token` |
-| `HUB_HTTPS_PORT` | `443` | Another port for HTTPS, if the FL port is 443. Then set `WES_INTERNAL_URL` to match, and Let's Encrypt still needs port 80 |
+| `WES_INTERNAL_URL` | `https://<FL_SERVER_NAME>` | Base of the links to kits. Keep it `https`, as kits hold private keys |
+| `WES_SITES_FILE` | `./sites.json` | The sites file: name, `tes` and `data`. Add `token` for a TES that needs one, which must then be at an `https` URL |
+| `HUB_HTTPS_PORT` | `443` | Another port for HTTPS, if the FL port is 443. Then set `WES_INTERNAL_URL` to match, and Let's Encrypt still needs port 80. The redirect from HTTP still points to 443, so use the `https` URL with its port |
 
 Tokens in the sites file stay out of task records and logs, and the file stays out of Git and of the image. To check the setup, run the [probe](#probing-a-node), then a run with one site ([T8](../tests/t8-real-sites.md)).
 
