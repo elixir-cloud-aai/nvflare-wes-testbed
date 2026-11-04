@@ -24,7 +24,9 @@ To follow a client, in another terminal:
 docker compose logs -f funnel-site-1
 ```
 
-It ends with `8/8 checks passed`. To see the connections on the server's side during a run:
+It ends with `8/8 checks passed`. With the data at [public URLs](../setup/real-sites.md#the-test-set), as on real sites, add `-f compose.yaml -f compose.public-data.yaml` after `docker compose`, and it ends with `10/10 checks passed`, as it also checks where the data came from.
+
+To see the connections on the server's side during a run:
 
 ```sh
 docker compose exec fl-hub sh -c 'grep "Connection \[" /tmp/wes/*/server.log'

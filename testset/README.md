@@ -12,6 +12,8 @@ One minimal job and tiny, made-up data.
 
 The two sites see different parts of the feature space, so a model trained at one site alone generalizes badly. Expected on the holdout set: federated 0.975, site 1 alone 0.825, site 2 alone 0.875.
 
+Real sites fetch their share from public URLs: see [Real sites](../docs/setup/real-sites.md#the-test-set).
+
 To regenerate the data and the job, which gives the same files:
 
 ```sh

@@ -1,0 +1,14 @@
+# Override: sites fetch their data from public URLs, as real sites do at the
+# event (issue #6, hack H13), instead of from a local file. Synthetic data only.
+# The commit is fixed, so that the data can't change under a run. Use with:
+#   docker compose -f compose.yaml -f compose.public-data.yaml ...
+services:
+  fl-hub:
+    environment:
+      WES_SITES: >-
+        {"site-1": {"tes": "http://funnel-site-1:8000", "data": "https://raw.githubusercontent.com/elixir-cloud-aai/nvflare-wes-testbed/b473b4b2d3246d6b5f74c31e209268e0c093e062/testset/data/site-1.csv"},
+        "site-2": {"tes": "http://funnel-site-2:8000", "data": "https://raw.githubusercontent.com/elixir-cloud-aai/nvflare-wes-testbed/b473b4b2d3246d6b5f74c31e209268e0c093e062/testset/data/site-2.csv"}}
+
+  e2e:
+    environment:
+      EXPECTED_DATA_PREFIX: https://raw.githubusercontent.com/elixir-cloud-aai/nvflare-wes-testbed/b473b4b2d3246d6b5f74c31e209268e0c093e062/testset/data/
