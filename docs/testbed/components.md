@@ -5,7 +5,7 @@
 | Actor | Role in the testbed | Role at the event |
 |---|---|---|
 | Researcher | Plays the WES client, as `tests/e2e.py` | Whoever submits the run |
-| Node operator | None: local Funnel instances stand in | Allows a task's way out, registers the TES at proTES, tells what's different |
+| Node operator | None: local Funnel instances stand in | Allows a task's way out, tells what's different, and for stretch goal 2 registers the TES at proTES |
 | Hub operator | None | Runs the hub on a reachable machine |
 
 ## Components
@@ -16,7 +16,7 @@
 | FL server | NVFlare server, one per run, as a child process of the WES (B1) or as a TES task (B2) | [NVFlare 2.9.0](https://pypi.org/project/nvflare/2.9.0/) |
 | FL client | NVFlare client, one per site, as a TES task (`images/fl-client.sh`) | Same |
 | Funnel | TES of one site. Starts executors as sibling containers on the site's network | [Funnel v0.11.14](https://github.com/calypr/funnel), Docker CLI added |
-| proTES | Optional TES gateway, used as of [T4](../tests/t4-protes.md) | [proTES v0.4.0](https://github.com/elixir-cloud-aai/proTES), built from its repository |
+| proTES | Optional TES gateway, used in [T4](../tests/t4-protes.md) only, and [stretch goal 2](index.md#goals) on real nodes | [proTES v0.4.0](https://github.com/elixir-cloud-aai/proTES), built from its repository |
 | Fake identity provider | For proTES only (`tests/fake_idp.py`): [H10](shortcuts.md#h10) | Cut down from proTES's smoke test |
 | Site networks | Docker networks without a route out: tasks reach the hub only | `compose.yaml` |
 

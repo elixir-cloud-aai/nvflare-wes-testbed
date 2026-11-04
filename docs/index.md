@@ -11,6 +11,10 @@ It's work towards milestone M4.5 of ECP work package 4 ("ELIXIR Cloud is availab
 
 The [Outcomes](outcomes/open-questions.md) are empty until the tests have run on real sites.
 
+## Goals
+
+The main goal is a direct run on real nodes, with the WES calling the TES of each site. Integration with Conquest and with proTES are stretch goals, in that order. See [Goals](testbed/index.md#goals).
+
 ## Quick start
 
 Takes a few minutes, mostly for the image builds. It needs Docker with Compose on Linux. No Python on your machine, no free ports, no account. The Funnel containers get the Docker socket: read [`compose.yaml`](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/blob/dev/compose.yaml) first.

@@ -1,5 +1,7 @@
 # Issues
 
+**History: these are [on GitHub](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues) now, which is where they're kept up to date. Decisions since then aren't reflected here, such as direct calls first, instead of through proTES.**
+
 To be created on GitHub once the repository exists, in this order. Labels are from the organization's set. "Blocked by" refers to the numbers here. Every issue is one pull request, or a task with no pull request where it says so.
 
 The event is the BioHackathon. Everything up to and including #9 should be done before it. No people named here on purpose: assign them when creating the issues.

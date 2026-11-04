@@ -25,12 +25,13 @@ Docs are written for Read the Docs (MkDocs Material), and readable here as Markd
 
 - [Home](docs/index.md)
 - [Background](docs/background/use-case.md): use case, requirements and design, independent of any product
+- [Goals](docs/testbed/index.md#goals): first the direct run, WES to each TES; then Conquest; then proTES
 - [Options](docs/testbed/options.md): what was evaluated, and the recommendation
 - [Shortcuts and hacks](docs/testbed/shortcuts.md): each with what the proper way would be
 - [Setup](docs/setup/installation.md)
 - [Tests](docs/tests/index.md)
 - [Outcomes](docs/outcomes/open-questions.md): empty until the tests have run on real sites
-- [Issues](ISSUES.md): the work ahead, in order, until they're on GitHub
+- [Issues](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues): the work ahead
 - [About](docs/about/index.md)
 
 Licence: [Apache-2.0](LICENSE). Never for production.

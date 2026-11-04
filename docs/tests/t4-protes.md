@@ -1,5 +1,8 @@
 # T4 Through proTES
 
+!!! note "Stretch goal 2"
+    The plan for real nodes is the [direct run](../testbed/index.md#goals). This test shows locally that a gateway fits, too. On real nodes, it's [#18](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/18).
+
 ## Description
 
 As [T2](t2-wes-to-tes.md), with tasks sent to [proTES](https://github.com/elixir-cloud-aai/proTES) instead of directly to the TES of a site. Each task has the tag [`gateway.backends`](https://github.com/elixir-cloud-aai/proTES/blob/dev/docs/plugins.md#choices-of-clients), which lets proTES use only the TES of that site ([H11](../testbed/shortcuts.md#h11)). Without it, a client could land on the wrong site, and not find its data. proTES uses a [fake identity provider](../testbed/shortcuts.md#h10) here.
