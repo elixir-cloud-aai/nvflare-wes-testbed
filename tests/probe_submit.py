@@ -7,7 +7,7 @@ of command lines.
 Ends with 0 if the node can take part: the task completed, reached the FL port of
 the hub, got its input and environment, and could write to `/tmp`. Ends with 1 if
 it can't, and with 2 if this doesn't tell: nothing listened on the FL port, the
-log isn't in the record, or the task ran elsewhere than asked for.
+log isn't in the record, the task ran elsewhere than asked for, or it didn't end.
 """
 
 import argparse
@@ -33,6 +33,27 @@ INPUT_SHA256 = "c578295a4bd973bb98fa2def75cffd50313dd9c7ab6b34f6548124a70103c001
 INPUT_PATH = "/probe/input.csv"
 
 
+def port_number(value: str) -> int:
+    """Parse a port.
+
+    Args:
+        value: The port.
+
+    Returns:
+        The port, as a number.
+
+    Raises:
+        argparse.ArgumentTypeError: It isn't a port.
+    """
+    try:
+        port = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"not a port: {value}") from error
+    if not 0 < port < 65536:
+        raise argparse.ArgumentTypeError(f"not a port: {value}")
+    return port
+
+
 def port_list(value: str) -> list[int]:
     """Parse a list of ports.
 
@@ -41,17 +62,8 @@ def port_list(value: str) -> list[int]:
 
     Returns:
         The ports.
-
-    Raises:
-        argparse.ArgumentTypeError: Something in the list isn't a port.
     """
-    try:
-        ports = [int(port) for port in value.split(",") if port.strip()]
-    except ValueError as error:
-        raise argparse.ArgumentTypeError(f"not a list of ports: {value}") from error
-    if not all(0 < port < 65536 for port in ports):
-        raise argparse.ArgumentTypeError(f"not a list of ports: {value}")
-    return ports
+    return [port_number(port.strip()) for port in value.split(",") if port.strip()]
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -64,11 +76,16 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--tes", required=True, help="Base URL of the TES or proTES, without /ga4gh/tes/v1")
     parser.add_argument("--backend", help="Through proTES: base URL of the TES to pin the task to")
     parser.add_argument("--hub", required=True, help="Name or address of the hub")
-    parser.add_argument("--fl-port", type=int, default=8002, help="FL port of the hub, which a client must reach")
+    parser.add_argument("--fl-port", type=port_number, default=8002, help="FL port of the hub, which a client must reach")
     parser.add_argument("--ports", type=port_list, default=[443], help="Other ports to try, for information")
     parser.add_argument("--image", default=IMAGE, help="Image of the task, which must be the testbed's")
     parser.add_argument("--timeout", type=int, default=600, help="Seconds to wait for the task")
-    return parser.parse_args()
+    parser.add_argument("--insecure-token", action="store_true", help="Allow sending a token over plain HTTP")
+    args = parser.parse_args()
+    urls = [args.tes, args.backend or "https://"]
+    if os.environ.get("TES_TOKEN") and not args.insecure_token and not all(u.startswith("https://") for u in urls):
+        parser.error("a token only goes over https, unless --insecure-token is set")
+    return args
 
 
 def build_task(args: argparse.Namespace) -> dict[str, Any]:
@@ -113,17 +130,25 @@ def wait_for_task(url: str, task_id: str, headers: dict[str, str], timeout: int)
         The full record of the task.
     """
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        reply = requests.get(f"{url}/tasks/{task_id}", params={"view": "MINIMAL"}, headers=headers, timeout=30)
+    try:
+        while time.monotonic() < deadline:
+            reply = requests.get(f"{url}/tasks/{task_id}", params={"view": "MINIMAL"}, headers=headers, timeout=30)
+            reply.raise_for_status()
+            if reply.json().get("state") in TERMINAL:
+                break
+            time.sleep(3)
+        else:
+            requests.post(f"{url}/tasks/{task_id}:cancel", headers=headers, timeout=30)
+        reply = requests.get(f"{url}/tasks/{task_id}", params={"view": "FULL"}, headers=headers, timeout=30)
         reply.raise_for_status()
-        if reply.json().get("state") in TERMINAL:
-            break
-        time.sleep(3)
-    else:
-        requests.post(f"{url}/tasks/{task_id}:cancel", headers=headers, timeout=30)
-    reply = requests.get(f"{url}/tasks/{task_id}", params={"view": "FULL"}, headers=headers, timeout=30)
-    reply.raise_for_status()
-    return reply.json()
+        return reply.json()
+    except requests.RequestException:
+        # Don't leave the task running at the node, if the TES can still be told
+        try:
+            requests.post(f"{url}/tasks/{task_id}:cancel", headers=headers, timeout=30)
+        except requests.RequestException:
+            print(f"Couldn't cancel task {task_id}: ask the operator of the node", file=sys.stderr)
+        raise
 
 
 def find_result(task: dict[str, Any]) -> dict[str, Any] | None:
@@ -152,21 +177,20 @@ def read_from_backend(task: dict[str, Any], args: argparse.Namespace, headers: d
     Args:
         task: The full record of the task at the gateway.
         args: The command line arguments.
-        headers: Headers of the requests, which only go to the TES named with `--backend`.
+        headers: Headers of the requests.
 
     Returns:
-        The findings, or nothing if there's no such TES, or it doesn't hold them.
+        The findings, or nothing if no TES was named with `--backend`, as a gateway
+        shouldn't choose what this asks next, or that TES doesn't hold them.
     """
-    tags = task.get("tags") or {}
-    backend, backend_id = tags.get("gateway.backend"), tags.get("gateway.backend_task_id")
-    if not backend or not backend_id:
+    backend_id = (task.get("tags") or {}).get("gateway.backend_task_id")
+    if not args.backend or not backend_id:
         return None
-    pinned = bool(args.backend) and same_url(backend, args.backend)
     try:
         reply = requests.get(
-            f"{backend.rstrip('/')}/ga4gh/tes/v1/tasks/{backend_id}",
+            f"{args.backend.rstrip('/')}/ga4gh/tes/v1/tasks/{backend_id}",
             params={"view": "FULL"},
-            headers=headers if pinned else {},
+            headers=headers,
             timeout=30,
         )
     except requests.RequestException:
@@ -199,6 +223,8 @@ def verdict(state: str, result: dict[str, Any], fl_target: str) -> tuple[int, st
         The exit code, and the line to end with.
     """
     fl_port = result["targets"][fl_target]
+    if state not in TERMINAL or state == "CANCELED":
+        return EXIT_INCONCLUSIVE, f"[inconclusive] the task ended up {state}: ask the operator of the node"
     if state != "COMPLETE" or result["input"] != "ok" or not result["env_passed"] or not result["tmp_writable"]:
         return EXIT_CANNOT, "[FAIL] the node can't take part: see above"
     if fl_port == "refused":

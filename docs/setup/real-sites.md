@@ -51,7 +51,7 @@ docker run --rm -e TES_TOKEN elixircloud/nvflare-wes-testbed:dev \
 
 `--fl-port` is the port that decides. `--ports` lists others to try, for information, such as 443 or the port of a [hub on Rahti](#what-the-hub-needs).
 
-`TES_TOKEN` is taken from your environment, if the TES needs a token. Through proTES, use its URL as `--tes`, and add `--backend https://<tes>` to pin the task to that TES. proTES keeps no output of tasks, so the script reads it from that TES, which must be reachable with the same token.
+`TES_TOKEN` is taken from your environment, if the TES needs a token, and only goes over HTTPS. Through proTES, use its URL as `--tes`, and add `--backend https://<tes>` to pin the task to that TES. proTES keeps no output of tasks, so the script reads it from that TES, which must be reachable with the same token.
 
 | Outcome for a port | Meaning |
 |---|---|
@@ -65,7 +65,7 @@ docker run --rm -e TES_TOKEN elixircloud/nvflare-wes-testbed:dev \
 |---|---|---|
 | `[ok]` | 0 | The task completed and reached the FL port, and the input, `env` and `/tmp` work |
 | `[FAIL]` | 1 | The node can't take part, as shown above that line |
-| `[inconclusive]` | 2 | This doesn't tell: the FL port was `refused`, the log isn't in the task's record (the TES needn't keep it, so ask the operator), or the task ran elsewhere than asked for |
+| `[inconclusive]` | 2 | This doesn't tell: the FL port was `refused`, the log isn't in the task's record (the TES needn't keep it, so ask the operator), the task ran elsewhere than asked for, or it was canceled or still hadn't ended by `--timeout` |
 
 The probe doesn't show that a node can fetch a startup kit from the hub, as its input comes from GitHub: a node with a strict allow-list may differ. That's what question 3 below is for. Record results per node in [Results](../outcomes/results.md), without hostnames. Only local runs against Funnel have been tried, directly and through proTES: see [Tests](../tests/index.md#local-runs).
 
