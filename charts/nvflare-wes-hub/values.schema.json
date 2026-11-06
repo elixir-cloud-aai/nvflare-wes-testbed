@@ -25,9 +25,9 @@
       "not": {"pattern": "(^|\\.)rahtiapp\\.fi$"}
     },
     "kitsHost": {
-      "description": "Name of the Route for /kits, without a scheme",
+      "description": "Name of the Route for /kits, without a scheme, under rahtiapp.fi, which the router's certificate covers",
       "type": "string",
-      "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"
+      "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+rahtiapp\\.fi$"
     },
     "flPort": {
       "description": "FL port: Rahti's LoadBalancer ports are 30000 to 35000",

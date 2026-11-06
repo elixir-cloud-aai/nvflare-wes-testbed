@@ -1,6 +1,7 @@
-{{/* Name of all objects of a release */}}
+{{/* Name of all objects of a release, with room for the longest suffix
+(`-kits`) within the 63 characters of a name */}}
 {{- define "hub.fullname" -}}
-{{- printf "%s-%s" .Release.Name .Chart.Name | trunc 63 | trimSuffix "-" -}}
+{{- printf "%s-%s" .Release.Name .Chart.Name | trunc 58 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/* Labels of all objects */}}

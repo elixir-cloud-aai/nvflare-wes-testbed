@@ -169,7 +169,7 @@ The sites file comes from a Secret that you create, which isn't part of the char
     ```
 
     If the nodes only let out 443, Rahti won't do: use a VM, [as above](#where-it-goes).
-3. **Two names.** The hub's name, of your own, for an `A` record to the address (not under `rahtiapp.fi`, which leads to the routers; the chart refuses it). And a name for the Route of the kits, which leads to the routers: by [Rahti's docs](https://docs.csc.fi/cloud/rahti/usage/networking/), a free name ending in `.rahtiapp.fi` works out of the box, such as `<kits name>.2.rahtiapp.fi`.
+3. **Two names.** The hub's name, of your own, for an `A` record to the address (not under `rahtiapp.fi`, which leads to the routers; the chart refuses it). And a name for the Route of the kits, which leads to the routers, so it can't be the same: a free name ending in `.rahtiapp.fi`, such as `<kits name>.2.rahtiapp.fi`, which works out of the box by [Rahti's docs](https://docs.csc.fi/cloud/rahti/usage/networking/), with the router's certificate. The chart has no certificate of its own, so it refuses other names.
 4. **Tools:** `oc` and `helm` 3, logged in with the command that Rahti's web console copies for you (`oc login --token=…`, a secret: don't paste it anywhere else).
 
 **Install it** (Fish), from a clone of this repository, with the [image](#the-image) at a `sha-` tag:
@@ -198,7 +198,7 @@ The Route must say `Admitted=True`. If another project already has its name, the
 |---|---|---|
 | `image.tag` | None, required | `sha-<commit>` of `dev`, for the hub and the tasks. `dev` is refused, as it moves |
 | `hubName` | None, required | `FL_SERVER_NAME`: the hub's name in the kits, with an `A` record to the address |
-| `kitsHost` | None, required | Name of the Route for `/kits`, without a scheme. Links to kits are `https://<kitsHost>/kits/…` |
+| `kitsHost` | None, required | Name of the Route for `/kits`, without a scheme, ending in `.rahtiapp.fi`. Links to kits are `https://<kitsHost>/kits/…` |
 | `flPort` | `30002` | FL port, on the address and in the pod: 30000 to 35000 |
 | `flScheme` | `grpc` | `grpc`, or `http` (WebSocket, see [T7](../tests/t7-port-443.md)) |
 | `loadBalancerIP` | Empty | Internal address of the project's pool (`192.168.…`), not the public one. Empty: one of the pool's |

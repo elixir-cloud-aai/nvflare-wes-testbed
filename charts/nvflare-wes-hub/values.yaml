@@ -15,8 +15,10 @@ image:
 hubName: ""
 
 # Required: the name of the Route that serves `/kits`, without a scheme. It
-# leads to the routers, so a name under Rahti's apps domain works, with
-# Rahti's certificate. Links to kits use `https://<kitsHost>`
+# leads to the routers, not to the hub's address, so it differs from
+# `hubName`, and it ends in `.rahtiapp.fi`, which works out of the box,
+# certificate included: the chart has none of its own. Links to kits use
+# `https://<kitsHost>`
 kitsHost: ""
 
 # The FL port, on the `LoadBalancer` and in the pod: between 30000 and 35000

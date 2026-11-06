@@ -16,11 +16,12 @@ for tool in helm yq; do
 done
 
 chart=charts/nvflare-wes-hub
-# Placeholders only: `.invalid` names and an address for documentation (RFC 5737)
+# Placeholders only: `.invalid` names, a name under Rahti's domain for the
+# Route, and an address for documentation (RFC 5737)
 tag=sha-0123456789abcdef0123456789abcdef01234567
 image="docker.io/elixircloud/nvflare-wes-testbed:${tag}"
 hub=flare-wes.example.invalid
-kits=flare-wes-kits.example.invalid
+kits=flare-wes-kits.example.rahtiapp.fi
 wes=hub-nvflare-wes-hub-wes
 tag_arg=(--set "image.tag=${tag}")
 hub_arg=(--set "hubName=${hub}")
@@ -68,6 +69,8 @@ refuse "an FL port below 30000" "${args[@]}" --set flPort=8002
 refuse "an FL port above 35000" "${args[@]}" --set flPort=35001
 refuse "an unknown FL scheme" "${args[@]}" --set flScheme=https
 refuse "a kits host with a scheme" "${args[@]}" --set kitsHost=https://${kits}
+refuse "a kits host outside rahtiapp.fi, without a certificate" "${args[@]}" --set kitsHost=kits.example.invalid
+refuse "the hub's name as kits host" "${args[@]}" --set "kitsHost=${hub}"
 refuse "an address that isn't IPv4" "${args[@]}" --set loadBalancerIP=not-an-address
 refuse "an address out of range" "${args[@]}" --set loadBalancerIP=256.0.0.1
 refuse "an unknown value" "${args[@]}" --set flport=30003
@@ -138,6 +141,11 @@ expect "Route redirects plain HTTP" "${route} | .spec.tls.insecureEdgeTerminatio
 expect "Route to the WES' Service" "${route} | .spec.to.name + \":\" + .spec.port.targetPort" "${wes}:http"
 expect "the WES' Service inside only" \
     "select(.kind == \"Service\" and .metadata.name == \"${wes}\") | .spec.type" "ClusterIP"
+
+# Names stay within 63 characters, with the longest release name of Helm (53)
+helm template "$(printf 'r%.0s' {1..53})" "${chart}" "${args[@]}" >"${out}"
+expect "names within 63 characters, also with a long release name" \
+    '[.metadata.name | select(length > 63)] | length' "0"
 
 # The defaults. Without an address, MetalLB picks one of the project's
 helm template hub "${chart}" "${args[@]}" >"${out}"
