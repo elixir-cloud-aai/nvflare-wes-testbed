@@ -24,11 +24,12 @@ The authors of [NVIDIA FLARE](https://github.com/NVIDIA/NVFlare) and [Funnel](ht
 
 Light by design: it's a sandbox. Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/), with a subject of at most 50 characters. Add every shortcut to [Shortcuts and hacks](../testbed/shortcuts.md), and every test to [Tests](../tests/index.md). CI lints, builds the docs and runs the local tests; the only required check is `CI passed`.
 
-The linters run through [pre-commit](https://pre-commit.com/) (`.pre-commit-config.yaml`): ruff, gitleaks, actionlint and some file checks. To run them on each commit, and once on all files:
+The linters run through [pre-commit](https://pre-commit.com/) (`.pre-commit-config.yaml`): ruff, gitleaks, actionlint and some file checks. To run them on each commit, then once on all files, and gitleaks over the whole checkout, as CI does (the second command only scans staged changes with it):
 
 ```sh
 python3 -m venv .venv && .venv/bin/pip install '.[lint]' && .venv/bin/pre-commit install
 .venv/bin/pre-commit run --all-files
+.venv/bin/pre-commit run --all-files --hook-stage manual gitleaks-all
 ```
 
 To build the docs:
