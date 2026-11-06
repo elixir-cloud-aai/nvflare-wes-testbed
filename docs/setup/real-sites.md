@@ -80,7 +80,7 @@ The probe doesn't show that a node can fetch a startup kit from the hub, as its 
 ## Deploying the hub
 
 !!! warning "This hasn't run on a real machine"
-    `tests/hub.sh` runs `compose.hub.yaml` in CI, with local sites that dial the hub by its name, as an arbitrary non-root user, and it checks what the proxy lets through. `tests/chart.sh` checks the chart for Rahti without a cluster. Certificates from Let's Encrypt, a public port and anything on Rahti or Nebius are untested: **nothing has been tried on Rahti yet**. What's below about Rahti and Nebius comes from their public docs, read on 2026-11-04. Running it on a machine is [#4](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/4).
+    `tests/hub.sh` runs `compose.hub.yaml` in CI, with local sites that dial the hub by its name, as an arbitrary non-root user, and it checks what the proxy lets through. `tests/chart.sh` checks the chart for Rahti without a cluster. Certificates from Let's Encrypt, a public port and anything on Rahti or Nebius are untested. What's below about Rahti and Nebius comes from their public docs, read on 2026-11-04. Running it on a machine is [#4](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/4).
 
 ### Where it goes
 
@@ -163,7 +163,7 @@ The sites file comes from a Secret that you create, which isn't part of the char
 1. **An address from CSC.** Ask the [CSC Service Desk](https://docs.csc.fi/support/contact/) for one `LoadBalancer` address for your Rahti project, with the Rahti project name, the `csc_project` number, the use case (a federated learning hub for a BioHackathon sandbox, one TCP port between 30000 and 35000 for connections from compute sites) and the number of addresses: one. It can take some days.
 2. **The probe.** Find out whether tasks at the nodes may reach a port that high: [probe them](#probing-a-node) with `--fl-port 30002 --ports 8002,443`, and a listener on any machine with those ports open:
 
-    ```sh
+    ```fish
     docker run --rm -p 30002:30002 -p 8002:8002 -p 443:443 elixircloud/nvflare-wes-testbed:sha-<commit> \
         python3 /app/tests/probe.py listen 30002 8002 443
     ```
@@ -215,14 +215,15 @@ Then use `http://localhost:8080/ga4gh/wes/v1` in place of `https://<hub>/ga4gh/w
 ```fish
 set kits <kits name>
 set hub <hub name>
+set port 30002    # flPort
 curl -s -o /dev/null -w '%{http_code} /kits\n' https://$kits/kits/no-such-token/site-1.tgz
 curl -s -o /dev/null -w '%{http_code} WES\n' https://$kits/ga4gh/wes/v1/service-info
 curl -s -o /dev/null -w '%{http_code} WES\n' https://$hub/ga4gh/wes/v1/service-info
-nc -zv -w 5 $hub 30002
+nc -zv -w 5 $hub $port
 nc -zv -w 5 $hub 8003
 ```
 
-`/kits` should give 404, which comes from the WES: no such kit, but the way is open. The WES must not answer with 200 on either name: the router has no Route for it, and the address has only the FL port. The FL port only listens during a run, so 30002 can read as closed until then. 8003 must stay closed. If the FL port times out during a run although the Service has its address, look for NetworkPolicies of the project (`oc get networkpolicy`) that keep it out: by Rahti's docs, pods only talk to pods of the same project by default.
+`/kits` should give 404, which comes from the WES: no such kit, but the way is open. The WES must not answer with 200 on either name: the router has no Route for it, and the address has only the FL port. The FL port only listens during a run, so it can read as closed until then. 8003 must stay closed. If the FL port times out during a run although the Service has its address, look for NetworkPolicies of the project (`oc get networkpolicy`) that keep it out: by Rahti's docs, pods only talk to pods of the same project by default.
 
 **Acceptance:** a run with one site ([T8](../tests/t8-real-sites.md)) passes, `/kits` is reachable from outside, and the WES isn't.
 
