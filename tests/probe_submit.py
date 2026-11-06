@@ -76,7 +76,9 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--tes", required=True, help="Base URL of the TES or proTES, without /ga4gh/tes/v1")
     parser.add_argument("--backend", help="Through proTES: base URL of the TES to pin the task to")
     parser.add_argument("--hub", required=True, help="Name or address of the hub")
-    parser.add_argument("--fl-port", type=port_number, default=8002, help="FL port of the hub, which a client must reach")
+    parser.add_argument(
+        "--fl-port", type=port_number, default=8002, help="FL port of the hub, which a client must reach"
+    )
     parser.add_argument("--ports", type=port_list, default=[443], help="Other ports to try, for information")
     parser.add_argument("--image", default=IMAGE, help="Image of the task, which must be the testbed's")
     parser.add_argument("--timeout", type=int, default=600, help="Seconds to wait for the task")

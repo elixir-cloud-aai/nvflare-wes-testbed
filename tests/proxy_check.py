@@ -26,7 +26,7 @@ def main() -> None:
     failed = 0
     for path, status in expected.items():
         # The proxy's certificate comes from its own test CA here (`tls internal`)
-        got = requests.get(f"{base}{path}", verify=False, timeout=30).status_code  # noqa: S501  # nosemgrep
+        got = requests.get(f"{base}{path}", verify=False, timeout=30).status_code  # nosemgrep
         print(f"[{'ok' if got == status else 'FAIL'}] {path}: {got}, expected {status}")
         failed += got != status
     sys.exit(1 if failed else 0)
