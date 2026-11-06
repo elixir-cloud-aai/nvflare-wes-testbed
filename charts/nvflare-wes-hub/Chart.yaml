@@ -1,0 +1,10 @@
+apiVersion: v2
+name: nvflare-wes-hub
+description: >-
+  The hub of the NVFlare on WES and TES testbed on OpenShift (Rahti): the thin
+  WES with its FL server. Sandbox only, never for production.
+type: application
+version: 0.1.0
+home: https://github.com/elixir-cloud-aai/nvflare-wes-testbed
+sources:
+  - https://github.com/elixir-cloud-aai/nvflare-wes-testbed

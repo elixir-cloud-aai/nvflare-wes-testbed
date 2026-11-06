@@ -1,0 +1,13 @@
+# Not part of the chart: version control, editors, and local values, which may
+# hold names and addresses of a deployment
+.git/
+.gitignore
+*.swp
+*.bak
+*.tmp
+*.orig
+*~
+.DS_Store
+.idea/
+.vscode/
+values.*.yaml
