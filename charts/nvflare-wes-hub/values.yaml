@@ -1,0 +1,44 @@
+# The hub on OpenShift (Rahti). Sandbox only. See "Rahti" in
+# docs/setup/real-sites.md. Nothing here is specific to a deployment: set
+# names and addresses with `--set`, and never commit them.
+
+# The image of the hub, which also goes to the sites for their tasks
+image:
+  repository: docker.io/elixircloud/nvflare-wes-testbed
+  # Required: a `sha-<commit>` tag of `dev`, as `dev` moves
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Required: the public name of the hub (`FL_SERVER_NAME`), which goes into the
+# startup kits. A name of your own, with an `A` record to the address of the
+# `LoadBalancer`: names under `rahtiapp.fi` lead to the routers instead
+hubName: ""
+
+# Required: the name of the Route that serves `/kits`, without a scheme. It
+# leads to the routers, so a name under Rahti's apps domain works, with
+# Rahti's certificate. Links to kits use `https://<kitsHost>`
+kitsHost: ""
+
+# The FL port, on the `LoadBalancer` and in the pod: between 30000 and 35000
+# on Rahti. The kits name it, so nodes must be let out on it (see the probe)
+flPort: 30002
+
+# `grpc`, or `http` (WebSocket): see T7 in the docs
+flScheme: grpc
+
+# The address that CSC assigned to the project, for the `LoadBalancer`.
+# Empty: MetalLB picks one of the project's addresses
+loadBalancerIP: ""
+
+# The Secret with the sites file under the key `sites.json` (see
+# `compose/sites.example.json`). Not part of the chart: create it with `oc
+# create secret`, and never commit it
+sitesSecret: nvflare-wes-sites
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 2Gi

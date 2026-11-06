@@ -1,0 +1,93 @@
+# The thin WES, with its FL server as a child process. One replica, as it keeps
+# its state in memory and runs one federation at a time (hacks H2 and H4)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hub.fullname" . }}
+  labels:
+    {{- include "hub.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # No two pods at once: a LoadBalancer may still send to the old one
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "hub.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hub.selectorLabels" . | nindent 8 }}
+    spec:
+      # The WES talks to its FL server by the name in the kits, so that name
+      # must lead to the pod, not out through the LoadBalancer
+      hostAliases:
+        - ip: 127.0.0.1
+          hostnames:
+            - {{ .Values.hubName | quote }}
+      # No `runAsUser`: OpenShift picks an arbitrary one
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: hub
+          image: {{ include "hub.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # No access log, as links to kits are secrets while a run lasts (H3)
+          command: ["uvicorn", "wes.app:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "info", "--no-access-log"]
+          env:
+            - name: FL_SERVER_NAME
+              value: {{ .Values.hubName | quote }}
+            # Links to kits go through the Route
+            - name: WES_INTERNAL_URL
+              value: {{ printf "https://%s" .Values.kitsHost | quote }}
+            - name: FL_IMAGE
+              value: {{ include "hub.image" . | quote }}
+            - name: FL_SCHEME
+              value: {{ .Values.flScheme | quote }}
+            - name: FL_PORT
+              value: {{ .Values.flPort | quote }}
+            - name: WES_SITES_FILE
+              value: /run/secrets/sites/sites.json
+            # The arbitrary user has no home directory
+            - name: HOME
+              value: /tmp
+          ports:
+            - name: http
+              containerPort: 8080
+            # FLARE's admin port (8003) stays inside the pod
+            - name: fl
+              containerPort: {{ .Values.flPort }}
+          volumeMounts:
+            - name: sites
+              mountPath: /run/secrets/sites
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /ga4gh/wes/v1/service-info
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /ga4gh/wes/v1/service-info
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        # Group-readable: OpenShift gives the pod's user the volume's group
+        - name: sites
+          secret:
+            secretName: {{ .Values.sitesSecret | quote }}
+            defaultMode: 0440
+            items:
+              - key: sites.json
+                path: sites.json

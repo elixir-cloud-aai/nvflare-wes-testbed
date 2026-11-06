@@ -1,0 +1,15 @@
+The hub {{ .Values.hubName }} is starting. Sandbox only.
+
+1. Point an A record for {{ .Values.hubName }} to the address of the FL port:
+
+     oc get service {{ include "hub.fullname" . }}-fl -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+
+2. Kits: https://{{ .Values.kitsHost }}/kits (only this path).
+
+3. The WES is not exposed. Reach it with:
+
+     oc port-forward service/{{ include "hub.fullname" . }}-wes 8080:8080
+
+   then http://localhost:8080/ga4gh/wes/v1/service-info
+
+The pod waits for the Secret {{ .Values.sitesSecret }} with the key sites.json.

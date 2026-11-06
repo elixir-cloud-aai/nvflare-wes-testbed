@@ -1,0 +1,22 @@
+# The FL port, straight to the FL server, as its TLS is mutual. Rahti has no
+# NodePorts, and assigns the address on request to the CSC Service Desk
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hub.fullname" . }}-fl
+  labels:
+    {{- include "hub.labels" . | nindent 4 }}
+  {{- with .Values.loadBalancerIP }}
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: {{ . | quote }}
+  {{- end }}
+spec:
+  type: LoadBalancer
+  allocateLoadBalancerNodePorts: false
+  selector:
+    {{- include "hub.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: fl
+      protocol: TCP
+      port: {{ .Values.flPort }}
+      targetPort: fl

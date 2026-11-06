@@ -1,0 +1,17 @@
+# The WES, inside the cluster only: for the Route's `/kits`, and for `oc
+# port-forward`
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hub.fullname" . }}-wes
+  labels:
+    {{- include "hub.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "hub.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8080
+      targetPort: http

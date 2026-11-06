@@ -80,7 +80,7 @@ The probe doesn't show that a node can fetch a startup kit from the hub, as its 
 ## Deploying the hub
 
 !!! warning "This hasn't run on a real machine"
-    `tests/hub.sh` runs `compose.hub.yaml` in CI, with local sites that dial the hub by its name, as an arbitrary non-root user, and it checks what the proxy lets through. Certificates from Let's Encrypt, a public port and anything on Rahti or Nebius are untested. What's below about Rahti and Nebius comes from their public docs, read on 2026-11-04. Running it on a machine is [#4](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/4).
+    `tests/hub.sh` runs `compose.hub.yaml` in CI, with local sites that dial the hub by its name, as an arbitrary non-root user, and it checks what the proxy lets through. `tests/chart.sh` checks the chart for Rahti without a cluster. Certificates from Let's Encrypt, a public port and anything on Rahti or Nebius are untested: **nothing has been tried on Rahti yet**. What's below about Rahti and Nebius comes from their public docs, read on 2026-11-04. Running it on a machine is [#4](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/4).
 
 ### Where it goes
 
@@ -98,7 +98,7 @@ So on Rahti, `FL_PORT` is, for example, 30002, not 8002 or 443. **Whether tasks 
 
 What else differs on Rahti:
 
-- Compose doesn't run there: it takes a Deployment, the `LoadBalancer` Service with `allocateLoadBalancerNodePorts: false`, and a Secret for the sites file. None of it is written, as there's nothing to try it on.
+- Compose doesn't run there: it takes a Deployment, the `LoadBalancer` Service with `allocateLoadBalancerNodePorts: false`, and a Secret for the sites file. The Helm chart [`charts/nvflare-wes-hub`](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/tree/dev/charts/nvflare-wes-hub) has them: see [Running it on Rahti](#running-it-on-rahti).
 - **Name:** the kits contain the name of the hub, and it must lead to the address of the `LoadBalancer`. Names under `rahtiapp.fi` should lead to the routers instead, so this takes a name of your own, with an `A` record.
 - **Kits:** an edge Route with `path: /kits` exposes the links to kits, and nothing else of the WES. Reach the WES itself with `oc port-forward`, which needs no address list. To limit the FL port to the addresses of nodes, Rahti has a [NetworkPolicy](https://docs.csc.fi/cloud/rahti/configurations/loadbalancer-service/) with `externalTrafficPolicy: Local`. That takes the node selector `rahti.csc.fi/local-load-balancer: ''` on the pod, an address that no other Service shares, and a policy that still lets the router reach the `/kits` Route.
 - **User:** pods run as an arbitrary user. The hub works that way, with `HOME=/tmp`: `tests/hub.sh` runs it so.
@@ -142,9 +142,110 @@ Caddy gets a certificate for that name, which needs ports 80 and 443 reachable. 
 
 Tokens in the sites file stay out of task records and logs, and the file stays out of Git and of the image. To check the setup, run the [probe](#probing-a-node), then a run with one site ([T8](../tests/t8-real-sites.md)).
 
+### Running it on Rahti
+
+!!! warning "Nothing of this has been tried on Rahti"
+    The chart passes `helm lint`, OpenShift's schemas and the checks of `tests/chart.sh`, in CI, without a cluster. It hasn't been installed anywhere: there's no address to try it with yet. Record what differs in [#25](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/25), without hostnames.
+
+The chart [`charts/nvflare-wes-hub`](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/tree/dev/charts/nvflare-wes-hub) holds the hub alone: the thin WES with its FL server, no proxy, no TES. It's a chart rather than plain manifests with Kustomize, as names, port and address are set with `--set`, so nothing about a deployment goes into a file of the repository, and its schema refuses what can't work on Rahti. It makes:
+
+| Object | What it's for |
+|---|---|
+| Deployment | One pod, replaced, not rolled, on update. As OpenShift's arbitrary user, with `HOME=/tmp`. `hostAliases` lead the hub's name to the pod itself, as `extra_hosts` does in `compose.hub.yaml` |
+| `LoadBalancer` Service `…-fl` | The FL port only, with `allocateLoadBalancerNodePorts: false` |
+| `ClusterIP` Service `…-wes` | The WES, inside the cluster only |
+| Route `…-kits` | `https://<kits name>/kits`, edge TLS, and no other path |
+
+The sites file comes from a Secret that you create, which isn't part of the chart. The WES is not exposed at all: reach it with `oc port-forward`, which needs no address list (in place of `WES_ALLOWED_IPS` and [#5](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/5)). The FLARE admin port stays inside the pod.
+
+**Before you start:**
+
+1. **An address from CSC.** Ask the [CSC Service Desk](https://docs.csc.fi/support/contact/) for one `LoadBalancer` address for your Rahti project, with the Rahti project name, the `csc_project` number, the use case (a federated learning hub for a BioHackathon sandbox, one TCP port between 30000 and 35000 for connections from compute sites) and the number of addresses: one. It can take some days.
+2. **The probe.** Find out whether tasks at the nodes may reach a port that high: [probe them](#probing-a-node) with `--fl-port 30002 --ports 8002,443`, and a listener on any machine with those ports open:
+
+    ```sh
+    docker run --rm -p 30002:30002 -p 8002:8002 -p 443:443 elixircloud/nvflare-wes-testbed:sha-<commit> \
+        python3 /app/tests/probe.py listen 30002 8002 443
+    ```
+
+    If the nodes only let out 443, Rahti won't do: use a VM, [as above](#where-it-goes).
+3. **Two names.** The hub's name, of your own, for an `A` record to the address (not under `rahtiapp.fi`, which leads to the routers; the chart refuses it). And a name for the Route of the kits, which leads to the routers: by [Rahti's docs](https://docs.csc.fi/cloud/rahti/usage/networking/), a free name ending in `.rahtiapp.fi` works out of the box, such as `<kits name>.2.rahtiapp.fi`.
+4. **Tools:** `oc` and `helm` 3, logged in with the command that Rahti's web console copies for you (`oc login --token=…`, a secret: don't paste it anywhere else).
+
+**Install it** (Fish), from a clone of this repository, with the [image](#the-image) at a `sha-` tag:
+
+```fish
+oc project <rahti project>
+cp compose/sites.example.json sites.json    # edit it: never commit it
+chmod 600 sites.json
+oc create secret generic nvflare-wes-sites --from-file=sites.json=sites.json
+helm install hub charts/nvflare-wes-hub \
+    --set image.tag=sha-<commit> \
+    --set hubName=<hub name> \
+    --set kitsHost=<kits name> \
+    --set flPort=30002 \
+    --set loadBalancerIP=<address from CSC>
+oc rollout status deployment/hub-nvflare-wes-hub
+oc get service hub-nvflare-wes-hub-fl -o jsonpath='{.status.loadBalancer.ingress[0].ip}'; echo
+```
+
+Leave out `loadBalancerIP` to let Rahti pick one of the project's addresses. The last command shows the address in use: point the `A` record of the hub's name to it. Without an address, the Service stays `<pending>`. Without the Secret, the pod waits in `ContainerCreating`.
+
+| Value | Default | Meaning |
+|---|---|---|
+| `image.tag` | None, required | `sha-<commit>` of `dev`, for the hub and the tasks. `dev` is refused, as it moves |
+| `hubName` | None, required | `FL_SERVER_NAME`: the hub's name in the kits, with an `A` record to the address |
+| `kitsHost` | None, required | Name of the Route for `/kits`, without a scheme. Links to kits are `https://<kitsHost>/kits/…` |
+| `flPort` | `30002` | FL port, on the address and in the pod: 30000 to 35000 |
+| `flScheme` | `grpc` | `grpc`, or `http` (WebSocket, see [T7](../tests/t7-port-443.md)) |
+| `loadBalancerIP` | Empty | Address from CSC. Empty: one of the project's |
+| `sitesSecret` | `nvflare-wes-sites` | Secret with the sites file under the key `sites.json` |
+| `resources` | 250m CPU and 1 GiB, up to 2 CPUs and 2 GiB | Requests and limits of the pod |
+
+**Reach the WES** (Fish), in a terminal of its own, which keeps the tunnel open:
+
+```fish
+oc port-forward service/hub-nvflare-wes-hub-wes 8080:8080
+```
+
+Then use `http://localhost:8080/ga4gh/wes/v1` in place of `https://<hub>/ga4gh/wes/v1`, for example in [T8](../tests/t8-real-sites.md). A run goes on in the pod if the tunnel drops.
+
+**Check from outside** (Fish), from a machine outside Rahti:
+
+```fish
+set kits <kits name>
+set hub <hub name>
+curl -s -o /dev/null -w '%{http_code} /kits\n' https://$kits/kits/no-such-token/site-1.tgz
+curl -s -o /dev/null -w '%{http_code} WES\n' https://$kits/ga4gh/wes/v1/service-info
+curl -s -o /dev/null -w '%{http_code} WES\n' https://$hub/ga4gh/wes/v1/service-info
+nc -zv -w 5 $hub 30002
+nc -zv -w 5 $hub 8003
+```
+
+`/kits` should give 404, which comes from the WES: no such kit, but the way is open. The WES must not answer with 200 on either name: the router has no Route for it, and the address has only the FL port. The FL port only listens during a run, so 30002 can read as closed until then. 8003 must stay closed. If the FL port times out during a run although the Service has its address, look for NetworkPolicies of the project (`oc get networkpolicy`) that keep it out: by Rahti's docs, pods only talk to pods of the same project by default.
+
+**Acceptance:** a run with one site ([T8](../tests/t8-real-sites.md)) passes, `/kits` is reachable from outside, and the WES isn't.
+
+**Update or remove it** (Fish). An update restarts the pod, which forgets its runs ([H2](../testbed/shortcuts.md#h2)): check for tasks left at the sites.
+
+```fish
+helm upgrade hub charts/nvflare-wes-hub --reuse-values --set image.tag=sha-<commit>
+helm uninstall hub
+oc delete secret nvflare-wes-sites
+```
+
+After editing `sites.json`, replace the Secret and restart the pod:
+
+```fish
+oc create secret generic nvflare-wes-sites --from-file=sites.json=sites.json --dry-run=client -o yaml | oc replace -f -
+oc rollout restart deployment/hub-nvflare-wes-hub
+```
+
+To limit the FL port to the addresses of nodes, Rahti has a [NetworkPolicy with `externalTrafficPolicy: Local`](https://docs.csc.fi/cloud/rahti/configurations/loadbalancer-service/). The chart doesn't do that yet.
+
 ## What changes in the setup
 
 - A sites file holds the real TES URLs, their tokens, and the [data URLs](#the-test-set).
 - `FL_IMAGE` names the [image](#the-image), at a fixed commit.
-- `compose.hub.yaml` runs the hub alone, in place of `compose.yaml`.
+- `compose.hub.yaml` runs the hub alone, in place of `compose.yaml`; on Rahti, the chart `charts/nvflare-wes-hub` does.
 - Only for [stretch goal 2](../testbed/index.md#goals): `compose/protes.yaml` lists the real TES instances, with their `auth`.

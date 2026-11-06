@@ -112,6 +112,34 @@ jobs:
         if: always()
         run: docker compose --profile test down -v
 
+  # The chart of the hub on Rahti (`charts/nvflare-wes-hub`): lint, what it
+  # exposes and refuses, and OpenShift's schemas. No cluster
+  chart:
+    name: Chart
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.22.1
+      - name: Install kubeconform
+        env:
+          VERSION: v0.8.0
+          SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+        run: |
+          curl -fsSLo "${RUNNER_TEMP}/kubeconform.tar.gz" \
+              "https://github.com/yannh/kubeconform/releases/download/${VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${SHA256}  ${RUNNER_TEMP}/kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/kubeconform.tar.gz" -C "${RUNNER_TEMP}" kubeconform
+      # mikefarah's yq is on GitHub's Ubuntu runners
+      - name: Test chart
+        run: KUBECONFORM="${RUNNER_TEMP}/kubeconform" tests/chart.sh
+
   # The image of the participants, which real nodes pull. A sandbox image, so
   # not signed or scanned (hack H20)
   push:
@@ -155,7 +183,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [lint, docs, e2e, push]
+    needs: [lint, docs, e2e, chart, push]
     permissions: {}
     steps:
       - name: Check results of all jobs
