@@ -156,11 +156,11 @@ The chart [`charts/nvflare-wes-hub`](https://github.com/elixir-cloud-aai/nvflare
 | `ClusterIP` Service `…-wes` | The WES, inside the cluster only |
 | Route `…-kits` | `https://<kits name>/kits`, edge TLS, and no other path |
 
-The sites file comes from a Secret that you create, which isn't part of the chart. The WES is not exposed at all: reach it with `oc port-forward`, which needs no address list (in place of `WES_ALLOWED_IPS` and [#5](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/5)). The FLARE admin port stays inside the pod.
+The sites file comes from a Secret that you create, which isn't part of the chart. The WES is not exposed at all: reach it with `oc port-forward`, which needs no address list (in place of `WES_ALLOWED_IPS` and [#5](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/5)). The FLARE admin port stays inside the pod. Other pods of the same Rahti project could still reach the WES and the admin port at the pod's address, so keep the hub in a project of its own.
 
 **Before you start:**
 
-1. **An address from CSC.** Ask the [CSC Service Desk](https://docs.csc.fi/support/contact/) for one `LoadBalancer` address for your Rahti project, with the Rahti project name, the `csc_project` number, the use case (a federated learning hub for a BioHackathon sandbox, one TCP port between 30000 and 35000 for connections from compute sites) and the number of addresses: one. It can take some days.
+1. **An address from CSC.** Ask the [CSC Service Desk](https://docs.csc.fi/support/contact/), `servicedesk@csc.fi`, for one `LoadBalancer` address for your Rahti project, with the Rahti project name, the `csc_project` number, the use case (a federated learning hub for a BioHackathon sandbox, one TCP port between 30000 and 35000 for connections from compute sites) and the number of addresses: one. It can take some days.
 2. **The probe.** Find out whether tasks at the nodes may reach a port that high: [probe them](#probing-a-node) with `--fl-port 30002 --ports 8002,443`, and a listener on any machine with those ports open:
 
     ```fish
@@ -183,13 +183,16 @@ helm install hub charts/nvflare-wes-hub \
     --set image.tag=sha-<commit> \
     --set hubName=<hub name> \
     --set kitsHost=<kits name> \
-    --set flPort=30002 \
-    --set loadBalancerIP=<address from CSC>
+    --set flPort=30002
 oc rollout status deployment/hub-nvflare-wes-hub
 oc get service hub-nvflare-wes-hub-fl -o jsonpath='{.status.loadBalancer.ingress[0].ip}'; echo
+oc get ipaddresspools.metallb.io -n metallb-system <rahti project> -o jsonpath='{.metadata.annotations.ip_pairs}'; echo
+oc get route hub-nvflare-wes-hub-kits -o jsonpath='{.status.ingress[0].conditions[0].type}={.status.ingress[0].conditions[0].status}'; echo
 ```
 
-Leave out `loadBalancerIP` to let Rahti pick one of the project's addresses. The last command shows the address in use: point the `A` record of the hub's name to it. Without an address, the Service stays `<pending>`. Without the Secret, the pod waits in `ContainerCreating`.
+**Two addresses:** by the example in [Rahti's docs](https://docs.csc.fi/cloud/rahti/configurations/loadbalancer-service/), the project's pool holds internal addresses (`192.168.…`), and `ip_pairs` pairs each with a public one (`<internal> - <public>`), the one CSC tells you. The Service shows the internal one. **Point the `A` record of the hub's name to the public one**: the kits name it, and sites can't reach the internal one. With more than one address in the pool, pick one with `--set loadBalancerIP=<internal address>`, never the public one, which MetalLB can't assign. Without an address, the Service stays `<pending>`. Without the Secret, the pod waits in `ContainerCreating`.
+
+The Route must say `Admitted=True`. If another project already has its name, the router rejects it (`HostAlreadyClaimed`), and links to kits would lead to someone else's app: pick another `kitsHost`, with `helm upgrade`.
 
 | Value | Default | Meaning |
 |---|---|---|
@@ -198,7 +201,7 @@ Leave out `loadBalancerIP` to let Rahti pick one of the project's addresses. The
 | `kitsHost` | None, required | Name of the Route for `/kits`, without a scheme. Links to kits are `https://<kitsHost>/kits/…` |
 | `flPort` | `30002` | FL port, on the address and in the pod: 30000 to 35000 |
 | `flScheme` | `grpc` | `grpc`, or `http` (WebSocket, see [T7](../tests/t7-port-443.md)) |
-| `loadBalancerIP` | Empty | Address from CSC. Empty: one of the project's |
+| `loadBalancerIP` | Empty | Internal address of the project's pool (`192.168.…`), not the public one. Empty: one of the pool's |
 | `sitesSecret` | `nvflare-wes-sites` | Secret with the sites file under the key `sites.json` |
 | `resources` | 250m CPU and 1 GiB, up to 2 CPUs and 2 GiB | Requests and limits of the pod |
 
@@ -216,14 +219,14 @@ Then use `http://localhost:8080/ga4gh/wes/v1` in place of `https://<hub>/ga4gh/w
 set kits <kits name>
 set hub <hub name>
 set port 30002    # flPort
-curl -s -o /dev/null -w '%{http_code} /kits\n' https://$kits/kits/no-such-token/site-1.tgz
+curl -s -w ' %{http_code} /kits\n' https://$kits/kits/no-such-token/site-1.tgz
 curl -s -o /dev/null -w '%{http_code} WES\n' https://$kits/ga4gh/wes/v1/service-info
 curl -s -o /dev/null -w '%{http_code} WES\n' https://$hub/ga4gh/wes/v1/service-info
 nc -zv -w 5 $hub $port
 nc -zv -w 5 $hub 8003
 ```
 
-`/kits` should give 404, which comes from the WES: no such kit, but the way is open. The WES must not answer with 200 on either name: the router has no Route for it, and the address has only the FL port. The FL port only listens during a run, so it can read as closed until then. 8003 must stay closed. If the FL port times out during a run although the Service has its address, look for NetworkPolicies of the project (`oc get networkpolicy`) that keep it out: by Rahti's docs, pods only talk to pods of the same project by default.
+`/kits` should give 404 with `{"detail":"No such kit"}`, which comes from the WES: no such kit, but the way is open. The WES must not answer with 200 on either name: the router has no Route for it, and the address has only the FL port. The FL port only listens during a run, so it can read as closed until then. 8003 must stay closed. If the FL port times out during a run although the Service has its address, look for NetworkPolicies of the project (`oc get networkpolicy`) that keep it out: by Rahti's docs, pods only talk to pods of the same project by default.
 
 **Acceptance:** a run with one site ([T8](../tests/t8-real-sites.md)) passes, `/kits` is reachable from outside, and the WES isn't.
 

@@ -10,8 +10,8 @@ image:
   pullPolicy: IfNotPresent
 
 # Required: the public name of the hub (`FL_SERVER_NAME`), which goes into the
-# startup kits. A name of your own, with an `A` record to the address of the
-# `LoadBalancer`: names under `rahtiapp.fi` lead to the routers instead
+# startup kits. A name of your own, with an `A` record to the public address
+# of the `LoadBalancer`: names under `rahtiapp.fi` lead to the routers instead
 hubName: ""
 
 # Required: the name of the Route that serves `/kits`, without a scheme. It
@@ -26,8 +26,9 @@ flPort: 30002
 # `grpc`, or `http` (WebSocket): see T7 in the docs
 flScheme: grpc
 
-# The address that CSC assigned to the project, for the `LoadBalancer`.
-# Empty: MetalLB picks one of the project's addresses
+# The internal address (`192.168.…`) of the project's pool for the
+# `LoadBalancer`, which CSC translates to a public one: never the public
+# address. Empty: MetalLB picks one of the pool's
 loadBalancerIP: ""
 
 # The Secret with the sites file under the key `sites.json` (see
