@@ -804,6 +804,7 @@ def sign_csr(token: str, request: Request) -> Response:
     slot = CSR_TOKENS.get(token)
     if slot is None:
         raise HTTPException(404, "No such token")
+    CSR_TOKENS.pop(token, None)  # Deleting token on use
     run_id, site = slot
     work = BASE / run_id / "csr" / token
     work.mkdir(parents=True)
@@ -826,7 +827,6 @@ def sign_csr(token: str, request: Request) -> Response:
         text=True,
         check=True,
     )
-    CSR_TOKENS.pop(token, None)  # Deleting token on use
     if result.returncode != 0 or parse_fields(result.stdout).get("name") != site:
         raise HTTPException(400, "The request doesn't match the site of this token")
     return Response((work / "signed.zip").read_bytes(), media_type="application/zip")
