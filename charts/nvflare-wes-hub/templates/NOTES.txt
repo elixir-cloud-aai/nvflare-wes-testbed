@@ -6,10 +6,12 @@ The hub {{ .Values.hubName }} is starting. Sandbox only.
      oc get service {{ include "hub.fullname" . }}-fl -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
      oc get ipaddresspools.metallb.io -n metallb-system {{ .Release.Namespace }} -o jsonpath='{.metadata.annotations.ip_pairs}'
 
-2. Kits: https://{{ .Values.kitsHost }}/kits (only this path). The Route must
-   say Admitted=True:
+2. Kits: https://{{ .Values.kitsHost }}/kits (only this path). Certificate
+   signing requests: https://{{ .Values.kitsHost }}/sites (only this path).
+   Both Routes must say Admitted=True:
 
      oc get route {{ include "hub.fullname" . }}-kits -o jsonpath='{.status.ingress[0].conditions[0].type}={.status.ingress[0].conditions[0].status}'
+     oc get route {{ include "hub.fullname" . }}-csr -o jsonpath='{.status.ingress[0].conditions[0].type}={.status.ingress[0].conditions[0].status}'
 
 3. The WES is not exposed. Reach it with:
 

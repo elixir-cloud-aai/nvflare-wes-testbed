@@ -1,5 +1,6 @@
-# Links to kits, which nodes fetch, and nothing else of the WES: it has no
-# authentication (hack H5). Reach the WES with `oc port-forward`
+# Links to kits and to a site's certificate signing slot, which nodes fetch or
+# post to, and nothing else of the WES: it has no authentication (hack H5).
+# Reach the WES itself with `oc port-forward`.
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
@@ -9,6 +10,25 @@ metadata:
 spec:
   host: {{ .Values.kitsHost | quote }}
   path: /kits
+  to:
+    kind: Service
+    name: {{ include "hub.fullname" . }}-wes
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "hub.fullname" . }}-csr
+  labels:
+    {{- include "hub.labels" . | nindent 4 }}
+spec:
+  host: {{ .Values.kitsHost | quote }}
+  path: /sites
   to:
     kind: Service
     name: {{ include "hub.fullname" . }}-wes
