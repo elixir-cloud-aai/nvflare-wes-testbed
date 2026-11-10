@@ -86,6 +86,13 @@ services:
     command: ["python3", "/app/tests/site_config_check.py"]
     network_mode: none
 
+  # A site's CSR slot signs once, and is dead on a second try: no network needed
+  csr-token-check:
+    image: nvflare-testbed:local
+    profiles: [test]
+    command: ["python3", "/app/tests/csr_token_check.py"]
+    network_mode: none
+
 networks:
   control: {}
   site-1:
