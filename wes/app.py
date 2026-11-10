@@ -200,7 +200,9 @@ def provision_locally(run_dir: pathlib.Path, project: str, name: str, kind: str)
     """
     work = run_dir / name
     work.mkdir()
-    participant = server_participant_yaml(project, name, ORG) if kind == "server" else admin_participant_yaml(project, name, ORG)
+    participant = (
+        server_participant_yaml(project, name, ORG) if kind == "server" else admin_participant_yaml(project, name, ORG)
+    )
     (work / "participant.yaml").write_text(participant)
     subprocess.run(
         ["nvflare", "cert", "request", "--participant", "participant.yaml"],
