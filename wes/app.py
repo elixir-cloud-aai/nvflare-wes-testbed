@@ -601,6 +601,7 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
                 server.kill()
         for token in tokens:
             KITS.pop(token, None)
+            CSR_TOKENS.pop(token, None)
         for child in run_dir.iterdir():
             if child.is_dir() or child.suffix == ".tgz":
                 shutil.rmtree(child, ignore_errors=True) if child.is_dir() else child.unlink()
