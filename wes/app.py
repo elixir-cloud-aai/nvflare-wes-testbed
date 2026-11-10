@@ -787,7 +787,7 @@ def get_kit(token: str, name: str) -> FileResponse:
 
 
 @app.post("/sites/{token}/csr")
-async def sign_csr(token: str, request: Request) -> Response:
+def sign_csr(token: str, request: Request) -> Response:
     """Sign a site's certificate signing request, as this run's CA (H4).
 
     Args:
@@ -806,7 +806,7 @@ async def sign_csr(token: str, request: Request) -> Response:
     run_id, site = slot
     work = BASE / run_id / "csr" / token
     work.mkdir(parents=True)
-    (work / "request.zip").write_bytes(await request.body())
+    (work / "request.zip").write_bytes(request.body())
     result = subprocess.run(
         [
             "nvflare",
@@ -823,6 +823,7 @@ async def sign_csr(token: str, request: Request) -> Response:
         cwd=work,
         capture_output=True,
         text=True,
+        check=True,
     )
     CSR_TOKENS.pop(token, None)  # Deleting token on use
     if result.returncode != 0 or parse_fields(result.stdout).get("name") != site:
