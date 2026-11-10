@@ -81,7 +81,7 @@ def main() -> None:
             )
             check("federated model beats both local ones", done.returncode == 0, (done.stdout + done.stderr).strip())
 
-    # The kit's URL is in the record of the TES task (hack H3): it must be dead by now
+    # A client's CSR slot is in the record of its TES task (hack H3): it must be dead by now
     site_tes = {"fl-client site-1": "http://funnel-site-1:8000", "fl-client site-2": "http://funnel-site-2:8000"}
     gateway = os.environ.get("TES_GATEWAY_URL", "")
     headers = {}
@@ -99,11 +99,12 @@ def main() -> None:
             headers=headers,
             timeout=30,
         ).json()
-        kit_url = next(entry["url"] for entry in full["inputs"] if entry["name"] == "kit")
+        check(f"{task['name']} has no kit input", all(entry["name"] != "kit" for entry in full["inputs"]))
+        csr_url = full["executors"][0]["command"][4]
         # Plain HTTP on the private network of the testbed (hack H7)
         # nosemgrep: python.lang.security.audit.insecure-transport.requests.request-with-http.request-with-http
-        status = requests.get(kit_url, timeout=30).status_code
-        check(f"kit link of {task['name']} is dead after the run", status == 404, status)
+        status = requests.post(csr_url, data=b"", timeout=30).status_code
+        check(f"CSR slot of {task['name']} is dead after the run", status == 404, status)
         data_prefix = os.environ.get("EXPECTED_DATA_PREFIX", "")
         if data_prefix:
             data_url = next(entry["url"] for entry in full["inputs"] if entry["name"] == "data")
