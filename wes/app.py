@@ -835,7 +835,13 @@ async def sign_csr(token: str, request: Request) -> Response:
         cwd=work,
         check=True,
     )
-    if result.returncode != 0 or parse_fields(result.stdout.decode("utf-8")).get("name") != site:
+    fields = parse_fields(result.stdout.decode("utf-8"))
+    if (
+        result.returncode != 0
+        or fields.get("name") != site
+        or fields.get("cert_type") != "client"
+        or fields.get("cert_role") != "None"
+    ):
         raise HTTPException(400, "The request doesn't match the site of this token")
     return Response((work / "signed.zip").read_bytes(), media_type="application/zip")
 
