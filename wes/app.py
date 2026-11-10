@@ -91,6 +91,7 @@ ADMIN = "admin@testbed.invalid"
 ADMIN_PORT = 8003
 START_TIMEOUT = 180
 JOB_TIMEOUT = 600
+MAX_CSR_SIZE = 1 << 20  # a CSR package is a few KB; this just bounds memory
 TERMINAL_TES = {"COMPLETE", "EXECUTOR_ERROR", "SYSTEM_ERROR", "CANCELED", "PREEMPTED"}
 
 app = FastAPI(title="Thin WES for NVFlare (sandbox)")
@@ -800,7 +801,9 @@ async def sign_csr(token: str, request: Request) -> Response:
         The signed `*.signed.zip`, from `nvflare cert approve`.
 
     Raises:
-        HTTPException: No such token, or the request isn't that site's own.
+        HTTPException: No such token, or the request isn't that site's own: a
+            different name, a type other than a client's, or any role at all.
+            Also, a request body over `MAX_CSR_SIZE`.
     """
     slot = CSR_TOKENS.get(token)
     if slot is None:
@@ -809,7 +812,13 @@ async def sign_csr(token: str, request: Request) -> Response:
     run_id, site = slot
     work = BASE / run_id / "csr" / token
     work.mkdir(parents=True)
-    (work / "request.zip").write_bytes(await request.body())
+    size = 0
+    with (work / "request.zip").open("wb") as csr_file:
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > MAX_CSR_SIZE:
+                raise HTTPException(413, "Certificate signing request too large")
+            csr_file.write(chunk)
     result = await anyio.run_process(
         [
             "nvflare",
