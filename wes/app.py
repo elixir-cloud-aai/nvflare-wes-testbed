@@ -33,6 +33,7 @@ import time
 import uuid
 from typing import Annotated, Any
 
+import anyio
 import requests
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, Response
@@ -788,7 +789,7 @@ def get_kit(token: str, name: str) -> FileResponse:
 
 
 @app.post("/sites/{token}/csr")
-def sign_csr(token: str, request: Request) -> Response:
+async def sign_csr(token: str, request: Request) -> Response:
     """Sign a site's certificate signing request, as this run's CA (H4).
 
     Args:
@@ -808,8 +809,8 @@ def sign_csr(token: str, request: Request) -> Response:
     run_id, site = slot
     work = BASE / run_id / "csr" / token
     work.mkdir(parents=True)
-    (work / "request.zip").write_bytes(request.body())
-    result = subprocess.run(
+    (work / "request.zip").write_bytes(await request.body())
+    result = await anyio.run_process(
         [
             "nvflare",
             "cert",
@@ -823,11 +824,9 @@ def sign_csr(token: str, request: Request) -> Response:
             "signed.zip",
         ],
         cwd=work,
-        capture_output=True,
-        text=True,
         check=True,
     )
-    if result.returncode != 0 or parse_fields(result.stdout).get("name") != site:
+    if result.returncode != 0 or parse_fields(result.stdout.decode("utf-8")).get("name") != site:
         raise HTTPException(400, "The request doesn't match the site of this token")
     return Response((work / "signed.zip").read_bytes(), media_type="application/zip")
 
