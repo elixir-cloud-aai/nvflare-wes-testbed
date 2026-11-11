@@ -20,6 +20,8 @@ All of them, in one place, each with the proper way. Their numbers are referred 
 
 **The thin WES has no authentication, and one admin identity for all users.** Anyone who reaches it can start runs and download models. **Proper way:** LS Login and a real service framework (see [FOCA](https://github.com/elixir-cloud-aai/foca)), or Conquest with its planned access control, with the user's identity passed to NVFlare.
 
+**Update:** `/runs*` and `/outputs` now check a caller's bearer token against one trusted OIDC issuer (`WES_OIDC_ISSUER`), FOCA's own auth model (a trusted-issuer list, JWKS from the issuer's discovery document) borrowed without the rest of FOCA, which is Connexion on Flask and would mean leaving FastAPI. LS Login is the intended issuer for a real deployment; nothing here is specific to it. It's off unless configured, so the local sandbox stays as it was: a deliberate, named gap, not a silent one. `/service-info` stays open regardless, as a client has to discover how to authenticate before it has a token. `/kits` and `/sites/*/csr` are untouched: a different actor (a site or a task holding a one-time link, [H3](#h3)/[H4](#h4)), not a researcher with an identity. Still one admin identity for every caller: the validated identity isn't yet passed to NVFlare, so this closes "anyone can reach it," not "one identity for all users" — that part is a follow-up.
+
 ### H7
 
 **Plain HTTP between the WES, proTES and TES, in the local testbed.** Only FLARE's own connections use TLS, there. On [real sites](../setup/real-sites.md#deploying-the-hub), links to kits go over HTTPS, through a reverse proxy. **Proper way:** HTTPS everywhere, which real nodes have anyway.

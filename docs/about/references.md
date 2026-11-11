@@ -24,7 +24,7 @@
 - [proTES](https://github.com/elixir-cloud-aai/proTES): the TES gateway, used in [T4](../tests/t4-protes.md).
 - [Funnel](https://github.com/calypr/funnel): the TES used here.
 - [TESK](https://github.com/elixir-cloud-aai/TESK): a TES on Kubernetes, which real nodes may run.
-- [FOCA](https://github.com/elixir-cloud-aai/foca): the framework for services of the organization.
+- [FOCA](https://github.com/elixir-cloud-aai/foca): the framework for services of the organization. Its auth model (a trusted-issuer list, bearer JWTs checked against the issuer's JWKS) is what the WES's own gate ([H5](../testbed/shortcuts.md#h5)) is modeled on; FOCA itself is Connexion on Flask, so it wasn't adopted wholesale.
 - [Cloud Registry](https://github.com/elixir-cloud-aai/cloud-registry): a Service Registry for the nodes.
 
 ## Context
