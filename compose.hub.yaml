@@ -4,7 +4,8 @@
 #
 # The FL port goes straight to the FL server, as its TLS is mutual. The FLARE
 # admin port (8003) stays inside. The proxy lets anyone reach `/kits`, which nodes
-# need, and the WES only from `WES_ALLOWED_IPS`, as it has no authentication (H5).
+# need, and the WES only from `WES_ALLOWED_IPS` by default, as it has no
+# authentication of its own unless `WES_OIDC_ISSUER` is set (H5).
 name: nvflare-wes-hub
 
 services:
@@ -20,6 +21,9 @@ services:
       FL_SCHEME: ${FL_SCHEME:-grpc}
       FL_PORT: ${FL_PORT:-8002}
       WES_SITES_FILE: /run/secrets/sites
+      WES_OIDC_ISSUER: ${WES_OIDC_ISSUER:-}
+      WES_OIDC_AUDIENCE: ${WES_OIDC_AUDIENCE:-fl-wes}
+      WES_OIDC_ALGORITHMS: ${WES_OIDC_ALGORITHMS:-RS256}
     # The WES talks to its FL server by the name in the kits, so that name has to
     # lead back here, and not out through the public address
     extra_hosts:

@@ -31,6 +31,7 @@ echo "[ok] no Docker socket, admin port or TES in the hub's Compose file"
 "${hub[@]}" --profile test run --rm -T site-config-check
 "${hub[@]}" --profile test run --rm -T csr-token-check
 "${hub[@]}" --profile test run --rm -T fl-port-check
+"${hub[@]}" --profile test run --rm -T auth-check
 "${hub[@]}" --profile test run --rm -T e2e
 "${hub[@]}" up -d --wait proxy
 "${hub[@]}" --profile test run --rm -T proxy-check

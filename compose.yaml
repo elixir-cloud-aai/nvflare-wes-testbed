@@ -144,6 +144,13 @@ services:
     command: ["python3", "/app/tests/csr_token_check.py"]
     network_mode: none
 
+  # The WES's own OIDC gate (H5): no network needed, the JWKS client is faked
+  auth-check:
+    image: nvflare-testbed:local
+    profiles: [test]
+    command: ["python3", "/app/tests/auth_check.py"]
+    network_mode: none
+
 networks:
   control: {}
   site-1:
