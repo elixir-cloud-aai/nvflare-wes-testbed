@@ -14,8 +14,9 @@ workflow type, `NVFLARE`. For each run it:
 4. submits the FLARE job through the FLARE admin API, and waits for it;
 5. downloads the global model, shuts the federation down, deletes the CA.
 
-Every shortcut in here is listed in `docs/testbed/shortcuts.md`. No
-authentication, one run at a time, state in memory.
+Every shortcut in here is listed in `docs/testbed/shortcuts.md`. Authentication
+is OIDC bearer tokens against one trusted issuer, off unless `WES_OIDC_ISSUER`
+is set (H5); one run at a time, state in memory.
 """
 
 import errno
@@ -36,9 +37,11 @@ from collections.abc import Mapping
 from typing import Annotated, Any
 
 import anyio
+import jwt
 import requests
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, Response
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from wes import tokens
 
@@ -123,6 +126,10 @@ BIND_FAILURE = "Failed to add port"
 # What NVFlare logs for a port it did bind
 BOUND_PORT = r"added (?:secure|insecure) port at \S*:{port}\b"
 TERMINAL_TES = {"COMPLETE", "EXECUTOR_ERROR", "SYSTEM_ERROR", "CANCELED", "PREEMPTED"}
+# Empty disables auth (H5): no issuer to trust means no one this service can check
+OIDC_ISSUER = os.environ.get("WES_OIDC_ISSUER", "")
+OIDC_AUDIENCE = os.environ.get("WES_OIDC_AUDIENCE", "fl-wes")
+OIDC_ALGORITHMS = os.environ.get("WES_OIDC_ALGORITHMS", "RS256").split(",")
 
 app = FastAPI(title="Thin WES for NVFlare (sandbox)")
 RUNS: dict[str, dict[str, Any]] = {}
@@ -747,6 +754,54 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
         logger.info("Run %s: %s", run_id, final_state)
 
 
+_jwk_client: jwt.PyJWKClient | None = None
+
+
+def jwk_client() -> jwt.PyJWKClient:
+    """Get this process's JWKS client for `OIDC_ISSUER`, fetching its discovery document once.
+
+    Returns:
+        The client, caching the issuer's keys.
+    """
+    global _jwk_client
+    if _jwk_client is None:
+        discovery = requests.get(f"{OIDC_ISSUER.rstrip('/')}/.well-known/openid-configuration", timeout=10).json()
+        _jwk_client = jwt.PyJWKClient(discovery["jwks_uri"])
+    return _jwk_client
+
+
+bearer = HTTPBearer(auto_error=False)
+
+
+def authenticated(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]) -> dict[str, Any]:
+    """Check a caller's bearer token against `OIDC_ISSUER`, if one is set (H5).
+
+    Args:
+        credentials: The `Authorization` header, if the request has one.
+
+    Returns:
+        The token's claims, or an empty dict if no issuer is configured.
+
+    Raises:
+        HTTPException: An issuer is configured, and the token is missing, expired, or
+            otherwise doesn't check out against it.
+    """
+    if not OIDC_ISSUER:
+        return {}
+    if credentials is None:
+        raise HTTPException(401, "Bearer token required")
+    try:
+        key = jwk_client().get_signing_key_from_jwt(credentials.credentials).key
+        return jwt.decode(
+            credentials.credentials, key, algorithms=OIDC_ALGORITHMS, audience=OIDC_AUDIENCE, issuer=OIDC_ISSUER
+        )
+    except jwt.InvalidTokenError as error:
+        raise HTTPException(401, f"Invalid token: {error}") from None
+
+
+AUTH_DEPENDENCY = Depends(authenticated)
+
+
 @app.get("/ga4gh/wes/v1/service-info")
 def service_info() -> dict[str, Any]:
     """Describe the service.
@@ -766,7 +821,9 @@ def service_info() -> dict[str, Any]:
         "workflow_engine_versions": {"nvflare": {"workflow_engine_version": ["2.9.0"]}},
         "default_workflow_engine_parameters": [],
         "system_state_counts": {},
-        "auth_instructions_url": "https://example.org/no-auth-this-is-a-sandbox",
+        "auth_instructions_url": f"{OIDC_ISSUER.rstrip('/')}/.well-known/openid-configuration"
+        if OIDC_ISSUER
+        else "https://example.org/no-auth-this-is-a-sandbox",
         "tags": {"sites": ",".join(SITES)},
     }
 
@@ -778,6 +835,7 @@ def run_workflow(
     workflow_url: Annotated[str, Form()],
     workflow_params: Annotated[str, Form()] = "{}",
     tags: Annotated[str, Form()] = "{}",
+    _: dict[str, Any] = AUTH_DEPENDENCY,
 ) -> dict[str, str]:
     """Start a run.
 
@@ -842,7 +900,7 @@ def get_run(run_id: str) -> dict[str, Any]:
 
 
 @app.get("/ga4gh/wes/v1/runs")
-def list_runs() -> dict[str, Any]:
+def list_runs(_: Annotated[dict[str, Any], AUTH_DEPENDENCY]) -> dict[str, Any]:
     """List the runs.
 
     Returns:
@@ -852,7 +910,7 @@ def list_runs() -> dict[str, Any]:
 
 
 @app.get("/ga4gh/wes/v1/runs/{run_id}/status")
-def run_status(run_id: str) -> dict[str, str]:
+def run_status(run_id: str, _: Annotated[dict[str, Any], AUTH_DEPENDENCY]) -> dict[str, str]:
     """Get the state of a run.
 
     Args:
@@ -877,7 +935,7 @@ def task_name(task: dict[str, str]) -> str:
 
 
 @app.get("/ga4gh/wes/v1/runs/{run_id}")
-def run_log(run_id: str) -> dict[str, Any]:
+def run_log(run_id: str, _: Annotated[dict[str, Any], AUTH_DEPENDENCY]) -> dict[str, Any]:
     """Get the log of a run.
 
     Args:
@@ -982,7 +1040,7 @@ async def sign_csr(token: str, request: Request) -> Response:
 
 
 @app.get("/outputs/{run_id}/global_model.npy")
-def get_model(run_id: str) -> FileResponse:
+def get_model(run_id: str, _: Annotated[dict[str, Any], AUTH_DEPENDENCY]) -> FileResponse:
     """Serve the global model of a run.
 
     Args:
