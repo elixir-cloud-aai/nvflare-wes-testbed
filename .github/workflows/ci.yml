@@ -19,9 +19,18 @@ permissions:
 env:
   IMAGE_NAME: docker.io/${{ vars.DOCKERHUB_ORG || 'elixircloud' }}/nvflare-wes-testbed
 
+# Only a new head commit of a pull request cancels its runs in progress
+# (action `synchronize`, first attempt); runs for other actions and reruns
+# wait, so that a run on the same commit never leaves a cancelled, failed
+# `CI passed` (see "Cancelled runs" in `actions/gate/README.md` of
+# `elixir-cloud-aai/.github`). Runs for pushes get their own group, so that
+# none is dropped
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: >-
+    ${{ github.event_name == 'pull_request'
+    && github.event.action == 'synchronize'
+    && github.run_attempt == 1 }}
 
 jobs:
   # ruff, gitleaks, actionlint and file checks, through pre-commit
