@@ -93,12 +93,15 @@ ctr="${dep} | .spec.template.spec.containers[0]"
 env="${ctr} | .env[]"
 lb='select(.kind == "Service" and .spec.type == "LoadBalancer")'
 route='select(.kind == "Route")'
+fullname="${wes%-wes}"
+route_kits="select(.kind == \"Route\" and .metadata.name == \"${fullname}-kits\")"
+route_csr="select(.kind == \"Route\" and .metadata.name == \"${fullname}-csr\")"
 
 # Values other than the defaults, to see them arrive
 helm template hub "${chart}" "${args[@]}" --set flPort=30123 --set flScheme=http \
     --set loadBalancerIP=192.0.2.10 --set sitesSecret=other-sites >"${out}"
 
-expect "kinds" '[.kind] | sort | join(",")' "Deployment,Route,Service,Service"
+expect "kinds" '[.kind] | sort | join(",")' "Deployment,Route,Route,Service,Service"
 expect "no Secret in the chart" '[select(.kind == "Secret")] | length' "0"
 expect "one replica, replaced, not rolled" "${dep} | [.spec.replicas, .spec.strategy.type] | join(\" \")" "1 Recreate"
 expect "the image at its tag" "${ctr} | .image" "${image}"
@@ -133,12 +136,17 @@ expect "only one Service with an address" \
 expect "the FLARE admin port nowhere" \
     "[select(.kind == \"Service\") | .spec.ports[] | select(.port == 8003 or .targetPort == 8003)] | length" "0"
 
-expect "one Route" "[${route}] | length" "1"
-expect "Route only for /kits" "${route} | .spec.path" "/kits"
-expect "Route at the kits host" "${route} | .spec.host" "${kits}"
-expect "Route ends TLS at the router" "${route} | .spec.tls.termination" "edge"
-expect "Route redirects plain HTTP" "${route} | .spec.tls.insecureEdgeTerminationPolicy" "Redirect"
-expect "Route to the WES' Service" "${route} | .spec.to.name + \":\" + .spec.port.targetPort" "${wes}:http"
+expect "two Routes, kits and csr" "[${route}] | length" "2"
+expect "kits Route only for /kits" "${route_kits} | .spec.path" "/kits"
+expect "kits Route at the kits host" "${route_kits} | .spec.host" "${kits}"
+expect "kits Route ends TLS at the router" "${route_kits} | .spec.tls.termination" "edge"
+expect "kits Route redirects plain HTTP" "${route_kits} | .spec.tls.insecureEdgeTerminationPolicy" "Redirect"
+expect "kits Route to the WES' Service" "${route_kits} | .spec.to.name + \":\" + .spec.port.targetPort" "${wes}:http"
+expect "csr Route only for /sites" "${route_csr} | .spec.path" "/sites"
+expect "csr Route at the kits host" "${route_csr} | .spec.host" "${kits}"
+expect "csr Route ends TLS at the router" "${route_csr} | .spec.tls.termination" "edge"
+expect "csr Route redirects plain HTTP" "${route_csr} | .spec.tls.insecureEdgeTerminationPolicy" "Redirect"
+expect "csr Route to the WES' Service" "${route_csr} | .spec.to.name + \":\" + .spec.port.targetPort" "${wes}:http"
 expect "the WES' Service inside only" \
     "select(.kind == \"Service\" and .metadata.name == \"${wes}\") | .spec.type" "ClusterIP"
 
