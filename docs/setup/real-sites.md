@@ -197,6 +197,8 @@ oc get route hub-nvflare-wes-hub-kits -o jsonpath='{.status.ingress[0].condition
 
 The Route must say `Admitted=True`. If another project already has its name, the router rejects it (`HostAlreadyClaimed`), and links to kits would lead to someone else's app: pick another `kitsHost`, with `helm upgrade`.
 
+**LimitRanges:** clusters with a LimitRange may cap the ratio of a container's limit to its request (`maxLimitRequestRatio`), often at 5 for CPU, and refuse pods above it. The defaults keep the CPU limit at 5 times the request (400m, up to 2), which `tests/chart.sh` checks. To change `resources`, set requests and limits together, such as `--set resources.requests.cpu=500m --set resources.limits.cpu=2`, and keep each ratio within your cluster's: `oc describe limitrange` shows it. Above it, the ReplicaSet creates no pod, and `oc get events` names the ratio.
+
 | Value | Default | Meaning |
 |---|---|---|
 | `image.tag` | None, required | `sha-<commit>` of `dev`, for the hub and the tasks. `dev` is refused, as it moves |
@@ -208,7 +210,7 @@ The Route must say `Admitted=True`. If another project already has its name, the
 | `sitesSecret` | `nvflare-wes-sites` | Secret with the sites file under the key `sites.json` |
 | `podSecurityContext` | `runAsNonRoot: true`, `seccompProfile: {type: RuntimeDefault}` | Security context of the pod. On Rahti, `--set podSecurityContext.seccompProfile=null` |
 | `securityContext` | `allowPrivilegeEscalation: false`, all capabilities dropped | Security context of the container |
-| `resources` | 250m CPU and 1 GiB, up to 2 CPUs and 2 GiB | Requests and limits of the pod |
+| `resources` | 400m CPU and 1 GiB, up to 2 CPUs and 2 GiB | Requests and limits of the pod. The CPU limit stays at most 5 times the request (see LimitRanges above) |
 
 **Reach the WES** (Fish), in a terminal of its own, which keeps the tunnel open:
 
@@ -231,10 +233,12 @@ Every check should say `[ok]`, with a `[warn]` for the FL port outside a run: `/
 **Update or remove it** (Fish). An update restarts the pod, which forgets its runs ([H2](../testbed/shortcuts.md#h2)): check for tasks left at the sites.
 
 ```fish
-helm upgrade hub charts/nvflare-wes-hub --reuse-values --set image.tag=sha-<commit>
+helm upgrade hub charts/nvflare-wes-hub --reset-then-reuse-values --set image.tag=sha-<commit>
 helm uninstall hub
 oc delete secret nvflare-wes-sites
 ```
+
+`--reset-then-reuse-values` (Helm 3.14 or later) keeps your own values and takes up the chart's new defaults. `--reuse-values` would keep the defaults of the chart you installed: an install from before the CPU request of 400m would keep 250m.
 
 After editing `sites.json`, replace the Secret and restart the pod:
 
