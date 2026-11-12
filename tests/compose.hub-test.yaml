@@ -18,6 +18,8 @@ services:
         condition: service_healthy
       funnel-site-2:
         condition: service_healthy
+      fake-idp:
+        condition: service_started
     ports: !reset []
     environment:
       FL_IMAGE: nvflare-testbed:local
@@ -63,6 +65,7 @@ services:
     command: ["python3", "/app/tests/e2e.py"]
     environment:
       WES_URL: http://hub:8080/ga4gh/wes/v1
+      WES_OIDC_TOKEN_URL: http://fake-idp:8080/oidc/token
     depends_on:
       hub:
         condition: service_healthy
@@ -77,7 +80,8 @@ services:
     command: ["python3", "/app/tests/proxy_check.py", "${FL_SERVER_NAME}"]
     environment:
       WES_EXPECTED: ${WES_EXPECTED:-403}
-    networks: [hub]
+      WES_OIDC_TOKEN_URL: http://fake-idp:8080/oidc/token
+    networks: [hub, control]
 
   # The checks from outside of `docs/setup/real-sites.md`, with the name of the
   # hub for both names, and the proxy's test CA
@@ -114,6 +118,12 @@ services:
     profiles: [test]
     command: ["python3", "/app/tests/auth_check.py"]
     network_mode: none
+
+  # Hands access tokens to anyone, as the trusted issuer of the sandbox
+  fake-idp:
+    image: nvflare-testbed:local
+    command: ["python3", "/app/tests/fake_idp.py"]
+    networks: [control]
 
 networks:
   control: {}

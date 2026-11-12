@@ -15,8 +15,9 @@ workflow type, `NVFLARE`. For each run it:
 5. downloads the global model, shuts the federation down, deletes the CA.
 
 Every shortcut in here is listed in `docs/testbed/shortcuts.md`. Authentication
-is OIDC bearer tokens against one trusted issuer, off unless `WES_OIDC_ISSUER`
-is set (H5); one run at a time, state in memory.
+is mandatory, OIDC bearer tokens against one trusted issuer (H5); a caller
+only sees and acts on its own runs, and may also be checked against a static
+allow-list (H22). One run at a time, state in memory.
 """
 
 import errno
@@ -116,7 +117,6 @@ FL_PORT = int(os.environ.get("FL_PORT", "8002"))
 for _name in {name for source in TOKENS.values() for name in source.env_names}:
     os.environ.pop(_name, None)
 ORG = "testbed"
-ADMIN = "admin@testbed.invalid"
 ADMIN_PORT = 8003
 START_TIMEOUT = 180
 JOB_TIMEOUT = 600
@@ -126,10 +126,12 @@ BIND_FAILURE = "Failed to add port"
 # What NVFlare logs for a port it did bind
 BOUND_PORT = r"added (?:secure|insecure) port at \S*:{port}\b"
 TERMINAL_TES = {"COMPLETE", "EXECUTOR_ERROR", "SYSTEM_ERROR", "CANCELED", "PREEMPTED"}
-# Empty disables auth (H5): no issuer to trust means no one this service can check
+# Mandatory (H5): empty means no issuer is trusted, so no caller can check out
 OIDC_ISSUER = os.environ.get("WES_OIDC_ISSUER", "")
 OIDC_AUDIENCE = os.environ.get("WES_OIDC_AUDIENCE", "fl-wes")
 OIDC_ALGORITHMS = os.environ.get("WES_OIDC_ALGORITHMS", "RS256").split(",")
+# Empty allows any authenticated subject (H22): a shortcut, not group/role RBAC
+ALLOWED_SUBS = {s.strip() for s in os.environ.get("WES_OIDC_ALLOWED_SUBS", "").split(",") if s.strip()}
 
 app = FastAPI(title="Thin WES for NVFlare (sandbox)")
 RUNS: dict[str, dict[str, Any]] = {}
@@ -659,13 +661,14 @@ def cancel_tasks(run: dict[str, Any]) -> None:
                 logger.warning("Couldn't cancel the task of %s", task["site"])
 
 
-def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
+def execute(run_id: str, job_dir: pathlib.Path, sites: list[str], submitter: str) -> None:
     """Carry out a run, in the background.
 
     Args:
         run_id: Identifier of the run.
         job_dir: Directory of the FLARE job.
         sites: Names of the sites.
+        submitter: The caller's validated identity, as the FLARE admin's name.
     """
     from nvflare.fuel.flare_api.flare_api import new_secure_session
 
@@ -682,7 +685,7 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
         project = f"run{run_id[:8]}"
         fingerprint = init_ca(run_dir, project)
         server_kit = provision_locally(run_dir, project, FL_HOST, "server")
-        admin_kit = provision_locally(run_dir, project, ADMIN, "admin")
+        admin_kit = provision_locally(run_dir, project, submitter, "admin")
         if FL_SERVER_MODE == "tes":
             token, kit_url = publish_kit(server_kit, run_dir)
             slots.append(token)
@@ -704,7 +707,7 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
             )
             reply.raise_for_status()
             run["tasks"].append({"site": site, "id": reply.json()["id"], "base": base, "state": "QUEUED"})
-        session = new_secure_session(ADMIN, str(admin_kit), timeout=60)
+        session = new_secure_session(submitter, str(admin_kit), timeout=60)
         try:
             run["state"] = "RUNNING"
             wait_for_clients(session, run, sites, START_TIMEOUT)
@@ -774,20 +777,20 @@ bearer = HTTPBearer(auto_error=False)
 
 
 def authenticated(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]) -> dict[str, Any]:
-    """Check a caller's bearer token against `OIDC_ISSUER`, if one is set (H5).
+    """Check a caller's bearer token against `OIDC_ISSUER`.
 
     Args:
         credentials: The `Authorization` header, if the request has one.
 
     Returns:
-        The token's claims, or an empty dict if no issuer is configured.
+        The token's claims.
 
     Raises:
-        HTTPException: An issuer is configured, and the token is missing, expired, or
+        HTTPException: No issuer is configured, or the token is missing, expired, or
             otherwise doesn't check out against it.
     """
     if not OIDC_ISSUER:
-        return {}
+        raise HTTPException(401, "No trusted OIDC issuer is configured")
     if credentials is None:
         raise HTTPException(401, "Bearer token required")
     try:
@@ -800,6 +803,30 @@ def authenticated(credentials: Annotated[HTTPAuthorizationCredentials | None, De
 
 
 AUTH_DEPENDENCY = Depends(authenticated)
+
+
+def identity(claims: dict[str, Any] = AUTH_DEPENDENCY) -> str:
+    """The caller's identity: a token's `sub`, checked safe and, if configured, allowed (H22).
+
+    Args:
+        claims: The caller's validated claims.
+
+    Returns:
+        The identity, as the FLARE admin's name for a run it starts.
+
+    Raises:
+        HTTPException: The subject is missing or unsafe to use as a FLARE admin's
+            name, or `WES_OIDC_ALLOWED_SUBS` is set and doesn't list it.
+    """
+    sub = claims.get("sub")
+    if not sub or not re.fullmatch(r"[A-Za-z0-9._@-]{1,64}", sub):
+        raise HTTPException(400, "The subject of this token has characters that can't name a FLARE admin")
+    if ALLOWED_SUBS and sub not in ALLOWED_SUBS:
+        raise HTTPException(403, "This identity isn't allowed to use this WES")
+    return sub
+
+
+IDENTITY_DEPENDENCY = Depends(identity)
 
 
 @app.get("/ga4gh/wes/v1/service-info")
@@ -835,7 +862,7 @@ def run_workflow(
     workflow_url: Annotated[str, Form()],
     workflow_params: Annotated[str, Form()] = "{}",
     tags: Annotated[str, Form()] = "{}",
-    _: dict[str, Any] = AUTH_DEPENDENCY,
+    submitter: str = IDENTITY_DEPENDENCY,
 ) -> dict[str, str]:
     """Start a run.
 
@@ -845,6 +872,7 @@ def run_workflow(
         workflow_url: Name of a job in the image (no uploads, so no user code).
         workflow_params: JSON object, with the sites to use (`sites`).
         tags: JSON object with tags of the run.
+        submitter: The caller's identity, as its FLARE admin's name.
 
     Returns:
         The identifier of the run.
@@ -867,6 +895,7 @@ def run_workflow(
         run_id = str(uuid.uuid4())
         RUNS[run_id] = {
             "state": "QUEUED",
+            "submitter": submitter,
             "request": {
                 "workflow_type": workflow_type,
                 "workflow_type_version": workflow_type_version,
@@ -878,48 +907,61 @@ def run_workflow(
             "outputs": {},
             "start_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
-    threading.Thread(target=execute, args=(run_id, job_dir, sites), daemon=True).start()
+    threading.Thread(target=execute, args=(run_id, job_dir, sites, submitter), daemon=True).start()
     return {"run_id": run_id}
 
 
-def get_run(run_id: str) -> dict[str, Any]:
-    """Look up a run.
+def get_run(run_id: str, submitter: str) -> dict[str, Any]:
+    """Look up a run, if the caller is the one who started it.
 
     Args:
         run_id: Identifier of the run.
+        submitter: The caller's identity.
 
     Returns:
         The run.
 
     Raises:
-        HTTPException: There is no such run.
+        HTTPException: There is no such run, or it isn't this caller's own.
     """
-    if run_id not in RUNS:
+    run = RUNS.get(run_id)
+    if run is None or run["submitter"] != submitter:
         raise HTTPException(404, "No such run")
-    return RUNS[run_id]
+    return run
 
 
 @app.get("/ga4gh/wes/v1/runs")
-def list_runs(_: Annotated[dict[str, Any], AUTH_DEPENDENCY]) -> dict[str, Any]:
-    """List the runs.
+def list_runs(submitter: str = IDENTITY_DEPENDENCY) -> dict[str, Any]:
+    """List this caller's own runs.
+
+    Args:
+        submitter: The caller's identity.
 
     Returns:
         Identifiers and states of the runs.
     """
-    return {"runs": [{"run_id": key, "state": run["state"]} for key, run in RUNS.items()], "next_page_token": ""}
+    return {
+        "runs": [
+            {"run_id": key, "state": run["state"], "submitter": run["submitter"]}
+            for key, run in RUNS.items()
+            if run["submitter"] == submitter
+        ],
+        "next_page_token": "",
+    }
 
 
 @app.get("/ga4gh/wes/v1/runs/{run_id}/status")
-def run_status(run_id: str, _: Annotated[dict[str, Any], AUTH_DEPENDENCY]) -> dict[str, str]:
+def run_status(run_id: str, submitter: str = IDENTITY_DEPENDENCY) -> dict[str, str]:
     """Get the state of a run.
 
     Args:
         run_id: Identifier of the run.
+        submitter: The caller's identity.
 
     Returns:
         Identifier and state of the run.
     """
-    return {"run_id": run_id, "state": get_run(run_id)["state"]}
+    return {"run_id": run_id, "state": get_run(run_id, submitter)["state"]}
 
 
 def task_name(task: dict[str, str]) -> str:
@@ -935,19 +977,21 @@ def task_name(task: dict[str, str]) -> str:
 
 
 @app.get("/ga4gh/wes/v1/runs/{run_id}")
-def run_log(run_id: str, _: Annotated[dict[str, Any], AUTH_DEPENDENCY]) -> dict[str, Any]:
+def run_log(run_id: str, submitter: str = IDENTITY_DEPENDENCY) -> dict[str, Any]:
     """Get the log of a run.
 
     Args:
         run_id: Identifier of the run.
+        submitter: The caller's identity.
 
     Returns:
         The run log, with the TES tasks under `task_logs`.
     """
-    run = get_run(run_id)
+    run = get_run(run_id, submitter)
     return {
         "run_id": run_id,
         "state": run["state"],
+        "submitter": run["submitter"],
         "request": run["request"],
         "run_log": {
             "name": f"flare job {run.get('flare_job_id', '')}",
@@ -1040,11 +1084,12 @@ async def sign_csr(token: str, request: Request) -> Response:
 
 
 @app.get("/outputs/{run_id}/global_model.npy")
-def get_model(run_id: str, _: Annotated[dict[str, Any], AUTH_DEPENDENCY]) -> FileResponse:
+def get_model(run_id: str, submitter: str = IDENTITY_DEPENDENCY) -> FileResponse:
     """Serve the global model of a run.
 
     Args:
         run_id: Identifier of the run.
+        submitter: The caller's identity.
 
     Returns:
         The model.
@@ -1052,7 +1097,7 @@ def get_model(run_id: str, _: Annotated[dict[str, Any], AUTH_DEPENDENCY]) -> Fil
     Raises:
         HTTPException: There is no model.
     """
-    get_run(run_id)
+    get_run(run_id, submitter)
     path = BASE / run_id / "global_model.npy"
     if not path.is_file():
         raise HTTPException(404, "No model")

@@ -9,8 +9,10 @@ import tempfile
 import time
 
 import requests
+from oidc_test_token import header
 
 WES = os.environ["WES_URL"]
+AUTH = header()
 TIMEOUT = 600
 TERMINAL = {"COMPLETE", "EXECUTOR_ERROR", "SYSTEM_ERROR", "CANCELED"}
 RESULTS: list[tuple[str, bool, str]] = []
@@ -40,6 +42,7 @@ def main() -> None:
             "workflow_url": "logreg-fedavg",
             "workflow_params": json.dumps({"sites": ["site-1", "site-2"]}),
         },
+        headers=AUTH,
         timeout=30,
     )
     reply.raise_for_status()
@@ -49,14 +52,14 @@ def main() -> None:
     start = time.monotonic()
     state = ""
     while time.monotonic() - start < TIMEOUT:
-        new = requests.get(f"{WES}/runs/{run_id}/status", timeout=30).json()["state"]
+        new = requests.get(f"{WES}/runs/{run_id}/status", headers=AUTH, timeout=30).json()["state"]
         if new != state:
             state = new
             print(f"{time.monotonic() - start:5.0f} s  {state}", flush=True)
         if state in TERMINAL:
             break
         time.sleep(2)
-    log = requests.get(f"{WES}/runs/{run_id}", timeout=30).json()
+    log = requests.get(f"{WES}/runs/{run_id}", headers=AUTH, timeout=30).json()
     print(json.dumps(log, indent=2), flush=True)
     check("run is COMPLETE", state == "COMPLETE", state)
     check("FLARE job finished", log["outputs"].get("flare_job_status") == "FINISHED:COMPLETED", log["outputs"])
@@ -65,9 +68,10 @@ def main() -> None:
         len(log["task_logs"]) >= 2 and all(t["system_logs"] == ["COMPLETE"] for t in log["task_logs"]),
         [(t["name"], t["system_logs"]) for t in log["task_logs"]],
     )
+    check("run log names its submitter", log["submitter"] == "researcher-1", log["submitter"])
 
     base = WES.split("/ga4gh")[0]
-    model = requests.get(f"{base}/outputs/{run_id}/global_model.npy", timeout=30)
+    model = requests.get(f"{base}/outputs/{run_id}/global_model.npy", headers=AUTH, timeout=30)
     check("global model can be downloaded", model.status_code == 200, f"{len(model.content)} bytes")
     if model.status_code == 200:
         with tempfile.TemporaryDirectory() as tmp:

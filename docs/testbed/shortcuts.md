@@ -22,6 +22,18 @@ All of them, in one place, each with the proper way. Their numbers are referred 
 
 **Update:** `/runs*` and `/outputs` now check a caller's bearer token against one trusted OIDC issuer (`WES_OIDC_ISSUER`), FOCA's own auth model (a trusted-issuer list, JWKS from the issuer's discovery document) borrowed without the rest of FOCA, which is Connexion on Flask and would mean leaving FastAPI. LS Login is the intended issuer for a real deployment; nothing here is specific to it. It's off unless configured, so the local sandbox stays as it was: a deliberate, named gap, not a silent one. `/service-info` stays open regardless, as a client has to discover how to authenticate before it has a token. `/kits` and `/sites/*/csr` are untouched: a different actor (a site or a task holding a one-time link, [H3](#h3)/[H4](#h4)), not a researcher with an identity. Still one admin identity for every caller: the validated identity isn't yet passed to NVFlare, so this closes "anyone can reach it," not "one identity for all users" — that part is a follow-up.
 
+**Update:** the gate is mandatory now, with no unconfigured bypass: a run can't start without a trusted issuer and a valid token, in the sandbox too (`compose.yaml` always runs the fake identity provider of [H10](#h10)). And the caller's identity does now reach NVFlare: the FLARE admin for a run is provisioned under the token's `sub`, not a fixed `admin@testbed.invalid`, so FLARE's own session is the real caller, not a shared one. NVFlare 2.9.0 has no other way to take an externally-authenticated identity: its admin API only ever checks a certificate, its SSO model (an identity-provider-backed CA such as `step-ca`) isn't in this release, and Multi-Study Support only manages study membership for an identity that already has one. Role stays a shortcut: every caller still gets `lead`, fixed, with no mapping from a claim to FLARE's other roles.
+
+**Update:** `WES_OIDC_ISSUER` and `WES_OIDC_AUDIENCE` are each one value: this WES trusts exactly one issuer, for exactly one registered client. A deployment serving more than one IdP, or more than one consortium with its own client registration, needs a redeploy to switch, not a config change at run time.
+
+### H22
+
+**Authorization is a static allow-list, not real access control.** `WES_OIDC_ALLOWED_SUBS`, if set, limits who may use the WES to a fixed list of token subjects; unset, any caller the trusted issuer ([H5](#h5)) vouches for is allowed, with no way to tell a federation's own researchers from anyone else with an account at the same issuer. There's no group, role or study membership behind it, and no connection to NVFlare's own roles ([H5](#h5)'s `lead`, fixed for everyone). **Proper way:** a claim or group check (e.g. against the issuer's `/userinfo`, at the cost of a network call per request), or NVFlare's own Multi-Study Support, if the provisioning flow here ever supports it.
+
+### H23
+
+**No rate limiting anywhere.** Not at the WES, not at the reverse proxy: any authenticated caller can submit requests as fast as it likes. The one-run-at-a-time lock ([H2](#h2)) keeps a flood of `POST /runs` cheap to refuse, but every gated request still costs a signature verification that didn't exist before the OIDC gate ([H5](#h5)) — a cost an attacker can spend at will, with nothing to slow them down. **Proper way:** rate limiting at the proxy or the WES, per subject or per address.
+
 ### H7
 
 **Plain HTTP between the WES, proTES and TES, in the local testbed.** Only FLARE's own connections use TLS, there. On [real sites](../setup/real-sites.md#deploying-the-hub), links to kits go over HTTPS, through a reverse proxy. **Proper way:** HTTPS everywhere, which real nodes have anyway.
@@ -43,6 +55,8 @@ All of them, in one place, each with the proper way. Their numbers are referred 
 ### H2
 
 **One run at a time, all state in memory, no restart.** Ports are fixed, so a second server wouldn't fit, and a restart forgets runs. **Proper way:** a database and a queue, as in any real WES, and a port per run or one long-running server.
+
+**Update:** now that starting a run needs an identity ([H5](#h5)), the single run slot is also a way for one authenticated caller to shut everyone else out: resubmit the instant each run ends, and no one else ever gets a turn. There's no cancel or evict endpoint to recover the slot from them either. A queue (above) would fix the starvation; a cancel endpoint would at least let an operator recover without a restart.
 
 ### H6
 

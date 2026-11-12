@@ -15,7 +15,7 @@
 | [T6 Losing a site](t6-site-loss.md) | A run fails soon and cleanly if a client dies | Local | Yes |
 | [T7 Only port 443](t7-port-443.md) | Works with a port that's more often open | Local | No |
 | [T8 Real sites](t8-real-sites.md) | The direct run, on real nodes. Conquest and proTES are [tracked separately](../testbed/index.md#goals) | Event | No |
-| [T9 The WES's OIDC gate](t9-auth.md) | The WES refuses a caller with no token, once an issuer is configured ([H5](../testbed/shortcuts.md#h5)) | Local | No (opt-in) |
+| [T9 The WES's OIDC gate](t9-auth.md) | The WES refuses a caller with no token; every run needs one, mandatory ([H5](../testbed/shortcuts.md#h5)) | Local | Yes |
 
 ## Order for a live session
 

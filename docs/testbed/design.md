@@ -28,8 +28,8 @@ flowchart LR
 
 ## One run
 
-1. **Request:** `POST /ga4gh/wes/v1/runs` with `workflow_type=NVFLARE`, `workflow_url=logreg-fedavg`, and optional `workflow_params` naming the sites.
-2. **Federation:** the WES writes a `project_profile.yaml`, and runs `nvflare cert init`: a new root CA for this run alone. It then provisions the server and an admin itself, through `nvflare cert request`, `approve` and `package` run locally, one after another.
+1. **Request:** `POST /ga4gh/wes/v1/runs`, with a bearer token from the trusted OIDC issuer (`WES_OIDC_ISSUER`), and `workflow_type=NVFLARE`, `workflow_url=logreg-fedavg`, and optional `workflow_params` naming the sites.
+2. **Federation:** the WES writes a `project_profile.yaml`, and runs `nvflare cert init`: a new root CA for this run alone. It then provisions the server and an admin itself, through `nvflare cert request`, `approve` and `package` run locally, one after another, the admin named after the caller's validated identity (its token's `sub`).
 3. **Server:** the WES starts it as a child process, and waits for its admin port.
 4. **Clients:** per site, the WES submits a TES task with one input, the data, by a URL that only resolves at the site, and a one-time link to sign a certificate (`/sites/{token}/csr`). The task goes straight to the TES of the site. Only through proTES (`TES_GATEWAY_URL` set), the tag `gateway.backends` pins it there.
 5. **Join:** Funnel fetches the data, and starts the image. The client makes its own key, sends the WES a signing request over its one-time link, and finishes provisioning itself with the certificate that comes back, checking the CA's fingerprint out of band first. It then dials out to `fl-hub:8002`, and blocks. The WES waits until all sites are registered, or a task has ended early.

@@ -10,6 +10,8 @@ export HUB_TLS="tls internal"
 export WES_SITES_FILE=tests/sites.hub-test.json
 # Nodes here can't check the certificate of `tls internal`, so kits go over HTTP
 export WES_INTERNAL_URL="http://${FL_SERVER_NAME}:8080"
+# Auth is mandatory, so the hub needs a trusted issuer: the fake identity provider
+export WES_OIDC_ISSUER=http://fake-idp:8080/oidc/
 hub=(docker compose -f compose.hub.yaml -f tests/compose.hub-test.yaml --project-directory .)
 trap '"${hub[@]}" --profile test down -v' EXIT
 

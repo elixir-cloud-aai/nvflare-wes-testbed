@@ -45,14 +45,6 @@ services:
     healthcheck:
       disable: true
 
-  fake-idp:
-    image: nvflare-testbed:local
-    command: ["python3", "/app/tests/fake_idp.py"]
-    depends_on:
-      flare-image:
-        condition: service_completed_successfully
-    networks: [control]
-
   mongodb:
     image: mongo:7.0
     healthcheck:

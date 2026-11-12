@@ -1,4 +1,4 @@
-"""Check the WES's own OIDC bearer-token gate: on, off, and a few bad tokens (H5)."""
+"""Check the WES's OIDC gate, its allow-list, and that a caller only sees its own runs (H5, H22)."""
 
 import os
 import sys
@@ -69,7 +69,7 @@ def bearer(value: str) -> HTTPAuthorizationCredentials:
 
 
 def main() -> None:
-    """Check the gate with a valid token, no token, a few bad tokens, and no issuer."""
+    """Check the gate with a valid token, no token, a few bad tokens, and no issuer configured."""
     with tempfile.TemporaryDirectory() as base:
         os.environ["WES_WORKDIR"] = base
         os.environ["WES_OIDC_ISSUER"] = "https://issuer.test/"
@@ -99,8 +99,39 @@ def main() -> None:
             "the wrong issuer is rejected": status(bearer(token(key, **{**good, "iss": "https://else.test/"}))) == 401,
             "an expired token is rejected": status(bearer(token(key, **{**good, "exp": now - 1}))) == 401,
         }
+
+        def id_status(claims: dict[str, object]) -> int:
+            try:
+                wes.identity(claims)
+            except HTTPException as error:
+                return error.status_code
+            return 200
+
+        checks["a safe subject is accepted"] = id_status({"sub": "researcher-1"}) == 200
+        checks["a missing subject is rejected"] = id_status({}) == 400
+        checks["an unsafe subject is rejected"] = id_status({"sub": "not a safe name!"}) == 400
+        wes.ALLOWED_SUBS = {"researcher-1"}
+        checks["an allowed subject is accepted"] = id_status({"sub": "researcher-1"}) == 200
+        checks["a disallowed subject is rejected"] = id_status({"sub": "someone-else"}) == 403
+        wes.ALLOWED_SUBS = set()
+
+        def run_status(run_id: str, caller: str) -> int:
+            try:
+                wes.get_run(run_id, caller)
+            except HTTPException as error:
+                return error.status_code
+            return 200
+
+        wes.RUNS["run-a"] = {"state": "COMPLETE", "submitter": "researcher-1"}
+        runs_as_owner = {r["run_id"] for r in wes.list_runs(identity="researcher-1")["runs"]}
+        runs_as_other = {r["run_id"] for r in wes.list_runs(identity="someone-else")["runs"]}
+        checks["the owner's run list includes it"] = "run-a" in runs_as_owner
+        checks["someone else's run list doesn't"] = "run-a" not in runs_as_other
+        checks["the owner can fetch it"] = run_status("run-a", "researcher-1") == 200
+        checks["someone else gets 404, not a peek"] = run_status("run-a", "someone-else") == 404
+
         wes.OIDC_ISSUER = ""
-        checks["no issuer configured lets any caller through"] = wes.authenticated(None) == {}
+        checks["no issuer configured is itself rejected"] = status(None) == 401
 
     for name, passed in checks.items():
         print(f"[{'ok' if passed else 'FAIL'}] {name}")

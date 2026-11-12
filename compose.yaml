@@ -40,6 +40,8 @@ services:
         condition: service_healthy
       funnel-site-2:
         condition: service_healthy
+      fake-idp:
+        condition: service_started
     environment:
       FL_SCHEME: ${FL_SCHEME:-grpc}
       FL_PORT: ${FL_PORT:-8002}
@@ -48,6 +50,9 @@ services:
       WES_SITES: >-
         {"site-1": {"tes": "http://funnel-site-1:8000", "data": "file:///data/site-1.csv"},
         "site-2": {"tes": "http://funnel-site-2:8000", "data": "file:///data/site-2.csv"}}
+      # Fake identity provider for the sandbox
+      WES_OIDC_ISSUER: http://fake-idp:8080/oidc/
+      WES_OIDC_TOKEN_URL: http://fake-idp:8080/oidc/token
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://localhost:8080/ga4gh/wes/v1/service-info')"]
       interval: 3s
@@ -83,6 +88,7 @@ services:
         condition: service_healthy
     environment:
       WES_URL: http://fl-hub:8080/ga4gh/wes/v1
+      WES_OIDC_TOKEN_URL: http://fake-idp:8080/oidc/token
     volumes:
       # Only to compare with models trained at one site alone: the user has no
       # business reading site data in real life (hack H12)
@@ -150,6 +156,28 @@ services:
     profiles: [test]
     command: ["python3", "/app/tests/auth_check.py"]
     network_mode: none
+
+  # The same gate, over real HTTP, through the fake identity provider (H5)
+  auth-e2e-check:
+    image: nvflare-testbed:local
+    profiles: [test]
+    command: ["python3", "/app/tests/auth_e2e_check.py"]
+    environment:
+      WES_URL: http://fl-hub:8080/ga4gh/wes/v1
+      WES_OIDC_TOKEN_URL: http://fake-idp:8080/oidc/token
+    depends_on:
+      fl-hub:
+        condition: service_healthy
+    networks: [control]
+
+  # Hands access tokens to anyone, as the trusted issuer of the sandbox (H5, H10)
+  fake-idp:
+    image: nvflare-testbed:local
+    command: ["python3", "/app/tests/fake_idp.py"]
+    depends_on:
+      flare-image:
+        condition: service_completed_successfully
+    networks: [control]
 
 networks:
   control: {}

@@ -2,7 +2,7 @@
 
 ## Description
 
-As [T2](t2-wes-to-tes.md), with the WES set to check a caller's bearer token against a trusted issuer ([H5](../testbed/shortcuts.md#h5)), here [proTES's fake identity provider](../testbed/shortcuts.md#h10) standing in for one. `WES_OIDC_ISSUER` and `WES_OIDC_AUDIENCE` turn the gate on; it's off by default, so this is opt-in, like [T4](t4-protes.md).
+As [T2](t2-wes-to-tes.md), with the WES checking every caller's bearer token against a trusted issuer ([H5](../testbed/shortcuts.md#h5)): mandatory, with no local-only bypass. `compose.yaml` always includes a fake identity provider (the same one [H10](../testbed/shortcuts.md#h10) uses for proTES), so this runs with no extra setup, unlike [T4](t4-protes.md).
 
 ## Expectations
 
@@ -10,14 +10,14 @@ As [T2](t2-wes-to-tes.md), with the WES set to check a caller's bearer token aga
 2. The same, with a token the fake identity provider issued: `200`.
 3. `GET /ga4gh/wes/v1/service-info` without a token: `200` (a client has to be able to discover how to authenticate before it has a token).
 
-Claim mismatches (wrong audience, issuer, signature, an expired token) are checked separately, against a fake key with no network at all, by `tests/auth_check.py` (run through `tests/hub.sh`, and in CI).
+Claim mismatches (wrong audience, issuer, signature, an expired token) are checked separately, against a fake key with no network at all, by `tests/auth_check.py` (run through `tests/hub.sh`, and in CI). T2 itself also checks that a completed run's log names its submitter.
 
 ## Steps
 
 ```sh
-docker compose -f compose.yaml -f compose.auth.yaml --profile test build
-docker compose -f compose.yaml -f compose.auth.yaml --profile test run --rm auth-e2e-check
-docker compose -f compose.yaml -f compose.auth.yaml --profile test down -v
+docker compose --profile test build
+docker compose --profile test run --rm auth-e2e-check
+docker compose --profile test down -v
 ```
 
 ## Questions it answers

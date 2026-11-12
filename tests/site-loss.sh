@@ -5,14 +5,16 @@ set -euo pipefail
 
 wes() {
     docker compose exec -T fl-hub python3 -c "
-import sys, requests
+import os, sys, requests
 base = 'http://localhost:8080/ga4gh/wes/v1'
+token = requests.get(os.environ['WES_OIDC_TOKEN_URL'], params={'sub': 'researcher-1'}).json()['access_token']
+auth = {'Authorization': f'Bearer {token}'}
 if sys.argv[1] == 'submit':
     print(requests.post(f'{base}/runs', data={
         'workflow_type': 'NVFLARE', 'workflow_type_version': '2.9',
-        'workflow_url': 'logreg-fedavg'}).json()['run_id'])
+        'workflow_url': 'logreg-fedavg'}, headers=auth).json()['run_id'])
 else:
-    print(requests.get(f'{base}/runs/{sys.argv[2]}').text)
+    print(requests.get(f'{base}/runs/{sys.argv[2]}', headers=auth).text)
 " "$@"
 }
 

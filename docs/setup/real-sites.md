@@ -5,7 +5,7 @@
 
 ## What the hub needs
 
-A public address, with these open: the FL port, straight through to the FL server, as its TLS is mutual, and HTTPS for the links to kits, which nodes fetch. It needs a stable name, set in `FL_SERVER_NAME`: the kits contain it. The WES has no authentication of its own by default ([H5](../testbed/shortcuts.md#h5)); set `WES_OIDC_ISSUER` (and, if it differs from the default `fl-wes`, `WES_OIDC_AUDIENCE`) to check callers against a trusted OIDC issuer, such as LS Login, instead of only restricting addresses. Either way, only some addresses may reach `/ga4gh/wes/v1`, and `/kits` stays open for nodes.
+A public address, with these open: the FL port, straight through to the FL server, as its TLS is mutual, and HTTPS for the links to kits, which nodes fetch. It needs a stable name, set in `FL_SERVER_NAME`: the kits contain it. The WES itself checks every caller against a trusted OIDC issuer, such as LS Login, mandatory, with no local-only bypass ([H5](../testbed/shortcuts.md#h5)): set `WES_OIDC_ISSUER`, and `WES_OIDC_AUDIENCE` if it differs from the default `fl-wes`. Only some addresses may also reach `/ga4gh/wes/v1`, and `/kits` stays open for nodes.
 
 See [Deploying the hub](#deploying-the-hub) for where it goes, and how.
 
@@ -138,9 +138,10 @@ Caddy gets a certificate for that name, which needs ports 80 and 443 reachable. 
 | `FL_IMAGE` | `elixircloud/nvflare-wes-testbed:dev` | Image of the hub and the tasks. Use `sha-<commit>` |
 | `FL_PORT`, `FL_SCHEME` | `8002`, `grpc` | FL port. For 443, use `http`: see [T7](../tests/t7-port-443.md) |
 | `WES_ALLOWED_IPS` | `127.0.0.1` | Addresses or ranges that reach the WES, separated by spaces |
-| `WES_OIDC_ISSUER` | None, auth off | Trusted OIDC issuer, e.g. LS Login's. `/runs*` and `/outputs` then need a bearer token it issued ([H5](../testbed/shortcuts.md#h5)) |
+| `WES_OIDC_ISSUER` | None, required | Trusted OIDC issuer, e.g. LS Login's. `/runs*` and `/outputs` need a bearer token it issued; there's no way to start a run without one ([H5](../testbed/shortcuts.md#h5)) |
 | `WES_OIDC_AUDIENCE` | `fl-wes` | The `aud` a token must carry, matching this deployment's registration at the issuer |
 | `WES_OIDC_ALGORITHMS` | `RS256` | Signing algorithms accepted from the issuer, comma-separated |
+| `WES_OIDC_ALLOWED_SUBS` | None, any caller | Subjects allowed to use the WES, comma-separated; a static allow-list, not real access control ([H22](../testbed/shortcuts.md#h22)) |
 | `WES_INTERNAL_URL` | `https://<FL_SERVER_NAME>` | Base of the links to kits. Keep it `https`, as kits hold private keys |
 | `WES_SITES_FILE` | `./sites.json` | The sites file: name, `tes` and `data`. Add a [token source](#tokens-for-the-tes-of-the-sites) for a TES that needs one, which must then be at an `https` URL |
 | `HUB_HTTPS_PORT` | `443` | Another port for HTTPS, if the FL port is 443. Then set `WES_INTERNAL_URL` to match, and Let's Encrypt still needs port 80. The redirect from HTTP still points to 443, so use the `https` URL with its port |
