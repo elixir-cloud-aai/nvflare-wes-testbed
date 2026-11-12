@@ -140,7 +140,7 @@ Caddy gets a certificate for that name, which needs ports 80 and 443 reachable. 
 | `WES_SITES_FILE` | `./sites.json` | The sites file: name, `tes` and `data`. Add `token` for a TES that needs one, which must then be at an `https` URL |
 | `HUB_HTTPS_PORT` | `443` | Another port for HTTPS, if the FL port is 443. Then set `WES_INTERNAL_URL` to match, and Let's Encrypt still needs port 80. The redirect from HTTP still points to 443, so use the `https` URL with its port |
 
-Tokens in the sites file stay out of task records and logs, and the file stays out of Git and of the image. To check the setup, run the [probe](#probing-a-node), then a run with one site ([T8](../tests/t8-real-sites.md)).
+Tokens in the sites file stay out of task records and logs, and the file stays out of Git and of the image. To check the setup, run the [checks from outside](#checking-the-hub-from-outside) from a machine that isn't in `WES_ALLOWED_IPS`, with the name of the hub for both names, as `python3 tests/outside_check.py <hub> <hub>` (`<hub>:<HUB_HTTPS_PORT>` as the second with another port for HTTPS, and `--fl-port` with another FL port); then the [probe](#probing-a-node), then a run with one site ([T8](../tests/t8-real-sites.md)).
 
 ### Running it on Rahti
 
@@ -218,20 +218,13 @@ oc port-forward service/hub-nvflare-wes-hub-wes 8080:8080
 
 Then use `http://localhost:8080/ga4gh/wes/v1` in place of `https://<hub>/ga4gh/wes/v1`, for example in [T8](../tests/t8-real-sites.md). A run goes on in the pod if the tunnel drops.
 
-**Check from outside** (Fish), from a machine outside Rahti:
+**Check from outside**, from a machine outside Rahti, with `flPort` as the FL port (see [Checking the hub from outside](#checking-the-hub-from-outside)):
 
-```fish
-set kits <kits name>
-set hub <hub name>
-set port 30002    # flPort
-curl -s -w ' %{http_code} /kits\n' https://$kits/kits/no-such-token/site-1.tgz
-curl -s -o /dev/null -w '%{http_code} WES\n' https://$kits/ga4gh/wes/v1/service-info
-curl -s -o /dev/null -w '%{http_code} WES\n' https://$hub/ga4gh/wes/v1/service-info
-nc -zv -w 5 $hub $port
-nc -zv -w 5 $hub 8003
+```sh
+python3 tests/outside_check.py --fl-port 30002 <hub name> <kits name>
 ```
 
-`/kits` should give 404 with `{"detail":"No such kit"}`, which comes from the WES: no such kit, but the way is open. The WES must not answer with 200 on either name: the router has no Route for it, and the address has only the FL port. The FL port only listens during a run, so it can read as closed until then. 8003 must stay closed. If the FL port times out during a run although the Service has its address, look for NetworkPolicies of the project (`oc get networkpolicy`) that keep it out: by Rahti's docs, pods only talk to pods of the same project by default.
+The WES must not answer with 200 on either name: the router has no Route for it, and the address has only the FL port. If the FL port times out during a run although the Service has its address, look for NetworkPolicies of the project (`oc get networkpolicy`) that keep it out: by Rahti's docs, pods only talk to pods of the same project by default.
 
 **Acceptance:** a run with one site ([T8](../tests/t8-real-sites.md)) passes, `/kits` is reachable from outside, and the WES isn't.
 
@@ -251,6 +244,24 @@ oc rollout restart deployment/hub-nvflare-wes-hub
 ```
 
 To limit the FL port to the addresses of nodes, Rahti has a [NetworkPolicy with `externalTrafficPolicy: Local`](https://docs.csc.fi/cloud/rahti/configurations/loadbalancer-service/). The chart doesn't do that yet.
+
+### Checking the hub from outside
+
+`tests/outside_check.py` checks a deployed hub as a node, or anyone on the internet, sees it. Run it from a machine outside the hub's network that isn't in `WES_ALLOWED_IPS`, with Python 3.12 or later and a clone of this repository; it needs nothing beyond the standard library. It takes the hub's name, as in the kits, and the host that serves `/kits` and `/sites`: with Compose, both are `FL_SERVER_NAME`.
+
+```sh
+python3 tests/outside_check.py [--fl-port <port>] [--during-run] <hub name> <kits host>
+```
+
+| Check | Passes when |
+|---|---|
+| `GET /kits/no-such-token/site-1.tgz` at the kits host | 404 `No such kit`, from the WES: no such kit, but the way is open. A 404 or 503 of a router or proxy fails |
+| `POST /sites/no-such-token/csr` at the kits host | 404 `No such token`, from the WES |
+| `GET /ga4gh/wes/v1/service-info` at both names | Anything but 200, including no answer. Certificates aren't checked here, as any answer counts |
+| FL port at the hub's name (`--fl-port`, default 8002) | Open. It only listens during a run, so a closed one is a warning; with `--during-run`, a failure |
+| FLARE admin port at the hub's name (`--admin-port`, default 8003) | Closed |
+
+It prints a line for each check, `[ok]`, `[warn]` or `[FAIL]`, and ends with 1 if any failed. `--insecure` skips checking certificates, for a hub with a test certificate, as in `tests/hub.sh`; `--help` lists all options. Without a clone, it's in the [image](#the-image): `docker run --rm elixircloud/nvflare-wes-testbed:sha-<commit> python3 /app/tests/outside_check.py …`. CI runs it against the hub of `tests/hub.sh`, and its unit tests (`python3 tests/outside_check_test.py`).
 
 ## What changes in the setup
 
