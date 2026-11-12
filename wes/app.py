@@ -76,19 +76,27 @@ def load_sites(
     if "server" in sites:
         raise ValueError("A site can't be named server")
     sources: dict[str, tokens.TokenSource] = {}
+    refresh_tokens: dict[str, str] = {}
     for name, site in sites.items():
         source = tokens.from_site(name, site, environ)
         if source is None:
             continue
         if not str(site.get("tes", "")).startswith("https://"):
             raise ValueError(f"The token of site {name} only goes to a TES over https")
+        # Each source renews on its own: with a provider that rotates refresh tokens, a shared one
+        # would be spent by one site and refused (or the whole family revoked) for the other
+        variable = site.get("oauth", {}).get("refresh_token_env")
+        if variable in refresh_tokens:
+            raise ValueError(f"Sites {refresh_tokens[variable]} and {name} share the refresh token in {variable}")
+        if variable:
+            refresh_tokens[variable] = name
         sources[name] = source
     return sites, sources
 
 
 SITES, TOKENS = load_sites(pathlib.Path(SITES_FILE).read_text() if SITES_FILE else os.environ.get("WES_SITES", "{}"))
 # The sources hold the secrets now: child processes (`nvflare`, the FL server) don't inherit them
-for _name in {name for source in TOKENS.values() for name in getattr(source, "env_names", ())}:
+for _name in {name for source in TOKENS.values() for name in source.env_names}:
     os.environ.pop(_name, None)
 # If set, tasks go to this gateway (proTES), pinned to the TES of the site by tag
 TES_GATEWAY = os.environ.get("TES_GATEWAY_URL", "")
@@ -387,7 +395,12 @@ def tes_request(method: str, site: str, url: str, **kwargs: Any) -> requests.Res
     if reply.status_code == 401 and source is not None and source.renewable:
         logger.info("TES of %s refused the token, renewing it", site)
         source.invalidate(headers.get("Authorization", "").removeprefix("Bearer "))
-        renewed = tes_headers(site)
+        try:
+            renewed = tes_headers(site)
+        except tokens.TokenError as error:
+            # The refusal stands, as for a token that can't be renewed
+            logger.warning("Couldn't renew the token of %s: %s", site, error)
+            return reply
         if renewed != headers:
             reply = requests.request(method, url, headers=renewed, **kwargs)
     return reply

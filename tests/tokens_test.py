@@ -121,7 +121,7 @@ def provider() -> Iterator[Provider]:
     handler = type("BoundHandler", (Handler,), {"provider": state})
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     state.issuer = f"http://127.0.0.1:{server.server_address[1]}/realm"
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
     thread.start()
     try:
         yield state
@@ -426,6 +426,50 @@ class OAuthTokenTest(unittest.TestCase):
             state.status = 200
             clock.now += tokens.RETRY_AFTER
             self.assertEqual(source.token(), "access-5")
+
+    def test_slow_failure(self) -> None:
+        """The wait after a failed renewal counts from the failure, so a provider that times out isn't asked each call."""
+        clock = Clock()
+
+        class Hanging:
+            """A provider that answers nothing, after the timeout."""
+
+            calls = 0
+
+            def get_json(self, url: str) -> tuple[int, Any]:
+                """Time out.
+
+                Args:
+                    url: Unused.
+
+                Raises:
+                    TokenError: Always, after the timeout.
+                """
+                Hanging.calls += 1
+                clock.now += tokens.TIMEOUT
+                raise tokens.TokenError("No response")
+
+            def post_form(self, url: str, form: Any, headers: Any) -> tuple[int, Any]:
+                """Never called: discovery fails first.
+
+                Args:
+                    url: Unused.
+                    form: Unused.
+                    headers: Unused.
+
+                Raises:
+                    AssertionError: Always.
+                """
+                raise AssertionError("no discovery, no token endpoint")
+
+        source = tokens.OAuthToken(
+            "site-1", oauth("https://login.example.org/realm"), ENVIRON, http=Hanging(), clock=clock
+        )
+        for _ in range(3):
+            with self.assertRaises(tokens.TokenError):
+                source.token()
+            clock.now += 2
+        self.assertEqual(Hanging.calls, 1)
 
     def test_malformed_replies(self) -> None:
         """A reply that isn't HTTP, or JSON nested too deep, fails as a `TokenError`."""

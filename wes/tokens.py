@@ -198,6 +198,8 @@ class TokenSource(Protocol):
 
     #: Whether `invalidate` can lead to another token, so that a `401` is worth a retry
     renewable: bool
+    #: Names of the environment variables with its secrets, which the caller may drop from the environment
+    env_names: tuple[str, ...]
 
     def token(self) -> str:
         """Get a token that is valid now.
@@ -221,6 +223,7 @@ class StaticToken:
     """One token, as it is, from the sites file."""
 
     renewable = False
+    env_names: tuple[str, ...] = ()
 
     def __init__(self, site: str, token: str) -> None:
         """Check the token.
@@ -257,6 +260,7 @@ class FileToken:
     """A token in a file, read before each request."""
 
     renewable = True
+    env_names: tuple[str, ...] = ()
 
     def __init__(self, site: str, path: str) -> None:
         """Check that the file can be read.
@@ -500,7 +504,8 @@ class OAuthToken:
             try:
                 self._request()
             except TokenError:
-                self._retry_at = now + RETRY_AFTER
+                # From when it failed: a provider that times out takes about as long
+                self._retry_at = self._clock() + RETRY_AFTER
                 if usable:
                     return self._token
                 raise

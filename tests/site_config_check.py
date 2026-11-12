@@ -51,8 +51,7 @@ def main() -> None:
         from wes import app as wes
 
         secret_dropped = "SITE_REFRESH_TOKEN" not in os.environ
-        # A token of the provider, refused by the TES of site 4, which then takes the next one
-        wes.tokens.MIN_RENEW_INTERVAL = 0
+        url_4 = "https://tes.site-4.example.org/tasks"
         oauth_seen: list[str] = []
 
         def tes_4(method: str, url: str, headers: dict[str, str], **kwargs: Any) -> FakeResponse:
@@ -60,13 +59,24 @@ def main() -> None:
             return FakeResponse(200 if headers.get("Authorization") == "Bearer access-2" else 401)
 
         with mock.patch.object(wes.requests, "request", side_effect=tes_4):
-            oauth_status = wes.tes_request(
-                "POST", "site-4", "https://tes.site-4.example.org/tasks", timeout=1
-            ).status_code
-        oauth_grants = [request["form"].get("grant_type") for request in provider.requests]
-        # The provider fails mid-run: the cleanup goes on, and logs no secret
-        provider.status = 503
-        wes.TOKENS["site-4"].invalidate("access-2")
+            # A fresh token that the TES refuses isn't renewed: the refusal comes back, after one request
+            fresh_status = wes.tes_request("POST", "site-4", url_4, timeout=1).status_code
+            fresh_seen, fresh_grants = list(oauth_seen), len(provider.requests)
+            oauth_seen.clear()
+            # An older one is: the TES takes the next one
+            with mock.patch.object(wes.tokens, "MIN_RENEW_INTERVAL", 0):
+                oauth_status = wes.tes_request("POST", "site-4", url_4, timeout=1).status_code
+                oauth_grants = [request["form"].get("grant_type") for request in provider.requests]
+                renewed_seen = list(oauth_seen)
+                # The provider fails just then: the refusal comes back, with no secret in the log
+                provider.status = 503
+                with (
+                    mock.patch.object(wes.logger, "warning") as warning_retry,
+                    mock.patch.object(wes.requests, "request", return_value=FakeResponse(401)),
+                ):
+                    failed_status = wes.tes_request("POST", "site-4", url_4, timeout=1).status_code
+        logged_retry = json.dumps([str(call) for call in warning_retry.call_args_list])
+        # The provider is still down: the cleanup goes on, and logs no secret
         run_4 = {"tasks": [{"site": "site-4", "id": "x", "base": "https://tes.site-4.example.org", "state": "RUNNING"}]}
         with mock.patch.object(wes.logger, "warning") as warning_4:
             wes.update_tasks(run_4)
@@ -84,9 +94,12 @@ def main() -> None:
             "a token file over plain HTTP": {"site-1": {"tes": "http://tes", "token_file": str(token_file)}},
             "two token sources": {"site-1": {"tes": "https://tes", "token": "decoy-5", "token_file": str(token_file)}},
             "a site named server": {"server": {"tes": "https://tes"}},
+            "a refresh token shared by two sites": {
+                site: {"tes": f"https://{site}", "oauth": tokens_test.oauth(provider.issuer)} for site in ("a", "b")
+            },
         }.items():
             try:
-                wes.load_sites(json.dumps(bad_sites))
+                wes.load_sites(json.dumps(bad_sites), {"SITE_REFRESH_TOKEN": tokens_test.REFRESH_TOKEN})
                 refusals[name] = "accepted"
             except ValueError as error:
                 refusals[name] = str(error)
@@ -128,6 +141,8 @@ def main() -> None:
         "a TES out of reach leaves the state of a task alone": run["tasks"][0]["state"] == "RUNNING",
         **{f"{name} is refused": refusal != "accepted" for name, refusal in refusals.items()},
         "the refusals don't hold the tokens": "decoy" not in json.dumps(refusals),
+        "a shared refresh token is refused as such": "share the refresh token"
+        in refusals["a refresh token shared by two sites"],
         "the token of a site doesn't go to a gateway": gateway_headers == [{}, {}],
         "the file wins over the environment": set(wes.SITES) == {*SITES, "site-4"},
         "a site with a token gets it": wes.tes_headers("site-1") == {"Authorization": "Bearer decoy-token-1"},
@@ -144,9 +159,15 @@ def main() -> None:
         not in json.dumps([wes.client_task("r", site, "proj", "https://k", "ab:cd") for site in ("site-1", "site-3")]),
         "the service info holds no token": "decoy" not in json.dumps(wes.service_info()),
         "the secrets of oauth sources don't go to child processes": secret_dropped,
-        "an oauth token refused by the TES is renewed, and the request sent once more": oauth_status == 200
-        and oauth_seen == ["Bearer access-1", "Bearer access-2"]
+        "a fresh oauth token that the TES refuses isn't renewed": fresh_status == 401
+        and fresh_seen == ["Bearer access-1"]
+        and fresh_grants == 1,
+        "an older oauth token refused by the TES is renewed, and the request sent once more": oauth_status == 200
+        and renewed_seen == ["Bearer access-1", "Bearer access-2"]
         and oauth_grants == ["refresh_token", "refresh_token"],
+        "a refusal stands if the renewal fails": failed_status == 401
+        and "site-4" in logged_retry
+        and "decoy" not in logged_retry,
         "a failing provider leaves the task alone": run_4["tasks"][0]["state"] == "RUNNING"
         and warning_4.call_count == 2,
         "a failing provider is logged without secrets": "site-4" in logged_4 and "decoy" not in logged_4,
