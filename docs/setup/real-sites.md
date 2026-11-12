@@ -257,10 +257,10 @@ Access tokens expire, often after an hour to a few hours. A run that lasts longe
 | Key | What it holds | When the token is renewed |
 |---|---|---|
 | `token` | The token itself | Never. When it expires, the TES answers `401`: write a new sites file, and restart the hub between runs |
-| `token_file` | The absolute path of a file with the token | The file is read before each request to the TES, so whatever writes a new token into it (an updated Secret, a script) needs no restart |
-| `oauth` | Where and how to get tokens from an OAuth 2.0 provider | Tokens are cached, and renewed 60 seconds before they expire (at half their lifetime if that's shorter; after 5 minutes if the provider doesn't say) |
+| `token_file` | The absolute path of a file with only the token, without surrounding white space | The file is read before each request to the TES, so whatever writes a new token into it (an updated Secret, a script) needs no restart. It must exist, with a token, when the hub starts: the hub doesn't start otherwise |
+| `oauth` | Where and how to get tokens from an OAuth 2.0 provider | Tokens are cached, and renewed 60 seconds before they expire (at half their lifetime if that's shorter; after 5 minutes if the provider doesn't say, and after a day at the latest). If a renewal fails, the hub keeps using the old token while it's valid, and asks the provider again after 10 seconds. These times are fixed |
 
-With `token_file` and `oauth`, a request that the TES answers with `401` is sent once more, with a renewed token. An `oauth` site looks like this:
+With `token_file` and `oauth`, a request that the TES answers with `401` is sent once more, with a renewed token: for `oauth`, only if the refused token is at least 30 seconds old, so that a TES that refuses every token doesn't make each request a renewal. An `oauth` site looks like this:
 
 ```json
 "site-1": {
@@ -288,7 +288,7 @@ With `token_file` and `oauth`, a request that the TES answers with `401` is sent
 
 **Which grant:** with `refresh_token`, tokens are those of the user whose refresh token it is, so the TES authorizes the tasks as that user, for example by the user's groups. Get the refresh token once, with the `offline_access` scope, for example through the device authorization grant of a client that allows it. With `client_credentials`, tokens are the client's own: only for a TES that accepts tokens of that client.
 
-**Secrets** come in only when the hub starts, as environment variables, which the sites file names: never their values in the sites file, the image, a command line or a log. Messages name sites and variables, never values. With a secret, the client authenticates with HTTP Basic (`client_secret_basic`). The hub follows no redirects of the provider, and takes `http` only for addresses of its own host, for tests. If the provider sends a new refresh token, the hub keeps it in memory: after a restart, it starts again from the one in the environment, which the provider may have revoked by then. Then get a new one.
+**Secrets** come in only when the hub starts, as environment variables, which the sites file names: never their values in the sites file, the image, a command line or a log. Once the hub has read them, it drops them from its environment, so that its child processes (`nvflare`, the FL server) don't get them. Messages name sites and variables, never values. With a secret, the client authenticates with HTTP Basic (`client_secret_basic`). The hub follows no redirects of the provider, and takes `http` only for addresses of its own host, for tests. If the provider sends a new refresh token, the hub keeps it in memory: after a restart, it starts again from the one in the environment, which the provider may have revoked by then. Then get a new one.
 
 **With Compose,** add an override file, say `compose.tokens.yaml`, which mounts the token files and passes on the variables from the shell that runs `docker compose`, without writing their values to a file:
 

@@ -87,6 +87,9 @@ def load_sites(
 
 
 SITES, TOKENS = load_sites(pathlib.Path(SITES_FILE).read_text() if SITES_FILE else os.environ.get("WES_SITES", "{}"))
+# The sources hold the secrets now: child processes (`nvflare`, the FL server) don't inherit them
+for _name in {name for source in TOKENS.values() for name in getattr(source, "env_names", ())}:
+    os.environ.pop(_name, None)
 # If set, tasks go to this gateway (proTES), pinned to the TES of the site by tag
 TES_GATEWAY = os.environ.get("TES_GATEWAY_URL", "")
 TES_GATEWAY_TOKEN_URL = os.environ.get("TES_GATEWAY_TOKEN_URL", "")
@@ -326,6 +329,19 @@ def publish_kit(kit_dir: pathlib.Path, run_dir: pathlib.Path) -> tuple[str, str]
     return token, f"{PUBLIC_URL}/kits/{token}/{name}.tgz"
 
 
+def site_source(site: str) -> tokens.TokenSource | None:
+    """Get the token source of a site, if its token goes anywhere.
+
+    Args:
+        site: Name of the site, or `server` for the task of the FL server.
+
+    Returns:
+        The source, or `None` if the site has none, or there's a gateway: the
+        token of a site is for its TES alone, and never goes to a gateway.
+    """
+    return None if TES_GATEWAY_TOKEN_URL or TES_GATEWAY else TOKENS.get(site)
+
+
 def tes_headers(site: str) -> dict[str, str]:
     """Get the headers for the TES of a site, or the gateway if there is one.
 
@@ -341,11 +357,8 @@ def tes_headers(site: str) -> dict[str, str]:
     """
     if TES_GATEWAY_TOKEN_URL:
         token = requests.get(TES_GATEWAY_TOKEN_URL, timeout=10).json()["access_token"]
-    elif TES_GATEWAY:
-        # The token of a site is for its TES alone, and never goes to a gateway
-        token = ""
     else:
-        source = TOKENS.get(site)
+        source = site_source(site)
         token = source.token() if source is not None else ""
     return {"Authorization": f"Bearer {token}"} if token else {}
 
@@ -368,12 +381,15 @@ def tes_request(method: str, site: str, url: str, **kwargs: Any) -> requests.Res
     Raises:
         tokens.TokenError: The site's token couldn't be had.
     """
-    reply = requests.request(method, url, headers=tes_headers(site), **kwargs)
-    source = None if TES_GATEWAY else TOKENS.get(site)
+    headers = tes_headers(site)
+    reply = requests.request(method, url, headers=headers, **kwargs)
+    source = site_source(site)
     if reply.status_code == 401 and source is not None and source.renewable:
         logger.info("TES of %s refused the token, renewing it", site)
-        source.invalidate()
-        reply = requests.request(method, url, headers=tes_headers(site), **kwargs)
+        source.invalidate(headers.get("Authorization", "").removeprefix("Bearer "))
+        renewed = tes_headers(site)
+        if renewed != headers:
+            reply = requests.request(method, url, headers=renewed, **kwargs)
     return reply
 
 
@@ -510,14 +526,16 @@ def update_tasks(run: dict[str, Any], wait: float = 0) -> None:
                 reply = tes_request(
                     "GET", task["site"], f"{task['base']}/tasks/{task['id']}", params={"view": "MINIMAL"}, timeout=30
                 )
+                if reply.ok:
+                    task["state"] = reply.json().get("state", "UNKNOWN")
             except requests.RequestException:
                 logger.warning("TES of %s is out of reach", task["site"])
                 continue
             except tokens.TokenError as error:
                 logger.warning("No token for the TES of %s: %s", task["site"], error)
                 continue
-            if reply.ok:
-                task["state"] = reply.json().get("state", "UNKNOWN")
+            except Exception as error:  # noqa: BLE001 - e.g. a malformed reply: the cleanup of a run must go on
+                logger.warning("Couldn't update the task of %s: %s", task["site"], type(error).__name__)
         if all(task["state"] in TERMINAL_TES for task in run["tasks"]) or time.monotonic() >= deadline:
             return
         time.sleep(2)
@@ -552,7 +570,7 @@ def cancel_tasks(run: dict[str, Any]) -> None:
         if task["state"] not in TERMINAL_TES:
             try:
                 tes_request("POST", task["site"], f"{task['base']}/tasks/{task['id']}:cancel", timeout=30)
-            except (requests.RequestException, tokens.TokenError):
+            except Exception:  # noqa: BLE001 - the cleanup of a run must go on
                 logger.warning("Couldn't cancel the task of %s", task["site"])
 
 
@@ -570,7 +588,7 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
     run_dir = BASE / run_id
     run_dir.mkdir(parents=True)
     server: subprocess.Popen[bytes] | None = None
-    tokens: list[str] = []
+    slots: list[str] = []
     final_state = "SYSTEM_ERROR"
     try:
         run["state"] = "INITIALIZING"
@@ -580,7 +598,7 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
         admin_kit = provision_locally(run_dir, project, ADMIN, "admin")
         if FL_SERVER_MODE == "tes":
             token, kit_url = publish_kit(server_kit, run_dir)
-            tokens.append(token)
+            slots.append(token)
             base = f"{FL_SERVER_TES}/ga4gh/tes/v1"
             reply = requests.post(f"{base}/tasks", json=server_task(run_id, kit_url), timeout=60)
             reply.raise_for_status()
@@ -591,7 +609,7 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
             wait_for_port("127.0.0.1", ADMIN_PORT, START_TIMEOUT)
         for site in sites:
             token, csr_url = issue_csr_token(run_id, site)
-            tokens.append(token)
+            slots.append(token)
             base = tes_base(site)
             reply = tes_request(
                 "POST", site, f"{base}/tasks", json=client_task(run_id, site, project, csr_url, fingerprint), timeout=60
@@ -637,7 +655,7 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
                 server.wait(timeout=30)
             except subprocess.TimeoutExpired:
                 server.kill()
-        for token in tokens:
+        for token in slots:
             KITS.pop(token, None)
             CSR_TOKENS.pop(token, None)
         for child in run_dir.iterdir():

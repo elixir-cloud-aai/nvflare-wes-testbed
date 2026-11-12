@@ -17,7 +17,9 @@ need nothing else.
 """
 
 import base64
+import http.client
 import json
+import math
 import os
 import re
 import threading
@@ -32,8 +34,13 @@ from typing import Any, Protocol
 TOKEN_PATTERN = re.compile(r"[\x21-\x7e]+")
 # Renewed this many seconds before it expires, or at half its lifetime if that's shorter
 RENEW_BEFORE = 60.0
-# Lifetime assumed for a token whose response doesn't say (`expires_in`)
+# Lifetime assumed for a token whose response doesn't say (`expires_in`), and the longest believed
 DEFAULT_LIFETIME = 300.0
+MAX_LIFETIME = 86400.0
+# Seconds before the provider is asked again after a failed renewal
+RETRY_AFTER = 10.0
+# A refused token is renewed only if it is at least this many seconds old
+MIN_RENEW_INTERVAL = 30.0
 TIMEOUT = 10.0
 MAX_RESPONSE_SIZE = 1 << 20
 GRANT_TYPES = ("refresh_token", "client_credentials")
@@ -116,11 +123,11 @@ class UrllibHttp:
                 status, body = response.status, response.read(MAX_RESPONSE_SIZE)
         except urllib.error.HTTPError as error:
             status, body = error.code, error.read(MAX_RESPONSE_SIZE)
-        except (urllib.error.URLError, OSError) as error:
+        except (urllib.error.URLError, http.client.HTTPException, OSError) as error:
             raise TokenError(f"No response from {request.full_url}: {type(error).__name__}") from None
         try:
             return status, json.loads(body)
-        except ValueError:
+        except (ValueError, RecursionError):
             return status, None
 
     def get_json(self, url: str) -> tuple[int, Any]:
@@ -200,8 +207,13 @@ class TokenSource(Protocol):
         """
         ...
 
-    def invalidate(self) -> None:
-        """Forget the cached token, e.g. after the TES refused it."""
+    def invalidate(self, refused: str) -> None:
+        """Forget the cached token if it's the one the TES refused.
+
+        Args:
+            refused: The token the TES refused. If another request renewed it
+                meanwhile, the new one stays.
+        """
         ...
 
 
@@ -233,8 +245,12 @@ class StaticToken:
         """
         return self._token
 
-    def invalidate(self) -> None:
-        """Do nothing: there's no other token."""
+    def invalidate(self, refused: str) -> None:
+        """Do nothing: there's no other token.
+
+        Args:
+            refused: Unused.
+        """
 
 
 class FileToken:
@@ -279,8 +295,12 @@ class FileToken:
             raise TokenError(f"Can't read the token file of site {self._site}: {type(error).__name__}") from None
         return check_token(token, f"The token file of site {self._site}")
 
-    def invalidate(self) -> None:
-        """Do nothing: the file is read anew anyway."""
+    def invalidate(self, refused: str) -> None:
+        """Do nothing: the file is read anew anyway.
+
+        Args:
+            refused: Unused.
+        """
 
 
 class OAuthToken:
@@ -351,11 +371,16 @@ class OAuthToken:
         self._scope = config.get("scope", "")
         self._client_secret = secrets.get("client_secret_env", "")
         self._refresh_token = secrets.get("refresh_token_env", "")
+        #: Names of the variables with the secrets, which the caller may drop from the environment
+        self.env_names = tuple(config[key] for key in ("client_secret_env", "refresh_token_env") if key in config)
         self._http = http or UrllibHttp()
         self._clock = clock
         self._lock = threading.Lock()
         self._token = ""
+        self._fetched_at = 0.0
+        self._expires_at = 0.0
         self._renew_at = 0.0
+        self._retry_at = 0.0
 
     def _call(self, method: Callable[..., tuple[int, Any]], *args: Any) -> tuple[int, Any]:
         """Call the provider, and name the site if there's no response.
@@ -433,33 +458,68 @@ class OAuthToken:
             raise TokenError(f"The token endpoint of site {self._site} sent no bearer token")
         token = check_token(str(body.get("access_token", "")), f"The access token of site {self._site}")
         lifetime = body.get("expires_in", DEFAULT_LIFETIME)
-        if not isinstance(lifetime, int | float) or isinstance(lifetime, bool) or lifetime <= 0:
+        if (
+            not isinstance(lifetime, int | float)
+            or isinstance(lifetime, bool)
+            or not math.isfinite(lifetime)
+            or lifetime <= 0
+        ):
             lifetime = DEFAULT_LIFETIME
+        lifetime = min(lifetime, MAX_LIFETIME)
         # Providers that rotate refresh tokens send a new one, and may revoke the old one
         if self._grant == "refresh_token" and isinstance(body.get("refresh_token"), str) and body["refresh_token"]:
             self._refresh_token = body["refresh_token"]
         self._token = token
+        self._fetched_at = started
+        self._expires_at = started + lifetime
         self._renew_at = started + lifetime - min(RENEW_BEFORE, lifetime / 2)
 
     def token(self) -> str:
         """Get a token valid for a while yet, from the cache or the token endpoint.
 
+        After a failed renewal, the provider is asked again only after
+        `RETRY_AFTER` seconds; meanwhile, and on failure, the cached token is
+        used for as long as it is valid.
+
         Returns:
             The token.
 
         Raises:
-            TokenError: A new one was due, and couldn't be had.
+            TokenError: A new one was due, and couldn't be had, and there's no
+                valid one left.
         """
         with self._lock:
-            if not self._token or self._clock() >= self._renew_at:
-                self._token = ""
+            now = self._clock()
+            usable = bool(self._token) and now < self._expires_at
+            if usable and now < self._renew_at:
+                return self._token
+            if now < self._retry_at:
+                if usable:
+                    return self._token
+                raise TokenError(f"Site {self._site}: the last renewal failed, next try within {RETRY_AFTER:.0f} s")
+            try:
                 self._request()
+            except TokenError:
+                self._retry_at = now + RETRY_AFTER
+                if usable:
+                    return self._token
+                raise
+            self._retry_at = 0.0
             return self._token
 
-    def invalidate(self) -> None:
-        """Forget the cached token, so that the next call gets a new one."""
+    def invalidate(self, refused: str) -> None:
+        """Forget the cached token if it's the refused one, so that the next call gets a new one.
+
+        Args:
+            refused: The token the TES refused. If another request renewed it
+                meanwhile, the new one stays, so that a refusal costs one
+                renewal, not one per request. A token got less than
+                `MIN_RENEW_INTERVAL` seconds ago stays too, so that a TES
+                that refuses every token doesn't make each poll a renewal.
+        """
         with self._lock:
-            self._token = ""
+            if self._token == refused and self._clock() - self._fetched_at >= MIN_RENEW_INTERVAL:
+                self._token = ""
 
 
 def from_site(

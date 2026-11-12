@@ -40,6 +40,7 @@ class Provider:
         self.token_type = "Bearer"
         self.rotate = False
         self.redirect = False
+        self.garbage = b""
         self.discovery: dict[str, Any] | None = None
 
 
@@ -80,6 +81,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         form = dict(urllib.parse.parse_qsl(self.rfile.read(length).decode()))
         provider.requests.append({"path": self.path, "form": form, "authorization": self.headers.get("Authorization")})
+        if provider.garbage:
+            self.wfile.write(provider.garbage)
+            self.close_connection = True
+            return
         if self.path == "/elsewhere":
             self.reply(200, {"access_token": "decoy-elsewhere", "token_type": "Bearer"})
             return
@@ -327,7 +332,7 @@ class OAuthTokenTest(unittest.TestCase):
 
     def test_no_lifetime(self) -> None:
         """Without `expires_in`, or with a bad one, a token counts as short-lived."""
-        for expires_in in (None, "3600", -1, True):
+        for expires_in in (None, "3600", -1, True, float("nan"), float("inf")):
             clock = Clock()
             with provider() as state:
                 state.expires_in = expires_in
@@ -336,32 +341,108 @@ class OAuthTokenTest(unittest.TestCase):
                 clock.now += tokens.DEFAULT_LIFETIME - tokens.RENEW_BEFORE
                 self.assertEqual(source.token(), "access-2", expires_in)
 
+    def test_longest_lifetime(self) -> None:
+        """A lifetime of years is believed for a day at most."""
+        clock = Clock()
+        with provider() as state:
+            state.expires_in = 10**9
+            source = self.source(oauth(state.issuer), clock)
+            source.token()
+            clock.now += tokens.MAX_LIFETIME - tokens.RENEW_BEFORE
+            self.assertEqual(source.token(), "access-2")
+
     def test_rotated_refresh_token(self) -> None:
         """A new refresh token in a response is used for the next renewal."""
+        clock = Clock()
         with provider() as state:
             state.rotate = True
-            source = self.source(oauth(state.issuer))
-            source.token()
-            source.invalidate()
+            source = self.source(oauth(state.issuer), clock)
+            refused = source.token()
+            clock.now += tokens.MIN_RENEW_INTERVAL
+            source.invalidate(refused)
             source.token()
             self.assertEqual(state.requests[1]["form"]["refresh_token"], "decoy-refresh-token-1")
 
     def test_invalidate(self) -> None:
         """A refused token is forgotten, and a new one requested."""
+        clock = Clock()
         with provider() as state:
-            source = self.source(oauth(state.issuer))
+            source = self.source(oauth(state.issuer), clock)
             self.assertEqual(source.token(), "access-1")
             self.assertEqual(source.token(), "access-1")
-            source.invalidate()
+            clock.now += tokens.MIN_RENEW_INTERVAL
+            source.invalidate("access-1")
             self.assertEqual(source.token(), "access-2")
             self.assertTrue(source.renewable)
 
+    def test_invalidate_stale(self) -> None:
+        """A refusal of a token renewed meanwhile keeps the new one: one renewal, not one per request."""
+        clock = Clock()
+        with provider() as state:
+            source = self.source(oauth(state.issuer), clock)
+            source.token()
+            clock.now += tokens.MIN_RENEW_INTERVAL
+            source.invalidate("access-1")
+            self.assertEqual(source.token(), "access-2")
+            clock.now += tokens.MIN_RENEW_INTERVAL
+            source.invalidate("access-1")
+            self.assertEqual(source.token(), "access-2")
+            self.assertEqual(len(state.requests), 2)
+
+    def test_invalidate_fresh(self) -> None:
+        """A TES that refuses every token doesn't make each request a renewal."""
+        clock = Clock()
+        with provider() as state:
+            source = self.source(oauth(state.issuer), clock)
+            source.invalidate(source.token())
+            self.assertEqual(source.token(), "access-1")
+            clock.now += tokens.MIN_RENEW_INTERVAL
+            source.invalidate(source.token())
+            self.assertEqual(source.token(), "access-2")
+
+    def test_failed_renewal(self) -> None:
+        """A failed renewal keeps a token that's still valid, and waits before it asks again."""
+        clock = Clock()
+        with provider() as state:
+            state.expires_in = 600
+            source = self.source(oauth(state.issuer), clock)
+            source.token()
+            state.status, state.error = 503, "temporarily_unavailable"
+            clock.now += 550
+            self.assertEqual(source.token(), "access-1")
+            self.assertEqual(source.token(), "access-1")
+            self.assertEqual(len(state.requests), 2)
+            clock.now += tokens.RETRY_AFTER
+            self.assertEqual(source.token(), "access-1")
+            self.assertEqual(len(state.requests), 3)
+            # Expired now, and the provider is still down
+            clock.now += 600
+            with self.assertRaises(tokens.TokenError):
+                source.token()
+            with self.assertRaises(tokens.TokenError) as waiting:
+                source.token()
+            self.assertIn("last renewal failed", str(waiting.exception))
+            self.assertEqual(len(state.requests), 4)
+            state.status = 200
+            clock.now += tokens.RETRY_AFTER
+            self.assertEqual(source.token(), "access-5")
+
+    def test_malformed_replies(self) -> None:
+        """A reply that isn't HTTP, or JSON nested too deep, fails as a `TokenError`."""
+        for garbage in (b"GARBAGE\r\n\r\n", b"HTTP/1.1 200 OK\r\nContent-Length: 200000\r\n\r\n" + b"[" * 200000):
+            with provider() as state:
+                state.garbage = garbage
+                with self.assertRaises(tokens.TokenError, msg=garbage[:20]):
+                    self.source(oauth(state.issuer)).token()
+
     def test_discovery_once(self) -> None:
         """Discovery happens once, not for each token."""
+        clock = Clock()
         with provider() as state:
-            source = self.source(oauth(state.issuer))
-            source.token()
-            source.invalidate()
+            source = self.source(oauth(state.issuer), clock)
+            refused = source.token()
+            clock.now += tokens.MIN_RENEW_INTERVAL
+            source.invalidate(refused)
             state.discovery = {"issuer": state.issuer, "token_endpoint": "http://example.org/token"}
             self.assertEqual(source.token(), "access-2")
 
