@@ -195,9 +195,9 @@ oc get route hub-nvflare-wes-hub-kits -o jsonpath='{.status.ingress[0].condition
 
 **No seccomp profile of the chart's:** by default, the pod asks for the runtime's profile (`seccompProfile: type: RuntimeDefault`), which suits most clusters. Since 2026-11-10, Rahti's admission rejects pods that do, and sets a profile of its own on pods that name none: `--set podSecurityContext.seccompProfile=null` drops it, and leaves the rest of the security context as it is. In a values file, `podSecurityContext: {seccompProfile: null}` does the same. Without it, the ReplicaSet creates no pod, and `oc get events` names the profile.
 
-**LimitRanges:** clusters with a LimitRange may cap the ratio of a container's limit to its request (`maxLimitRequestRatio`), often at 5 for CPU, and refuse pods above it. The defaults keep it at 5 for CPU (400m, up to 2) and at 2 for memory. To change `resources`, set requests and limits together, such as `--set resources.requests.cpu=500m --set resources.limits.cpu=2`, and keep each ratio within your cluster's: `oc describe limitrange` shows it. Above it, the ReplicaSet creates no pod, and `oc get events` names the ratio.
-
 The Route must say `Admitted=True`. If another project already has its name, the router rejects it (`HostAlreadyClaimed`), and links to kits would lead to someone else's app: pick another `kitsHost`, with `helm upgrade`.
+
+**LimitRanges:** clusters with a LimitRange may cap the ratio of a container's limit to its request (`maxLimitRequestRatio`), often at 5 for CPU, and refuse pods above it. The defaults keep the CPU limit at 5 times the request (400m, up to 2), which `tests/chart.sh` checks. To change `resources`, set requests and limits together, such as `--set resources.requests.cpu=500m --set resources.limits.cpu=2`, and keep each ratio within your cluster's: `oc describe limitrange` shows it. Above it, the ReplicaSet creates no pod, and `oc get events` names the ratio.
 
 | Value | Default | Meaning |
 |---|---|---|
@@ -237,6 +237,8 @@ helm upgrade hub charts/nvflare-wes-hub --reuse-values --set image.tag=sha-<comm
 helm uninstall hub
 oc delete secret nvflare-wes-sites
 ```
+
+`--reuse-values` keeps the defaults of the chart you installed, not the new ones: an install from before the CPU request of 400m keeps 250m. To take up new defaults and keep your own values, use `--reset-then-reuse-values` (Helm 3.14 or later) in place of `--reuse-values`.
 
 After editing `sites.json`, replace the Secret and restart the pod:
 
