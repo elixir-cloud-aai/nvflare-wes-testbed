@@ -224,7 +224,7 @@ Then use `http://localhost:8080/ga4gh/wes/v1` in place of `https://<hub>/ga4gh/w
 python3 tests/outside_check.py --fl-port 30002 <hub name> <kits name>
 ```
 
-The WES must not answer with 200 on either name: the router has no Route for it, and the address has only the FL port. If the FL port times out during a run although the Service has its address, look for NetworkPolicies of the project (`oc get networkpolicy`) that keep it out: by Rahti's docs, pods only talk to pods of the same project by default.
+Every check should say `[ok]`, with a `[warn]` for the FL port outside a run: `/kits` and `/sites` give the WES' own 404, the WES doesn't answer with 200 on either name, as the router has no Route for it and the address has only the FL port, and 8003 is closed. If the FL port times out during a run although the Service has its address, look for NetworkPolicies of the project (`oc get networkpolicy`) that keep it out: by Rahti's docs, pods only talk to pods of the same project by default.
 
 **Acceptance:** a run with one site ([T8](../tests/t8-real-sites.md)) passes, `/kits` is reachable from outside, and the WES isn't.
 
@@ -255,13 +255,14 @@ python3 tests/outside_check.py [--fl-port <port>] [--during-run] <hub name> <kit
 
 | Check | Passes when |
 |---|---|
+| Both names | They resolve, as an unknown name would pass the checks of closed ports. The hub's name comes without a port: give it with `--fl-port`. The kits host takes `:<port>` if HTTPS isn't on 443 |
 | `GET /kits/no-such-token/site-1.tgz` at the kits host | 404 `No such kit`, from the WES: no such kit, but the way is open. A 404 or 503 of a router or proxy fails |
 | `POST /sites/no-such-token/csr` at the kits host | 404 `No such token`, from the WES |
 | `GET /ga4gh/wes/v1/service-info` at both names | Anything but 200, including no answer. Certificates aren't checked here, as any answer counts |
 | FL port at the hub's name (`--fl-port`, default 8002) | Open. It only listens during a run, so a closed one is a warning; with `--during-run`, a failure |
 | FLARE admin port at the hub's name (`--admin-port`, default 8003) | Closed |
 
-It prints a line for each check, `[ok]`, `[warn]` or `[FAIL]`, and ends with 1 if any failed. `--insecure` skips checking certificates, for a hub with a test certificate, as in `tests/hub.sh`; `--help` lists all options. Without a clone, it's in the [image](#the-image): `docker run --rm elixircloud/nvflare-wes-testbed:sha-<commit> python3 /app/tests/outside_check.py …`. CI runs it against the hub of `tests/hub.sh`, and its unit tests (`python3 tests/outside_check_test.py`).
+It prints a line for each check, `[ok]`, `[warn]` or `[FAIL]`, and ends with 1 if any failed. It ignores proxy settings such as `HTTPS_PROXY`, as the checks are about what the machine reaches itself. `--insecure` skips checking certificates, for a hub with a test certificate, as in `tests/hub.sh`; `--help` lists all options. Without a clone, it's in the [image](#the-image): `docker run --rm elixircloud/nvflare-wes-testbed:sha-<commit> python3 /app/tests/outside_check.py …`. CI runs it against the proxy of `tests/hub.sh`, which has the hub's name there, so the port checks meet the proxy, and its unit tests (`python3 tests/outside_check_test.py`).
 
 ## What changes in the setup
 

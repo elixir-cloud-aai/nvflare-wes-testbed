@@ -3,12 +3,19 @@
 Usage: python3 tests/outside_check_test.py
 """
 
+import argparse
 import http.server
 import json
+import os
+import pathlib
 import socket
+import ssl
+import sys
 import threading
 import unittest
 from unittest import mock
+
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
 
 import outside_check
 from outside_check import Answer, Result
@@ -26,6 +33,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         """Answer a POST."""
+        if self.path.startswith("/drop/"):
+            # Headers, then the connection drops before the promised body
+            self.send_response(503)
+            self.send_header("Content-Length", "100")
+            self.end_headers()
+            self.close_connection = True
+            return
         self.reply(404, json.dumps({"detail": "No such token"}))
 
     def reply(self, status: int, body: str) -> None:
@@ -97,6 +111,16 @@ class RequestTest(unittest.TestCase):
         self.assertIsNone(answer.status)
         self.assertTrue(answer.error)
 
+    def test_no_proxy(self) -> None:
+        """Proxies of the environment aren't used."""
+        proxy = f"http://127.0.0.1:{free_port()}"
+        with mock.patch.dict(os.environ, {"http_proxy": proxy, "https_proxy": proxy, "no_proxy": ""}):
+            self.assertEqual(outside_check.request(f"{self.base}/other").status, 200)
+
+    def test_body_cut_short(self) -> None:
+        """A body cut short leaves the status, and no traceback."""
+        self.assertEqual(outside_check.request(f"{self.base}/drop/x", method="POST", timeout=2), Answer(503, ""))
+
     def test_tcp_open(self) -> None:
         """A listening port is open, and a free one is closed, with a reason."""
         self.assertEqual(outside_check.tcp_open("127.0.0.1", self.server.server_port), (True, ""))
@@ -120,6 +144,56 @@ class DescribeTest(unittest.TestCase):
         self.assertEqual(outside_check.describe(Answer(404, '{"detail": "No such kit"}')), "404 'No such kit'")
         self.assertEqual(outside_check.describe(Answer(403)), "403")
         self.assertEqual(outside_check.describe(Answer(None, error="timed out")), "no answer (timed out)")
+
+
+class TlsContextTest(unittest.TestCase):
+    """`tls_context`."""
+
+    def test_verify(self) -> None:
+        """Certificates and names are checked unless told not to."""
+        context = outside_check.tls_context(True)
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+        context = outside_check.tls_context(False)
+        self.assertEqual(context.verify_mode, ssl.CERT_NONE)
+        self.assertFalse(context.check_hostname)
+
+    def test_request_uses_it(self) -> None:
+        """`request` hands its context to the HTTPS handler."""
+        with mock.patch.object(outside_check, "tls_context", wraps=outside_check.tls_context) as context:
+            outside_check.request(f"http://127.0.0.1:{free_port()}/", verify=False, timeout=1)
+        context.assert_called_once_with(False)
+
+
+class NamesTest(unittest.TestCase):
+    """Names on the command line, and whether they resolve."""
+
+    def test_resolves(self) -> None:
+        """A name that resolves passes, one that doesn't fails."""
+        self.assertEqual(outside_check.resolves("127.0.0.1"), (True, ""))
+        with mock.patch.object(socket, "getaddrinfo", side_effect=socket.gaierror(-2, "Name or service not known")):
+            found, error = outside_check.resolves("typo.invalid")
+        self.assertFalse(found)
+        self.assertIn("not known", error)
+
+    def test_check_resolves(self) -> None:
+        """The port of the kits host is left out of the lookup."""
+        with mock.patch.object(outside_check, "resolves", return_value=(True, "")) as resolves:
+            self.assertEqual(outside_check.check_resolves("kits.example.org:8443").outcome, "ok")
+        resolves.assert_called_once_with("kits.example.org")
+        with mock.patch.object(outside_check, "resolves", return_value=(False, "not known")):
+            self.assertEqual(outside_check.check_resolves("typo.invalid").outcome, "FAIL")
+
+    def test_hub_name(self) -> None:
+        """The hub's name comes without a port."""
+        self.assertEqual(outside_check.hub_name("hub.example.org"), "hub.example.org")
+        with self.assertRaises(argparse.ArgumentTypeError):
+            outside_check.hub_name("hub.example.org:30002")
+
+    def test_defaults(self) -> None:
+        """Ports and options by default."""
+        args = outside_check.parse_args(["hub.example.org", "kits.example.org"])
+        self.assertEqual((args.fl_port, args.admin_port, args.during_run, args.insecure), (8002, 8003, False, False))
 
 
 class ChecksTest(unittest.TestCase):
@@ -211,6 +285,7 @@ class MainTest(unittest.TestCase):
             mock.patch.object(
                 outside_check, "tcp_open", side_effect=lambda host, port, **_: (ports[port], "" if ports[port] else "x")
             ),
+            mock.patch.object(outside_check, "resolves", side_effect=lambda host: (host != "typo.invalid", "x")),
             mock.patch("builtins.print") as printed,
         ):
             code = outside_check.main(argv)
@@ -239,8 +314,8 @@ class MainTest(unittest.TestCase):
             ["hub.example.org", "kits.example.org", "--fl-port", "30002"], self.answers(), {30002: False, 8003: False}
         )
         self.assertEqual(code, 0)
-        self.assertEqual([line.split("]")[0] for line in lines[:-1]], ["[ok"] * 4 + ["[warn", "[ok"])
-        self.assertEqual(lines[-1], "all 6 checks passed")
+        self.assertEqual([line.split("]")[0] for line in lines[:-1]], ["[ok"] * 6 + ["[warn", "[ok"])
+        self.assertEqual(lines[-1], "all 8 checks passed")
         self.assertIn(
             ("https://kits.example.org/sites/no-such-token/csr", {"method": "POST", "verify": True, "timeout": 10}),
             self.calls,
@@ -255,7 +330,7 @@ class MainTest(unittest.TestCase):
         )
         self.assertEqual(code, 1)
         self.assertEqual(sum(line.startswith("[FAIL]") for line in lines), 2)
-        self.assertEqual(lines[-1], "2 of 6 checks failed")
+        self.assertEqual(lines[-1], "2 of 8 checks failed")
         self.assertFalse(any(kwargs["verify"] for _, kwargs in self.calls))
 
     def test_same_name(self) -> None:
@@ -263,7 +338,15 @@ class MainTest(unittest.TestCase):
         answers = {url.replace("kits.example.org", "hub.example.org"): a for url, a in self.answers().items()}
         code, lines = self.run_main(["hub.example.org", "hub.example.org"], answers, {8002: False, 8003: False})
         self.assertEqual(code, 0)
-        self.assertEqual(lines[-1], "all 5 checks passed")
+        self.assertEqual(lines[-1], "all 6 checks passed")
+
+    def test_unknown_name(self) -> None:
+        """A hub name that doesn't resolve fails, although its ports read as closed."""
+        answers = self.answers()
+        answers["https://typo.invalid/ga4gh/wes/v1/service-info"] = Answer(None, error="not known")
+        code, lines = self.run_main(["typo.invalid", "kits.example.org"], answers, {8002: False, 8003: False})
+        self.assertEqual(code, 1)
+        self.assertIn("[FAIL] name typo.invalid: doesn't resolve (x)", lines)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ Usage:
     outside_check.py [--fl-port <port>] [--during-run] [--insecure] <hub name> <kits host>
 
 Run it from a machine outside the hub's network that isn't in `WES_ALLOWED_IPS`.
-The hub name is the name in the kits, with the FL port; the kits host serves
+The hub name is the name in the kits, without a port; the kits host serves
 `/kits` and `/sites` over HTTPS. With Compose, both are `FL_SERVER_NAME`. It checks:
 
 - `/kits` and `/sites` answer with the WES' own 404s: no such kit or token, but
@@ -13,6 +13,7 @@ The hub name is the name in the kits, with the FL port; the kits host serves
 - The FL port is open. It only listens during a run, so a closed one is a warning,
   unless `--during-run` says that a run is going on.
 - The FLARE admin port is closed.
+- Both names resolve, as an unknown name would pass the checks of closed ports.
 
 It prints one line per check, and ends with 1 if any failed. Only the standard
 library, so that it runs with any Python 3.12 or later, also outside the image.
@@ -26,6 +27,7 @@ import socket
 import ssl
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 # Enough for the WES' error messages; nothing is read beyond that
@@ -60,8 +62,42 @@ class Result:
     message: str
 
 
+def tls_context(verify: bool) -> ssl.SSLContext:
+    """Make the TLS context of requests.
+
+    Args:
+        verify: Whether to check the server's certificate and name.
+
+    Returns:
+        The context.
+    """
+    context = ssl.create_default_context()
+    if not verify:
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    return context
+
+
+def read_body(response: http.client.HTTPResponse | urllib.error.HTTPError) -> str:
+    """Read the start of a body, or nothing if that fails.
+
+    Args:
+        response: A response, or an error status with its body.
+
+    Returns:
+        The start of the body, as text.
+    """
+    try:
+        return response.read(MAX_BODY).decode("utf-8", "replace")
+    except (OSError, http.client.HTTPException):
+        return ""
+
+
 def request(url: str, *, method: str = "GET", verify: bool = True, timeout: float = 10) -> Answer:
-    """Send a request without a body, and tell what came back.
+    """Send a request without a body, straight to the server, and tell what came back.
+
+    Proxies of the environment (`HTTPS_PROXY` and so on) aren't used: the checks
+    are about what this machine reaches, and a proxy's refusal isn't the hub's.
 
     Args:
         url: URL to request.
@@ -72,21 +108,36 @@ def request(url: str, *, method: str = "GET", verify: bool = True, timeout: floa
     Returns:
         The status and the start of the body, or why there's none.
     """
-    context = ssl.create_default_context()
-    if not verify:
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=tls_context(verify))
+    )
     data = b"" if method == "POST" else None
     req = urllib.request.Request(url, data=data, method=method)
     try:
-        with urllib.request.urlopen(req, context=context, timeout=timeout) as response:
-            return Answer(response.status, response.read(MAX_BODY).decode("utf-8", "replace"))
+        with opener.open(req, timeout=timeout) as response:
+            return Answer(response.status, read_body(response))
     except urllib.error.HTTPError as error:
-        return Answer(error.code, error.read(MAX_BODY).decode("utf-8", "replace"))
+        return Answer(error.code, read_body(error))
     except urllib.error.URLError as error:
         return Answer(None, error=str(error.reason))
     except (OSError, http.client.HTTPException) as error:
         return Answer(None, error=str(error) or type(error).__name__)
+
+
+def resolves(host: str) -> tuple[bool, str]:
+    """Look up a name.
+
+    Args:
+        host: Host name or address.
+
+    Returns:
+        Whether it resolves, and why not if it doesn't.
+    """
+    try:
+        socket.getaddrinfo(host, None)
+    except OSError as error:
+        return False, str(error) or type(error).__name__
+    return True, ""
 
 
 def tcp_open(host: str, port: int, *, timeout: float = 5) -> tuple[bool, str]:
@@ -218,6 +269,37 @@ def check_admin_closed(hub: str, port: int, *, timeout: float) -> Result:
     return Result("ok", f"admin port {hub}:{port}: closed ({error})")
 
 
+def check_resolves(host: str) -> Result:
+    """Check that a name resolves, as an unknown one would pass the checks of closed ports.
+
+    Args:
+        host: Hub name, or kits host with an optional port.
+
+    Returns:
+        FAIL if it doesn't resolve.
+    """
+    name = urllib.parse.urlsplit(f"https://{host}").hostname or host
+    found, error = resolves(name)
+    return Result("ok" if found else "FAIL", f"name {name}: " + ("resolves" if found else f"doesn't resolve ({error})"))
+
+
+def hub_name(value: str) -> str:
+    """Read the hub's name from the command line.
+
+    Args:
+        value: The argument.
+
+    Returns:
+        The name.
+
+    Raises:
+        argparse.ArgumentTypeError: The name has a port.
+    """
+    if ":" in value:
+        raise argparse.ArgumentTypeError(f"{value!r}: give the hub's name without a port, and the port with --fl-port")
+    return value
+
+
 def run_checks(args: argparse.Namespace) -> list[Result]:
     """Run all checks.
 
@@ -228,7 +310,8 @@ def run_checks(args: argparse.Namespace) -> list[Result]:
         One result per check.
     """
     verify = not args.insecure
-    results = [
+    results = [check_resolves(host) for host in dict.fromkeys([args.kits, args.hub])]
+    results += [
         check_open_path(
             args.kits, "/kits/no-such-token/site-1.tgz", "GET", "No such kit", verify=verify, timeout=args.timeout
         ),
@@ -253,8 +336,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         The parsed arguments.
     """
     parser = argparse.ArgumentParser(description="Check a hub for real sites from outside.")
-    parser.add_argument("hub", help="name of the hub, as in the kits, with the FL port")
-    parser.add_argument("kits", help="host that serves /kits and /sites over HTTPS")
+    parser.add_argument("hub", type=hub_name, help="name of the hub, as in the kits, without the port")
+    parser.add_argument("kits", help="host that serves /kits and /sites over HTTPS, with :<port> if not 443")
     parser.add_argument("--fl-port", type=int, default=8002, help="FL port (default: %(default)s)")
     parser.add_argument("--admin-port", type=int, default=8003, help="FLARE admin port (default: %(default)s)")
     parser.add_argument("--during-run", action="store_true", help="a run is going on, so the FL port must be open")
