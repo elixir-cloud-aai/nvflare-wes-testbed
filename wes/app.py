@@ -116,6 +116,8 @@ ADMIN_PORT = 8003
 START_TIMEOUT = 180
 JOB_TIMEOUT = 600
 MAX_CSR_SIZE = 1 << 20  # a CSR package is a few KB; this just bounds memory
+# What gRPC logs, in the FL server's output, when it can't bind the FL port; the server starts anyway
+BIND_FAILURE = "Failed to add port"
 TERMINAL_TES = {"COMPLETE", "EXECUTOR_ERROR", "SYSTEM_ERROR", "CANCELED", "PREEMPTED"}
 
 app = FastAPI(title="Thin WES for NVFlare (sandbox)")
@@ -345,6 +347,7 @@ def check_server_bound(log_path: pathlib.Path, port: int) -> None:
 
     `ensure_port_free` can't see a listener that starts after it, or one on
     another address family, and the FL server starts anyway without its port.
+    This depends on the wording of gRPC's log line (`BIND_FAILURE`).
 
     Args:
         log_path: File with the output of the server.
@@ -353,7 +356,7 @@ def check_server_bound(log_path: pathlib.Path, port: int) -> None:
     Raises:
         RuntimeError: The server logged that it couldn't bind the port.
     """
-    if "Failed to add port" in log_path.read_text(errors="replace"):
+    if BIND_FAILURE in log_path.read_text(errors="replace"):
         raise RuntimeError(f"The FL port {port} is in use in the hub's container: the FL server couldn't bind it")
 
 

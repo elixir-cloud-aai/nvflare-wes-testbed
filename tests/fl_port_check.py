@@ -56,7 +56,7 @@ def main() -> None:
         # What NVFlare's gRPC logs when it can't bind, as on Rahti; the server starts anyway
         log = pathlib.Path(directory) / "server.log"
         log.write_text(
-            "E1112 17:31:44.926438      59 add_port.cc:83] Failed to add port to server: No address added out of"
+            f"E1112 17:31:44.926438      59 add_port.cc:83] {wes.BIND_FAILURE} to server: No address added out of"
             f" total 1 resolved for '0.0.0.0:{port}' (... Address already in use)\n"
             "2026-11-12 17:31:44,932 - Server - INFO - added secure port at 0.0.0.0:8003\n"
         )
