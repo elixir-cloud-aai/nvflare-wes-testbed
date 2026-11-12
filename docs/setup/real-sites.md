@@ -183,7 +183,8 @@ helm install hub charts/nvflare-wes-hub \
     --set image.tag=sha-<commit> \
     --set hubName=<hub name> \
     --set kitsHost=<kits name> \
-    --set flPort=30002
+    --set flPort=30002 \
+    --set podSecurityContext.seccompProfile=null
 oc rollout status deployment/hub-nvflare-wes-hub
 oc get service hub-nvflare-wes-hub-fl -o jsonpath='{.status.loadBalancer.ingress[0].ip}'; echo
 oc get ipaddresspools.metallb.io -n metallb-system <rahti project> -o jsonpath='{.metadata.annotations.ip_pairs}'; echo
@@ -191,6 +192,8 @@ oc get route hub-nvflare-wes-hub-kits -o jsonpath='{.status.ingress[0].condition
 ```
 
 **Two addresses:** by the example in [Rahti's docs](https://docs.csc.fi/cloud/rahti/configurations/loadbalancer-service/), the project's pool holds internal addresses (`192.168.…`), and `ip_pairs` pairs each with a public one (`<internal> - <public>`), the one CSC tells you. The Service shows the internal one. **Point the `A` record of the hub's name to the public one**: the kits name it, and sites can't reach the internal one. With more than one address in the pool, pick one with `--set loadBalancerIP=<internal address>`, never the public one, which MetalLB can't assign. Without an address, the Service stays `<pending>`. Without the Secret, the pod waits in `ContainerCreating`.
+
+**No seccomp profile of the chart's:** by default, the pod asks for the runtime's profile (`seccompProfile: type: RuntimeDefault`), which suits most clusters. Since 2026-11-10, Rahti's admission rejects pods that do, and sets a profile of its own on pods that name none: `--set podSecurityContext.seccompProfile=null` drops it, and leaves the rest of the security context as it is. In a values file, `podSecurityContext: {seccompProfile: null}` does the same. Without it, the Deployment has no pod, and `oc get events` names the profile.
 
 The Route must say `Admitted=True`. If another project already has its name, the router rejects it (`HostAlreadyClaimed`), and links to kits would lead to someone else's app: pick another `kitsHost`, with `helm upgrade`.
 
@@ -203,6 +206,8 @@ The Route must say `Admitted=True`. If another project already has its name, the
 | `flScheme` | `grpc` | `grpc`, or `http` (WebSocket, see [T7](../tests/t7-port-443.md)) |
 | `loadBalancerIP` | Empty | Internal address of the project's pool (`192.168.…`), not the public one. Empty: one of the pool's |
 | `sitesSecret` | `nvflare-wes-sites` | Secret with the sites file under the key `sites.json` |
+| `podSecurityContext` | `runAsNonRoot: true`, `seccompProfile: {type: RuntimeDefault}` | Security context of the pod. On Rahti, `--set podSecurityContext.seccompProfile=null` |
+| `securityContext` | `allowPrivilegeEscalation: false`, all capabilities dropped | Security context of the container |
 | `resources` | 250m CPU and 1 GiB, up to 2 CPUs and 2 GiB | Requests and limits of the pod |
 
 **Reach the WES** (Fish), in a terminal of its own, which keeps the tunnel open:
