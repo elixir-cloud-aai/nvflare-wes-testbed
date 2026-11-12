@@ -25,11 +25,8 @@ spec:
         - ip: 127.0.0.1
           hostnames:
             - {{ .Values.hubName | quote }}
-      # No `runAsUser`: OpenShift picks an arbitrary one
       securityContext:
-        runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: hub
           image: {{ include "hub.image" . | quote }}
@@ -77,9 +74,7 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 6
           securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
+            {{- toYaml .Values.securityContext | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
