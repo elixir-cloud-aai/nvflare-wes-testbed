@@ -22,7 +22,6 @@ import json
 import logging
 import os
 import pathlib
-import re
 import secrets
 import shutil
 import socket
@@ -31,12 +30,15 @@ import tarfile
 import threading
 import time
 import uuid
+from collections.abc import Mapping
 from typing import Annotated, Any
 
 import anyio
 import requests
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, Response
+
+from wes import tokens
 
 logger = logging.getLogger("wes")
 
@@ -46,38 +48,45 @@ FL_HOST = os.environ.get("FL_SERVER_NAME", "fl-hub")
 IMAGE = os.environ.get("FL_IMAGE", "nvflare-testbed:local")
 JOBS = pathlib.Path(os.environ.get("FL_JOBS", "/app/testset/job"))
 # {"site-1": {"tes": "http://funnel-site-1:8000", "data": "file:///data/site-1.csv"}, ...},
-# from a file if `WES_SITES_FILE` is set, as a site's optional `token` for its TES is a secret
+# from a file if `WES_SITES_FILE` is set, as a site's optional `token` for its TES is a secret.
+# In place of `token`, a site may name a `token_file` or an `oauth` provider (`wes/tokens.py`)
 SITES_FILE = os.environ.get("WES_SITES_FILE", "")
 
 
-def load_sites(text: str) -> dict[str, dict[str, str]]:
-    """Read the sites, and check their tokens, as a bad one would end up in errors and logs.
+def load_sites(
+    text: str, environ: Mapping[str, str] | None = None
+) -> tuple[dict[str, dict[str, Any]], dict[str, tokens.TokenSource]]:
+    """Read the sites, and check their token sources, as a bad one would end up in errors and logs.
 
     Args:
         text: The sites, as JSON.
+        environ: The environment that `oauth` sources take their secrets from,
+            by default the process's.
 
     Returns:
-        The sites.
+        The sites, and the token source of each site that has one (`token`,
+        `token_file` or `oauth`, see `wes/tokens.py`).
 
     Raises:
         ValueError: A site is named `server`, which stands for the task of the FL
-            server, or a token can't go into a header, or only over plain HTTP.
-            The message doesn't hold the token.
+            server, or a token source can't work, or would send tokens over
+            plain HTTP. The message doesn't hold a token or secret.
     """
-    sites: dict[str, dict[str, str]] = json.loads(text)
+    sites: dict[str, dict[str, Any]] = json.loads(text)
     if "server" in sites:
         raise ValueError("A site can't be named server")
+    sources: dict[str, tokens.TokenSource] = {}
     for name, site in sites.items():
-        if "token" not in site:
+        source = tokens.from_site(name, site, environ)
+        if source is None:
             continue
-        if not re.fullmatch(r"[\x21-\x7e]+", site["token"]):
-            raise ValueError(f"The token of site {name} has characters that can't go into a header")
-        if not site.get("tes", "").startswith("https://"):
+        if not str(site.get("tes", "")).startswith("https://"):
             raise ValueError(f"The token of site {name} only goes to a TES over https")
-    return sites
+        sources[name] = source
+    return sites, sources
 
 
-SITES = load_sites(pathlib.Path(SITES_FILE).read_text() if SITES_FILE else os.environ.get("WES_SITES", "{}"))
+SITES, TOKENS = load_sites(pathlib.Path(SITES_FILE).read_text() if SITES_FILE else os.environ.get("WES_SITES", "{}"))
 # If set, tasks go to this gateway (proTES), pinned to the TES of the site by tag
 TES_GATEWAY = os.environ.get("TES_GATEWAY_URL", "")
 TES_GATEWAY_TOKEN_URL = os.environ.get("TES_GATEWAY_TOKEN_URL", "")
@@ -324,7 +333,11 @@ def tes_headers(site: str) -> dict[str, str]:
         site: Name of the site, or `server` for the task of the FL server.
 
     Returns:
-        The headers: an access token if there's one, else none.
+        The headers: an access token if there's one, else none. A site's
+        token is read or renewed here, when it's needed (`wes/tokens.py`).
+
+    Raises:
+        tokens.TokenError: The site's token couldn't be had.
     """
     if TES_GATEWAY_TOKEN_URL:
         token = requests.get(TES_GATEWAY_TOKEN_URL, timeout=10).json()["access_token"]
@@ -332,8 +345,36 @@ def tes_headers(site: str) -> dict[str, str]:
         # The token of a site is for its TES alone, and never goes to a gateway
         token = ""
     else:
-        token = SITES.get(site, {}).get("token", "")
+        source = TOKENS.get(site)
+        token = source.token() if source is not None else ""
     return {"Authorization": f"Bearer {token}"} if token else {}
+
+
+def tes_request(method: str, site: str, url: str, **kwargs: Any) -> requests.Response:
+    """Send a request to the TES of a site, or the gateway, with the site's token.
+
+    If the TES refuses the token (`401`) and the site's token can be renewed,
+    it is renewed, and the request is sent once more.
+
+    Args:
+        method: The HTTP method.
+        site: Name of the site, or `server` for the task of the FL server.
+        url: The URL.
+        **kwargs: For `requests.request`, but no `headers`.
+
+    Returns:
+        The response.
+
+    Raises:
+        tokens.TokenError: The site's token couldn't be had.
+    """
+    reply = requests.request(method, url, headers=tes_headers(site), **kwargs)
+    source = None if TES_GATEWAY else TOKENS.get(site)
+    if reply.status_code == 401 and source is not None and source.renewable:
+        logger.info("TES of %s refused the token, renewing it", site)
+        source.invalidate()
+        reply = requests.request(method, url, headers=tes_headers(site), **kwargs)
+    return reply
 
 
 def tes_base(site: str) -> str:
@@ -466,14 +507,14 @@ def update_tasks(run: dict[str, Any], wait: float = 0) -> None:
         for task in run["tasks"]:
             # A TES out of reach must neither end a run's cleanup, nor look like a task's end
             try:
-                reply = requests.get(
-                    f"{task['base']}/tasks/{task['id']}",
-                    params={"view": "MINIMAL"},
-                    headers=tes_headers(task["site"]),
-                    timeout=30,
+                reply = tes_request(
+                    "GET", task["site"], f"{task['base']}/tasks/{task['id']}", params={"view": "MINIMAL"}, timeout=30
                 )
             except requests.RequestException:
                 logger.warning("TES of %s is out of reach", task["site"])
+                continue
+            except tokens.TokenError as error:
+                logger.warning("No token for the TES of %s: %s", task["site"], error)
                 continue
             if reply.ok:
                 task["state"] = reply.json().get("state", "UNKNOWN")
@@ -510,10 +551,8 @@ def cancel_tasks(run: dict[str, Any]) -> None:
     for task in run["tasks"]:
         if task["state"] not in TERMINAL_TES:
             try:
-                requests.post(
-                    f"{task['base']}/tasks/{task['id']}:cancel", headers=tes_headers(task["site"]), timeout=30
-                )
-            except requests.RequestException:
+                tes_request("POST", task["site"], f"{task['base']}/tasks/{task['id']}:cancel", timeout=30)
+            except (requests.RequestException, tokens.TokenError):
                 logger.warning("Couldn't cancel the task of %s", task["site"])
 
 
@@ -554,11 +593,8 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
             token, csr_url = issue_csr_token(run_id, site)
             tokens.append(token)
             base = tes_base(site)
-            reply = requests.post(
-                f"{base}/tasks",
-                json=client_task(run_id, site, project, csr_url, fingerprint),
-                headers=tes_headers(site),
-                timeout=60,
+            reply = tes_request(
+                "POST", site, f"{base}/tasks", json=client_task(run_id, site, project, csr_url, fingerprint), timeout=60
             )
             reply.raise_for_status()
             run["tasks"].append({"site": site, "id": reply.json()["id"], "base": base, "state": "QUEUED"})

@@ -5,54 +5,112 @@ import os
 import pathlib
 import sys
 import tempfile
+from typing import Any
+from unittest import mock
 
 SITES = {
     "site-1": {"tes": "https://tes.site-1.example.org", "data": "https://example.org/1.csv", "token": "decoy-token-1"},
     "site-2": {"tes": "https://tes.site-2.example.org", "data": "https://example.org/2.csv"},
+    "site-3": {"tes": "https://tes.site-3.example.org", "data": "https://example.org/3.csv", "token_file": ""},
 }
+
+
+class FakeResponse:
+    """A response of a TES, with only a status."""
+
+    def __init__(self, status_code: int) -> None:
+        """Build the response.
+
+        Args:
+            status_code: Its status.
+        """
+        self.status_code = status_code
 
 
 def main() -> None:
     """Load the WES with a sites file, and check its headers and task records."""
     with tempfile.TemporaryDirectory() as directory:
+        token_file = pathlib.Path(directory) / "site-3.token"
+        token_file.write_text("decoy-file-token-1\n")
+        sites = json.loads(json.dumps(SITES))
+        sites["site-3"]["token_file"] = str(token_file)
         path = pathlib.Path(directory) / "sites.json"
-        path.write_text(json.dumps(SITES))
+        path.write_text(json.dumps(sites))
         os.environ["WES_SITES"] = '{"from-the-environment": {}}'
         os.environ["WES_SITES_FILE"] = str(path)
         sys.path.insert(0, "/app")
         from wes import app as wes
 
-    # A TES out of reach must not break the cleanup of a run
-    run = {"tasks": [{"site": "site-2", "id": "x", "base": "http://127.0.0.1:9", "state": "RUNNING"}]}
-    wes.update_tasks(run)
-    wes.cancel_tasks(run)
-    refusals = {}
-    for name, sites in {
-        "a bad token": {"site-1": {"tes": "https://tes", "token": "decoy-token-3\n"}},
-        "a token over plain HTTP": {"site-1": {"tes": "http://tes", "token": "decoy-token-4"}},
-        "a site named server": {"server": {"tes": "https://tes"}},
-    }.items():
-        try:
-            wes.load_sites(json.dumps(sites))
-            refusals[name] = "accepted"
-        except ValueError as error:
-            refusals[name] = str(error)
-    wes.TES_GATEWAY = "https://gateway.example.org"
-    gateway_headers = wes.tes_headers("site-1")
-    wes.TES_GATEWAY = ""
+        # A TES out of reach must not break the cleanup of a run
+        run = {"tasks": [{"site": "site-2", "id": "x", "base": "http://127.0.0.1:9", "state": "RUNNING"}]}
+        wes.update_tasks(run)
+        wes.cancel_tasks(run)
+        refusals = {}
+        for name, bad_sites in {
+            "a bad token": {"site-1": {"tes": "https://tes", "token": "decoy-token-3\n"}},
+            "a token over plain HTTP": {"site-1": {"tes": "http://tes", "token": "decoy-token-4"}},
+            "a token file over plain HTTP": {"site-1": {"tes": "http://tes", "token_file": str(token_file)}},
+            "two token sources": {"site-1": {"tes": "https://tes", "token": "decoy-5", "token_file": str(token_file)}},
+            "a site named server": {"server": {"tes": "https://tes"}},
+        }.items():
+            try:
+                wes.load_sites(json.dumps(bad_sites))
+                refusals[name] = "accepted"
+            except ValueError as error:
+                refusals[name] = str(error)
+        wes.TES_GATEWAY = "https://gateway.example.org"
+        gateway_headers = [wes.tes_headers("site-1"), wes.tes_headers("site-3")]
+        wes.TES_GATEWAY = ""
+
+        file_headers = [wes.tes_headers("site-3")]
+        token_file.write_text("decoy-file-token-2")
+        file_headers.append(wes.tes_headers("site-3"))
+
+        # The TES of site 3 refuses the first token, which is renewed meanwhile;
+        # the TES of site 1 refuses its one token
+        seen: list[str] = []
+
+        def tes(method: str, url: str, headers: dict[str, str], **kwargs: Any) -> FakeResponse:
+            seen.append(headers.get("Authorization", ""))
+            if "site-3" in url and len(seen) == 1:
+                token_file.write_text("decoy-file-token-3")
+                return FakeResponse(401)
+            return FakeResponse(200 if headers.get("Authorization") == "Bearer decoy-file-token-3" else 401)
+
+        with mock.patch.object(wes.requests, "request", side_effect=tes):
+            renewed = wes.tes_request("GET", "site-3", "https://tes.site-3.example.org/x", timeout=1).status_code
+            seen_renewal = list(seen)
+            seen.clear()
+            static = wes.tes_request("GET", "site-1", "https://tes.site-1.example.org/x", timeout=1).status_code
+            seen_static = list(seen)
+
+        # A token that can't be had leaves the cleanup of a run alone, and stays out of the logs
+        token_file.unlink()
+        run_3 = {"tasks": [{"site": "site-3", "id": "x", "base": "https://tes.site-3.example.org", "state": "RUNNING"}]}
+        with mock.patch.object(wes.logger, "warning") as warning:
+            wes.update_tasks(run_3)
+            wes.cancel_tasks(run_3)
+        logged = json.dumps([str(call) for call in warning.call_args_list])
 
     checks = {
         "a TES out of reach leaves the state of a task alone": run["tasks"][0]["state"] == "RUNNING",
         **{f"{name} is refused": refusal != "accepted" for name, refusal in refusals.items()},
-        "the refusals don't hold the tokens": "decoy-token" not in json.dumps(refusals),
-        "the token of a site doesn't go to a gateway": gateway_headers == {},
+        "the refusals don't hold the tokens": "decoy" not in json.dumps(refusals),
+        "the token of a site doesn't go to a gateway": gateway_headers == [{}, {}],
         "the file wins over the environment": set(wes.SITES) == set(SITES),
         "a site with a token gets it": wes.tes_headers("site-1") == {"Authorization": "Bearer decoy-token-1"},
         "a site without a token gets none": wes.tes_headers("site-2") == {},
         "no site, no token": wes.tes_headers("server") == {},
-        "the task record holds no token": "decoy-token"
-        not in json.dumps(wes.client_task("r", "site-1", "proj", "https://k", "ab:cd")),
-        "the service info holds no token": "decoy-token" not in json.dumps(wes.service_info()),
+        "a token file is read for each request": file_headers
+        == [{"Authorization": "Bearer decoy-file-token-1"}, {"Authorization": "Bearer decoy-file-token-2"}],
+        "a refused token is renewed, and the request sent once more": renewed == 200
+        and seen_renewal == ["Bearer decoy-file-token-2", "Bearer decoy-file-token-3"],
+        "a refused token that can't be renewed is sent once": static == 401 and seen_static == ["Bearer decoy-token-1"],
+        "a missing token leaves the task alone": run_3["tasks"][0]["state"] == "RUNNING" and warning.call_count == 2,
+        "a missing token is logged without tokens": "site-3" in logged and "decoy" not in logged,
+        "the task records hold no token": "decoy"
+        not in json.dumps([wes.client_task("r", site, "proj", "https://k", "ab:cd") for site in ("site-1", "site-3")]),
+        "the service info holds no token": "decoy" not in json.dumps(wes.service_info()),
     }
     for name, passed in checks.items():
         print(f"[{'ok' if passed else 'FAIL'}] {name}")
