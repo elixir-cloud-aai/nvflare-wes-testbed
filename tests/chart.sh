@@ -162,6 +162,21 @@ expect "FL port 30002 by default" "${lb} | .spec.ports[0].port" "30002"
 expect "grpc by default" "${env} | select(.name == \"FL_SCHEME\") | .value" "grpc"
 expect "the Secret's default name" \
     "${dep} | .spec.template.spec.volumes[] | select(.name == \"sites\") | .secret.secretName" "nvflare-wes-sites"
+expect "not as root by default" "${dep} | .spec.template.spec.securityContext.runAsNonRoot" "true"
+expect "the runtime's seccomp profile by default" \
+    "${dep} | .spec.template.spec.securityContext.seccompProfile.type" "RuntimeDefault"
+expect "no privilege escalation by default" "${ctr} | .securityContext.allowPrivilegeEscalation" "false"
+expect "no capabilities by default" "${ctr} | .securityContext.capabilities.drop | join(\",\")" "ALL"
+
+# Rahti's admission rejects RuntimeDefault, and sets a profile of its own when
+# the pod names none: the override in the docs removes it and nothing else
+helm template hub "${chart}" "${args[@]}" --set podSecurityContext.seccompProfile=null >"${out}"
+expect "no seccomp profile with the override for Rahti" \
+    "[${dep} | .. | select(tag == \"!!map\") | select(has(\"seccompProfile\"))] | length" "0"
+expect "still not as root with the override for Rahti" \
+    "${dep} | .spec.template.spec.securityContext.runAsNonRoot" "true"
+expect "still no privilege escalation with the override for Rahti" \
+    "${ctr} | .securityContext.allowPrivilegeEscalation" "false"
 
 # OpenShift 4.20's schemas, with its Route, at a fixed commit
 schemas=https://raw.githubusercontent.com/melmorabity/openshift-json-schemas/62ad608b18edcd8ef4b6dd3741fc36115813fd18/v4.20-standalone-strict

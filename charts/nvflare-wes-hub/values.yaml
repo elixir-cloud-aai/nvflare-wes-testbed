@@ -38,6 +38,21 @@ loadBalancerIP: ""
 # create secret`, and never commit it
 sitesSecret: nvflare-wes-sites
 
+# The security context of the pod. No `runAsUser`: OpenShift picks an
+# arbitrary one. `RuntimeDefault` suits most clusters, but Rahti's admission
+# rejects it and sets a profile of its own when the pod names none: there, add
+# `--set podSecurityContext.seccompProfile=null`
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+# The security context of the container
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
 resources:
   requests:
     cpu: 250m
