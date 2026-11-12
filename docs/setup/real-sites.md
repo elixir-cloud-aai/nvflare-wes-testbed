@@ -42,7 +42,7 @@ The FL port of a [hub](#what-the-hub-needs) only listens during a run, so start 
 docker run --rm -p 8002:8002 elixircloud/nvflare-wes-testbed:dev python3 /app/tests/probe.py listen 8002
 ```
 
-Stop the listener before the hub's first run. While it holds the FL port, the FL server can't bind it, so the WES refuses to start runs, with "The FL port … is in use" in the run's `system_logs`.
+Stop the listener before you start the hub: while it holds the FL port, the hub can't publish it, and `docker compose up` fails. A listener inside the hub's own container makes the WES refuse runs, with "The FL port … is in use" in the run's `system_logs`.
 
 Then, on any machine with Docker that can reach the TES:
 
@@ -172,7 +172,7 @@ The sites file comes from a Secret that you create, which isn't part of the char
 
     If the nodes only let out 443, Rahti won't do: use a VM, [as above](#where-it-goes).
 
-    A listener in the hub's own pod (`oc exec deploy/hub-nvflare-wes-hub -- python3 /app/tests/probe.py listen 30002`) holds the FL port until the pod restarts, so runs fail until you stop it: `oc rollout restart deployment/hub-nvflare-wes-hub`, which also forgets the hub's runs ([H2](../testbed/shortcuts.md#h2)).
+    A listener in the hub's own pod holds the FL port while it runs, and the WES refuses runs, with "The FL port … is in use" in the run's `system_logs`. Start it with a terminal (`oc exec -it deploy/hub-nvflare-wes-hub -- python3 /app/tests/probe.py listen 30002`), and stop it with Ctrl-C before the first run. Without `-t`, it can stay behind after `oc` ends: then restart the pod, `oc rollout restart deployment/hub-nvflare-wes-hub`, which also forgets the hub's runs ([H2](../testbed/shortcuts.md#h2)).
 3. **Two names.** The hub's name, of your own, for an `A` record to the address (not under `rahtiapp.fi`, which leads to the routers; the chart refuses it). And a name for the Route of the kits, which leads to the routers, so it can't be the same: a free name ending in `.rahtiapp.fi`, such as `<kits name>.2.rahtiapp.fi`, which works out of the box by [Rahti's docs](https://docs.csc.fi/cloud/rahti/usage/networking/), with the router's certificate. The chart has no certificate of its own, so it refuses other names.
 4. **Tools:** `oc` and `helm` 3, logged in with the command that Rahti's web console copies for you (`oc login --token=…`, a secret: don't paste it anywhere else).
 

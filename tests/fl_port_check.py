@@ -15,7 +15,7 @@ import time
 
 
 def main() -> None:
-    """Hold a port, and check the port check and a run against it."""
+    """Hold a port, and check the port checks and a run against it."""
     with tempfile.TemporaryDirectory() as directory:
         os.environ["WES_WORKDIR"] = directory
         # A TES that refuses connections: a run that gets as far as its tasks fails otherwise
@@ -32,11 +32,20 @@ def main() -> None:
             except RuntimeError as error:
                 busy_error = str(error)
 
+            # A regression that starts an FL server anyway must fail fast, not wait out the start timeout
+            wes.START_TIMEOUT = 5
+            wes.FL_SERVER_MODE = "local"
             wes.RUNS["r"] = {"state": "QUEUED", "tasks": [], "outputs": {}}
             started = time.monotonic()
             wes.execute("r", pathlib.Path(directory) / "job", ["site-1"])
             took = time.monotonic() - started
             run = wes.RUNS["r"]
+            # The FL server of a TES task doesn't run here, so the port of this container doesn't matter
+            wes.FL_SERVER_MODE = "tes"
+            wes.RUNS["t"] = {"state": "QUEUED", "tasks": [], "outputs": {}}
+            wes.execute("t", pathlib.Path(directory) / "job", ["site-1"])
+            tes_run = wes.RUNS["t"]
+            wes.FL_SERVER_MODE = "local"
 
         try:
             wes.ensure_port_free(port)
@@ -44,14 +53,36 @@ def main() -> None:
         except RuntimeError as error:
             free_error = str(error)
 
+        # What NVFlare's gRPC logs when it can't bind, as on Rahti; the server starts anyway
+        log = pathlib.Path(directory) / "server.log"
+        log.write_text(
+            "E1112 17:31:44.926438      59 add_port.cc:83] Failed to add port to server: No address added out of"
+            f" total 1 resolved for '0.0.0.0:{port}' (... Address already in use)\n"
+            "2026-11-12 17:31:44,932 - Server - INFO - added secure port at 0.0.0.0:8003\n"
+        )
+        try:
+            wes.check_server_bound(log, port)
+            log_error = ""
+        except RuntimeError as error:
+            log_error = str(error)
+        log.write_text("2026-11-12 17:31:44,932 - Server - INFO - added secure port at 0.0.0.0:8003\n")
+        try:
+            wes.check_server_bound(log, port)
+            clean_error = ""
+        except RuntimeError as error:
+            clean_error = str(error)
+
     checks = {
         "a held port is refused": busy_error != "",
         "the refusal names the port": str(port) in busy_error,
         "a free port passes": free_error == "",
         "the run ends with SYSTEM_ERROR": run["state"] == "SYSTEM_ERROR",
-        "the run's error says the FL port is in use": "in use" in run.get("error", ""),
+        "the run's error says the FL port is in use": f"FL port {port} is in use" in run.get("error", ""),
         "the run submits no tasks": run["tasks"] == [],
         "the run fails at once, not after the start timeout": took < 30,
+        "a run with the FL server in a TES task skips the check": "is in use" not in tes_run.get("error", ""),
+        "a server log with a failed bind is refused": f"FL port {port} is in use" in log_error,
+        "a server log without one passes": clean_error == "",
     }
     for name, passed in checks.items():
         print(f"[{'ok' if passed else 'FAIL'}] {name}")

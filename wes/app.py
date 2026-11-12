@@ -336,8 +336,25 @@ def ensure_port_free(port: int) -> None:
             pass
     except OSError as error:
         raise RuntimeError(
-            f"The FL port {port} is in use by another process in the hub's container, such as a probe listener"
+            f"The FL port {port} is in use in the hub's container, such as by a probe listener"
         ) from error
+
+
+def check_server_bound(log_path: pathlib.Path, port: int) -> None:
+    """Check that the FL server got its port, by its log.
+
+    `ensure_port_free` can't see a listener that starts after it, or one on
+    another address family, and the FL server starts anyway without its port.
+
+    Args:
+        log_path: File with the output of the server.
+        port: The FL port.
+
+    Raises:
+        RuntimeError: The server logged that it couldn't bind the port.
+    """
+    if "Failed to add port" in log_path.read_text(errors="replace"):
+        raise RuntimeError(f"The FL port {port} is in use in the hub's container: the FL server couldn't bind it")
 
 
 def publish_kit(kit_dir: pathlib.Path, run_dir: pathlib.Path) -> tuple[str, str]:
@@ -650,6 +667,7 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
         else:
             server = start_server(server_kit, run_dir / "server.log")
             wait_for_port("127.0.0.1", ADMIN_PORT, START_TIMEOUT)
+            check_server_bound(run_dir / "server.log", FL_PORT)
         for site in sites:
             token, csr_url = issue_csr_token(run_id, site)
             slots.append(token)
