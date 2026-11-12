@@ -92,6 +92,8 @@ jobs:
           persist-credentials: false
       - name: Unit-test the checks from outside
         run: python3 tests/outside_check_test.py
+      - name: Unit-test the token sources of sites
+        run: python3 tests/tokens_test.py
       - name: Check that the image holds no site data or secrets
         run: tests/image-contents.sh
       - name: Build images
