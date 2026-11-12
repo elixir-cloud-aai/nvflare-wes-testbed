@@ -79,6 +79,14 @@ services:
       WES_EXPECTED: ${WES_EXPECTED:-403}
     networks: [hub]
 
+  # The checks from outside of `docs/setup/real-sites.md`, with the name of the
+  # hub for both names, and the proxy's test CA
+  outside-check:
+    image: nvflare-testbed:local
+    profiles: [test]
+    command: ["python3", "/app/tests/outside_check.py", "--insecure", "${FL_SERVER_NAME}", "${FL_SERVER_NAME}"]
+    networks: [hub]
+
   # Who may start runs, and which tokens go where: no network needed
   site-config-check:
     image: nvflare-testbed:local
