@@ -233,12 +233,12 @@ Every check should say `[ok]`, with a `[warn]` for the FL port outside a run: `/
 **Update or remove it** (Fish). An update restarts the pod, which forgets its runs ([H2](../testbed/shortcuts.md#h2)): check for tasks left at the sites.
 
 ```fish
-helm upgrade hub charts/nvflare-wes-hub --reuse-values --set image.tag=sha-<commit>
+helm upgrade hub charts/nvflare-wes-hub --reset-then-reuse-values --set image.tag=sha-<commit>
 helm uninstall hub
 oc delete secret nvflare-wes-sites
 ```
 
-`--reuse-values` keeps the defaults of the chart you installed, not the new ones: an install from before the CPU request of 400m keeps 250m. To take up new defaults and keep your own values, use `--reset-then-reuse-values` (Helm 3.14 or later) in place of `--reuse-values`.
+`--reset-then-reuse-values` (Helm 3.14 or later) keeps your own values and takes up the chart's new defaults. `--reuse-values` would keep the defaults of the chart you installed: an install from before the CPU request of 400m would keep 250m.
 
 After editing `sites.json`, replace the Secret and restart the pod:
 

@@ -176,7 +176,7 @@ max_ratio=5
 # forms (such as `1e3` or `0.0005`) fail the check, rather than pass unchecked
 millicores() {
     awk -v q="$1" 'BEGIN {
-        if (q ~ /^[0-9]+m$/) { print substr(q, 1, length(q) - 1); exit }
+        if (q ~ /^[0-9]+m$/) { print substr(q, 1, length(q) - 1) + 0; exit }
         if (q ~ /^[0-9]+(\.[0-9]{1,3})?$/) {
             n = split(q, p, ".")
             print p[1] * 1000 + (n > 1 ? substr(p[2] "00", 1, 3) : 0)
