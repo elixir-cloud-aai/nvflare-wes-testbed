@@ -195,6 +195,8 @@ oc get route hub-nvflare-wes-hub-kits -o jsonpath='{.status.ingress[0].condition
 
 **No seccomp profile of the chart's:** by default, the pod asks for the runtime's profile (`seccompProfile: type: RuntimeDefault`), which suits most clusters. Since 2026-11-10, Rahti's admission rejects pods that do, and sets a profile of its own on pods that name none: `--set podSecurityContext.seccompProfile=null` drops it, and leaves the rest of the security context as it is. In a values file, `podSecurityContext: {seccompProfile: null}` does the same. Without it, the ReplicaSet creates no pod, and `oc get events` names the profile.
 
+**LimitRanges:** clusters with a LimitRange may cap the ratio of a container's limit to its request (`maxLimitRequestRatio`), often at 5 for CPU, and refuse pods above it. The defaults keep it at 5 for CPU (400m, up to 2) and at 2 for memory. To change `resources`, set requests and limits together, such as `--set resources.requests.cpu=500m --set resources.limits.cpu=2`, and keep each ratio within your cluster's: `oc describe limitrange` shows it. Above it, the ReplicaSet creates no pod, and `oc get events` names the ratio.
+
 The Route must say `Admitted=True`. If another project already has its name, the router rejects it (`HostAlreadyClaimed`), and links to kits would lead to someone else's app: pick another `kitsHost`, with `helm upgrade`.
 
 | Value | Default | Meaning |
@@ -208,7 +210,7 @@ The Route must say `Admitted=True`. If another project already has its name, the
 | `sitesSecret` | `nvflare-wes-sites` | Secret with the sites file under the key `sites.json` |
 | `podSecurityContext` | `runAsNonRoot: true`, `seccompProfile: {type: RuntimeDefault}` | Security context of the pod. On Rahti, `--set podSecurityContext.seccompProfile=null` |
 | `securityContext` | `allowPrivilegeEscalation: false`, all capabilities dropped | Security context of the container |
-| `resources` | 250m CPU and 1 GiB, up to 2 CPUs and 2 GiB | Requests and limits of the pod |
+| `resources` | 400m CPU and 1 GiB, up to 2 CPUs and 2 GiB | Requests and limits of the pod. The CPU limit stays at most 5 times the request (see LimitRanges above) |
 
 **Reach the WES** (Fish), in a terminal of its own, which keeps the tunnel open:
 

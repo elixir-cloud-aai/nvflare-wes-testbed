@@ -168,6 +168,29 @@ expect "the runtime's seccomp profile by default" \
 expect "no privilege escalation by default" "${ctr} | .securityContext.allowPrivilegeEscalation" "false"
 expect "no capabilities by default" "${ctr} | .securityContext.capabilities.drop | join(\",\")" "ALL"
 
+# Clusters with a LimitRange often allow a CPU limit of at most 5 times the
+# request (`maxLimitRequestRatio`), and refuse pods above it. Every container
+# of the defaults sets both, as such a LimitRange fills in a missing one
+millicores() {
+    awk -v q="$1" 'BEGIN {
+        if (q ~ /^[0-9]+m$/) { print substr(q, 1, length(q) - 1); exit }
+        if (q ~ /^[0-9]+(\.[0-9]+)?$/) { printf "%d\n", q * 1000; exit }
+        exit 1
+    }'
+}
+containers="$(yq ea -r "${dep} | .spec.template.spec | (.initContainers // []) + .containers | .[] |
+    .name + \" \" + (.resources.requests.cpu // \"-\") + \" \" + (.resources.limits.cpu // \"-\")" "${out}")"
+[[ -n "${containers}" ]] || fail "no containers in the defaults"
+while read -r name request limit; do
+    if ! req_m="$(millicores "${request}")" || ! lim_m="$(millicores "${limit}")" || ((req_m == 0)); then
+        fail "CPU request and limit of ${name} by default: got '${request}' and '${limit}'"
+    elif ((lim_m <= 5 * req_m)); then
+        ok "CPU limit at most 5 times the request of ${name} by default (${limit}/${request})"
+    else
+        fail "CPU limit more than 5 times the request of ${name} by default (${limit}/${request})"
+    fi
+done <<<"${containers}"
+
 # Rahti's admission rejects RuntimeDefault, and sets a profile of its own when
 # the pod names none: the override in the docs removes it and nothing else
 helm template hub "${chart}" "${args[@]}" --set podSecurityContext.seccompProfile=null >"${out}"
