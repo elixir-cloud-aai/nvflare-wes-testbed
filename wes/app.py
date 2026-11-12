@@ -806,7 +806,7 @@ AUTH_DEPENDENCY = Depends(authenticated)
 
 
 def identity(claims: dict[str, Any] = AUTH_DEPENDENCY) -> str:
-    """The caller's identity: a token's `sub`, checked safe and, if configured, allowed (H22).
+    """The caller's identity: a token's `email`, if its `sub` checks out and is allowed (H22).
 
     Args:
         claims: The caller's validated claims.
@@ -815,15 +815,21 @@ def identity(claims: dict[str, Any] = AUTH_DEPENDENCY) -> str:
         The identity, as the FLARE admin's name for a run it starts.
 
     Raises:
-        HTTPException: The subject is missing or unsafe to use as a FLARE admin's
-            name, or `WES_OIDC_ALLOWED_SUBS` is set and doesn't list it.
+        HTTPException: The subject is missing, or `WES_OIDC_ALLOWED_SUBS` is set
+            and doesn't list it, or the email is missing or unsafe to use as a
+            FLARE admin's name.
     """
     sub = claims.get("sub")
-    if not sub or not re.fullmatch(r"[A-Za-z0-9._@-]{1,64}", sub):
-        raise HTTPException(400, "The subject of this token has characters that can't name a FLARE admin")
+    if not sub:
+        raise HTTPException(400, "Bearer token is missing required 'sub' claim")
     if ALLOWED_SUBS and sub not in ALLOWED_SUBS:
         raise HTTPException(403, "This identity isn't allowed to use this WES")
-    return sub
+    email = claims.get("email")
+    if not email:
+        raise HTTPException(400, "The provided token is missing email claim")
+    if not re.fullmatch(r"[A-Za-z0-9._@-]{1,80}", email):
+        raise HTTPException(400, "The submitter email has characters that can't name a FLARE admin")
+    return email
 
 
 IDENTITY_DEPENDENCY = Depends(identity)

@@ -59,7 +59,14 @@ class Handler(BaseHTTPRequestHandler):
             sub = parse_qs(url.query).get("sub", ["fl-wes"])[0]
             now = int(time.time())
             token = jwt.encode(
-                {"iss": ISSUER, "aud": AUDIENCE, "sub": sub, "iat": now, "exp": now + 600},
+                {
+                    "iss": ISSUER,
+                    "aud": AUDIENCE,
+                    "email": f"{sub}@testbed.invalid",
+                    "sub": sub,
+                    "iat": now,
+                    "exp": now + 600,
+                },
                 KEY,
                 algorithm="RS256",
                 headers={"kid": "fake", "typ": "at+jwt"},

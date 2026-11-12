@@ -107,11 +107,15 @@ def main() -> None:
                 return error.status_code
             return 200
 
-        checks["a safe subject is accepted"] = id_status({"sub": "researcher-1"}) == 200
+        checks["a safe subject is accepted"] = (
+            id_status({"sub": "researcher-1", "email": "researcher-1@testbed.invalid"}) == 200
+        )
         checks["a missing subject is rejected"] = id_status({}) == 400
-        checks["an unsafe subject is rejected"] = id_status({"sub": "not a safe name!"}) == 400
+        checks["an unsafe email is rejected"] = id_status({"sub": "researcher-1", "email": "not a safe email!"}) == 400
         wes.ALLOWED_SUBS = {"researcher-1"}
-        checks["an allowed subject is accepted"] = id_status({"sub": "researcher-1"}) == 200
+        checks["an allowed subject is accepted"] = (
+            id_status({"sub": "researcher-1", "email": "researcher-1@testbed.invalid"}) == 200
+        )
         checks["a disallowed subject is rejected"] = id_status({"sub": "someone-else"}) == 403
         wes.ALLOWED_SUBS = set()
 

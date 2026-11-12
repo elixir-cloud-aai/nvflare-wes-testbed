@@ -68,7 +68,7 @@ def main() -> None:
         len(log["task_logs"]) >= 2 and all(t["system_logs"] == ["COMPLETE"] for t in log["task_logs"]),
         [(t["name"], t["system_logs"]) for t in log["task_logs"]],
     )
-    check("run log names its submitter", log["submitter"] == "researcher-1", log["submitter"])
+    check("run log names its submitter", log["submitter"] == "researcher-1@testbed.invalid", log["submitter"])
 
     base = WES.split("/ga4gh")[0]
     model = requests.get(f"{base}/outputs/{run_id}/global_model.npy", headers=AUTH, timeout=30)
