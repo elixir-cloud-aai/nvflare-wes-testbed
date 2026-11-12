@@ -22,7 +22,6 @@ import json
 import logging
 import os
 import pathlib
-import re
 import secrets
 import shutil
 import socket
@@ -31,12 +30,15 @@ import tarfile
 import threading
 import time
 import uuid
+from collections.abc import Mapping
 from typing import Annotated, Any
 
 import anyio
 import requests
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, Response
+
+from wes import tokens
 
 logger = logging.getLogger("wes")
 
@@ -46,38 +48,56 @@ FL_HOST = os.environ.get("FL_SERVER_NAME", "fl-hub")
 IMAGE = os.environ.get("FL_IMAGE", "nvflare-testbed:local")
 JOBS = pathlib.Path(os.environ.get("FL_JOBS", "/app/testset/job"))
 # {"site-1": {"tes": "http://funnel-site-1:8000", "data": "file:///data/site-1.csv"}, ...},
-# from a file if `WES_SITES_FILE` is set, as a site's optional `token` for its TES is a secret
+# from a file if `WES_SITES_FILE` is set, as a site's optional `token` for its TES is a secret.
+# In place of `token`, a site may name a `token_file` or an `oauth` provider (`wes/tokens.py`)
 SITES_FILE = os.environ.get("WES_SITES_FILE", "")
 
 
-def load_sites(text: str) -> dict[str, dict[str, str]]:
-    """Read the sites, and check their tokens, as a bad one would end up in errors and logs.
+def load_sites(
+    text: str, environ: Mapping[str, str] | None = None
+) -> tuple[dict[str, dict[str, Any]], dict[str, tokens.TokenSource]]:
+    """Read the sites, and check their token sources, as a bad one would end up in errors and logs.
 
     Args:
         text: The sites, as JSON.
+        environ: The environment that `oauth` sources take their secrets from,
+            by default the process's.
 
     Returns:
-        The sites.
+        The sites, and the token source of each site that has one (`token`,
+        `token_file` or `oauth`, see `wes/tokens.py`).
 
     Raises:
         ValueError: A site is named `server`, which stands for the task of the FL
-            server, or a token can't go into a header, or only over plain HTTP.
-            The message doesn't hold the token.
+            server, or a token source can't work, or would send tokens over
+            plain HTTP. The message doesn't hold a token or secret.
     """
-    sites: dict[str, dict[str, str]] = json.loads(text)
+    sites: dict[str, dict[str, Any]] = json.loads(text)
     if "server" in sites:
         raise ValueError("A site can't be named server")
+    environ = os.environ if environ is None else environ
+    sources: dict[str, tokens.TokenSource] = {}
+    # Refresh token -> site, to find one in two sites, by the same variable or another
+    refresh_tokens: dict[str, str] = {}
     for name, site in sites.items():
-        if "token" not in site:
+        source = tokens.from_site(name, site, environ)
+        if source is None:
             continue
-        if not re.fullmatch(r"[\x21-\x7e]+", site["token"]):
-            raise ValueError(f"The token of site {name} has characters that can't go into a header")
-        if not site.get("tes", "").startswith("https://"):
+        if not str(site.get("tes", "")).startswith("https://"):
             raise ValueError(f"The token of site {name} only goes to a TES over https")
-    return sites
+        # Each source renews on its own: with a provider that rotates refresh tokens, a shared one
+        # would be spent by one site and refused (or the whole family revoked) for the other
+        variable = site.get("oauth", {}).get("refresh_token_env")
+        if variable:
+            value = environ[variable]
+            if value in refresh_tokens:
+                raise ValueError(f"Sites {refresh_tokens[value]} and {name} share a refresh token")
+            refresh_tokens[value] = name
+        sources[name] = source
+    return sites, sources
 
 
-SITES = load_sites(pathlib.Path(SITES_FILE).read_text() if SITES_FILE else os.environ.get("WES_SITES", "{}"))
+SITES, TOKENS = load_sites(pathlib.Path(SITES_FILE).read_text() if SITES_FILE else os.environ.get("WES_SITES", "{}"))
 # If set, tasks go to this gateway (proTES), pinned to the TES of the site by tag
 TES_GATEWAY = os.environ.get("TES_GATEWAY_URL", "")
 TES_GATEWAY_TOKEN_URL = os.environ.get("TES_GATEWAY_TOKEN_URL", "")
@@ -86,6 +106,10 @@ FL_SERVER_TES = os.environ.get("FL_SERVER_TES", "")
 # `grpc` or `http`, the latter (WebSocket) for sites that only allow port 443 out
 FL_SCHEME = os.environ.get("FL_SCHEME", "grpc")
 FL_PORT = int(os.environ.get("FL_PORT", "8002"))
+# The sources hold the secrets now, and all settings are read: child processes (`nvflare`, the
+# FL server) aren't passed them
+for _name in {name for source in TOKENS.values() for name in source.env_names}:
+    os.environ.pop(_name, None)
 ORG = "testbed"
 ADMIN = "admin@testbed.invalid"
 ADMIN_PORT = 8003
@@ -317,6 +341,19 @@ def publish_kit(kit_dir: pathlib.Path, run_dir: pathlib.Path) -> tuple[str, str]
     return token, f"{PUBLIC_URL}/kits/{token}/{name}.tgz"
 
 
+def site_source(site: str) -> tokens.TokenSource | None:
+    """Get the token source of a site, if its token goes anywhere.
+
+    Args:
+        site: Name of the site, or `server` for the task of the FL server.
+
+    Returns:
+        The source, or `None` if the site has none, or there's a gateway: the
+        token of a site is for its TES alone, and never goes to a gateway.
+    """
+    return None if TES_GATEWAY_TOKEN_URL or TES_GATEWAY else TOKENS.get(site)
+
+
 def tes_headers(site: str) -> dict[str, str]:
     """Get the headers for the TES of a site, or the gateway if there is one.
 
@@ -324,16 +361,54 @@ def tes_headers(site: str) -> dict[str, str]:
         site: Name of the site, or `server` for the task of the FL server.
 
     Returns:
-        The headers: an access token if there's one, else none.
+        The headers: an access token if there's one, else none. A site's
+        token is read or renewed here, when it's needed (`wes/tokens.py`).
+
+    Raises:
+        tokens.TokenError: The site's token couldn't be had.
     """
     if TES_GATEWAY_TOKEN_URL:
         token = requests.get(TES_GATEWAY_TOKEN_URL, timeout=10).json()["access_token"]
-    elif TES_GATEWAY:
-        # The token of a site is for its TES alone, and never goes to a gateway
-        token = ""
     else:
-        token = SITES.get(site, {}).get("token", "")
+        source = site_source(site)
+        token = source.token() if source is not None else ""
     return {"Authorization": f"Bearer {token}"} if token else {}
+
+
+def tes_request(method: str, site: str, url: str, **kwargs: Any) -> requests.Response:
+    """Send a request to the TES of a site, or the gateway, with the site's token.
+
+    If the TES refuses the token (`401`) and the site's token can be renewed,
+    it is renewed, and the request is sent once more.
+
+    Args:
+        method: The HTTP method.
+        site: Name of the site, or `server` for the task of the FL server.
+        url: The URL.
+        **kwargs: For `requests.request`, but no `headers`.
+
+    Returns:
+        The response.
+
+    Raises:
+        tokens.TokenError: The site's token couldn't be had.
+    """
+    headers = tes_headers(site)
+    reply = requests.request(method, url, headers=headers, **kwargs)
+    source = site_source(site)
+    if reply.status_code == 401 and source is not None and source.renewable:
+        logger.info("TES of %s refused the token, renewing it", site)
+        source.invalidate(headers.get("Authorization", "").removeprefix("Bearer "))
+        try:
+            renewed = tes_headers(site)
+        except tokens.TokenError as error:
+            # The refusal stands, as for a token that can't be renewed
+            # TokenError messages hold no token or secret (wes/tokens.py, tests/tokens_test.py)
+            logger.warning("Couldn't renew the token of %s: %s", site, error)  # nosemgrep
+            return reply
+        if renewed != headers:
+            reply = requests.request(method, url, headers=renewed, **kwargs)
+    return reply
 
 
 def tes_base(site: str) -> str:
@@ -466,17 +541,20 @@ def update_tasks(run: dict[str, Any], wait: float = 0) -> None:
         for task in run["tasks"]:
             # A TES out of reach must neither end a run's cleanup, nor look like a task's end
             try:
-                reply = requests.get(
-                    f"{task['base']}/tasks/{task['id']}",
-                    params={"view": "MINIMAL"},
-                    headers=tes_headers(task["site"]),
-                    timeout=30,
+                reply = tes_request(
+                    "GET", task["site"], f"{task['base']}/tasks/{task['id']}", params={"view": "MINIMAL"}, timeout=30
                 )
+                if reply.ok:
+                    task["state"] = reply.json().get("state", "UNKNOWN")
             except requests.RequestException:
                 logger.warning("TES of %s is out of reach", task["site"])
                 continue
-            if reply.ok:
-                task["state"] = reply.json().get("state", "UNKNOWN")
+            except tokens.TokenError as error:
+                # TokenError messages hold no token or secret (wes/tokens.py, tests/tokens_test.py)
+                logger.warning("No token for the TES of %s: %s", task["site"], error)  # nosemgrep
+                continue
+            except Exception as error:  # noqa: BLE001 - e.g. a malformed reply: the cleanup of a run must go on
+                logger.warning("Couldn't update the task of %s: %s", task["site"], type(error).__name__)
         if all(task["state"] in TERMINAL_TES for task in run["tasks"]) or time.monotonic() >= deadline:
             return
         time.sleep(2)
@@ -510,10 +588,8 @@ def cancel_tasks(run: dict[str, Any]) -> None:
     for task in run["tasks"]:
         if task["state"] not in TERMINAL_TES:
             try:
-                requests.post(
-                    f"{task['base']}/tasks/{task['id']}:cancel", headers=tes_headers(task["site"]), timeout=30
-                )
-            except requests.RequestException:
+                tes_request("POST", task["site"], f"{task['base']}/tasks/{task['id']}:cancel", timeout=30)
+            except Exception:  # noqa: BLE001 - the cleanup of a run must go on
                 logger.warning("Couldn't cancel the task of %s", task["site"])
 
 
@@ -531,7 +607,7 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
     run_dir = BASE / run_id
     run_dir.mkdir(parents=True)
     server: subprocess.Popen[bytes] | None = None
-    tokens: list[str] = []
+    slots: list[str] = []
     final_state = "SYSTEM_ERROR"
     try:
         run["state"] = "INITIALIZING"
@@ -541,7 +617,7 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
         admin_kit = provision_locally(run_dir, project, ADMIN, "admin")
         if FL_SERVER_MODE == "tes":
             token, kit_url = publish_kit(server_kit, run_dir)
-            tokens.append(token)
+            slots.append(token)
             base = f"{FL_SERVER_TES}/ga4gh/tes/v1"
             reply = requests.post(f"{base}/tasks", json=server_task(run_id, kit_url), timeout=60)
             reply.raise_for_status()
@@ -552,13 +628,10 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
             wait_for_port("127.0.0.1", ADMIN_PORT, START_TIMEOUT)
         for site in sites:
             token, csr_url = issue_csr_token(run_id, site)
-            tokens.append(token)
+            slots.append(token)
             base = tes_base(site)
-            reply = requests.post(
-                f"{base}/tasks",
-                json=client_task(run_id, site, project, csr_url, fingerprint),
-                headers=tes_headers(site),
-                timeout=60,
+            reply = tes_request(
+                "POST", site, f"{base}/tasks", json=client_task(run_id, site, project, csr_url, fingerprint), timeout=60
             )
             reply.raise_for_status()
             run["tasks"].append({"site": site, "id": reply.json()["id"], "base": base, "state": "QUEUED"})
@@ -601,7 +674,7 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
                 server.wait(timeout=30)
             except subprocess.TimeoutExpired:
                 server.kill()
-        for token in tokens:
+        for token in slots:
             KITS.pop(token, None)
             CSR_TOKENS.pop(token, None)
         for child in run_dir.iterdir():

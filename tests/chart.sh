@@ -74,6 +74,8 @@ refuse "the hub's name as kits host" "${args[@]}" --set "kitsHost=${hub}"
 refuse "an address that isn't IPv4" "${args[@]}" --set loadBalancerIP=not-an-address
 refuse "an address out of range" "${args[@]}" --set loadBalancerIP=256.0.0.1
 refuse "an unknown value" "${args[@]}" --set flport=30003
+refuse "a token Secret that isn't a name" "${args[@]}" --set tokenSecret=Not_A_Name
+refuse "an environment Secret that isn't a name" "${args[@]}" --set envSecret=Not_A_Name
 
 helm lint --strict "${chart}" "${args[@]}" >/dev/null && ok "lint" || fail "lint"
 
@@ -167,6 +169,28 @@ expect "the runtime's seccomp profile by default" \
     "${dep} | .spec.template.spec.securityContext.seccompProfile.type" "RuntimeDefault"
 expect "no privilege escalation by default" "${ctr} | .securityContext.allowPrivilegeEscalation" "false"
 expect "no capabilities by default" "${ctr} | .securityContext.capabilities.drop | join(\",\")" "ALL"
+expect "no token Secret by default" \
+    "[${dep} | .spec.template.spec.volumes[] | select(.name == \"tes-tokens\")] | length" "0"
+expect "no token mount by default" "[${ctr} | .volumeMounts[] | select(.name == \"tes-tokens\")] | length" "0"
+expect "no environment from a Secret by default" "[${ctr} | .envFrom // [] | .[]] | length" "0"
+
+# Tokens that get renewed: files from a Secret, mounted as a whole (no
+# `subPath`, no `items`), so that a renewed token reaches the pod; and the
+# secrets of `oauth` sources as environment variables. Never as values
+helm template hub "${chart}" "${args[@]}" --set tokenSecret=tes-tokens --set envSecret=tes-oauth >"${out}"
+expect "token files from their Secret" \
+    "${dep} | .spec.template.spec.volumes[] | select(.name == \"tes-tokens\") | .secret.secretName" "tes-tokens"
+expect "all token files, so that renewals arrive" \
+    "${dep} | .spec.template.spec.volumes[] | select(.name == \"tes-tokens\") | .secret | has(\"items\")" "false"
+expect "token files read-only, by the pod's group" \
+    "${dep} | .spec.template.spec.volumes[] | select(.name == \"tes-tokens\") | .secret.defaultMode" "0440"
+expect "token files at their path, read-only, whole" \
+    "${ctr} | .volumeMounts[] | select(.name == \"tes-tokens\") | .mountPath + \" \" + (.readOnly | tostring) + \" \" + (has(\"subPath\") | tostring)" \
+    "/run/secrets/tes-tokens true false"
+expect "the sites file still from its Secret" \
+    "${ctr} | .volumeMounts[] | select(.name == \"sites\") | .mountPath" "/run/secrets/sites"
+expect "environment from the Secret" "${ctr} | .envFrom[0].secretRef.name" "tes-oauth"
+expect "no secret as a value of the chart" "[${env} | select(.name | test(\"TOKEN|SECRET\"))] | length" "0"
 
 # Clusters with a LimitRange often allow a CPU limit of at most 5 times the
 # request (`maxLimitRequestRatio`), and refuse pods above it. Every container

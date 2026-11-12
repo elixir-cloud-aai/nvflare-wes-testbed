@@ -137,10 +137,10 @@ Caddy gets a certificate for that name, which needs ports 80 and 443 reachable. 
 | `FL_PORT`, `FL_SCHEME` | `8002`, `grpc` | FL port. For 443, use `http`: see [T7](../tests/t7-port-443.md) |
 | `WES_ALLOWED_IPS` | `127.0.0.1` | Addresses or ranges that reach the WES, separated by spaces |
 | `WES_INTERNAL_URL` | `https://<FL_SERVER_NAME>` | Base of the links to kits. Keep it `https`, as kits hold private keys |
-| `WES_SITES_FILE` | `./sites.json` | The sites file: name, `tes` and `data`. Add `token` for a TES that needs one, which must then be at an `https` URL |
+| `WES_SITES_FILE` | `./sites.json` | The sites file: name, `tes` and `data`. Add a [token source](#tokens-for-the-tes-of-the-sites) for a TES that needs one, which must then be at an `https` URL |
 | `HUB_HTTPS_PORT` | `443` | Another port for HTTPS, if the FL port is 443. Then set `WES_INTERNAL_URL` to match, and Let's Encrypt still needs port 80. The redirect from HTTP still points to 443, so use the `https` URL with its port |
 
-Tokens in the sites file stay out of task records and logs, and the file stays out of Git and of the image. To check the setup, run the [checks from outside](#checking-the-hub-from-outside) from a machine that isn't in `WES_ALLOWED_IPS`, with the name of the hub for both names, as `python3 tests/outside_check.py <hub> <hub>` (`<hub>:<HUB_HTTPS_PORT>` as the second with another port for HTTPS, and `--fl-port` with another FL port); then the [probe](#probing-a-node), then a run with one site ([T8](../tests/t8-real-sites.md)).
+Tokens in the sites file stay out of task records and logs, and the file stays out of Git and of the image. Tokens that expire during a run need a `token_file` or `oauth` source: see [Tokens for the TES of the sites](#tokens-for-the-tes-of-the-sites). To check the setup, run the [checks from outside](#checking-the-hub-from-outside) from a machine that isn't in `WES_ALLOWED_IPS`, with the name of the hub for both names, as `python3 tests/outside_check.py <hub> <hub>` (`<hub>:<HUB_HTTPS_PORT>` as the second with another port for HTTPS, and `--fl-port` with another FL port); then the [probe](#probing-a-node), then a run with one site ([T8](../tests/t8-real-sites.md)).
 
 ### Running it on Rahti
 
@@ -208,6 +208,8 @@ The Route must say `Admitted=True`. If another project already has its name, the
 | `flScheme` | `grpc` | `grpc`, or `http` (WebSocket, see [T7](../tests/t7-port-443.md)) |
 | `loadBalancerIP` | Empty | Internal address of the project's pool (`192.168.…`), not the public one. Empty: one of the pool's |
 | `sitesSecret` | `nvflare-wes-sites` | Secret with the sites file under the key `sites.json` |
+| `tokenSecret` | Empty | Secret with [token files](#tokens-for-the-tes-of-the-sites), one key per site, mounted whole at `/run/secrets/tes-tokens`, so that renewed tokens arrive without a restart. Empty: none |
+| `envSecret` | Empty | Secret whose keys become environment variables of the hub: the secrets that [`oauth`](#tokens-for-the-tes-of-the-sites) sources name. Empty: none |
 | `podSecurityContext` | `runAsNonRoot: true`, `seccompProfile: {type: RuntimeDefault}` | Security context of the pod. On Rahti, `--set podSecurityContext.seccompProfile=null` |
 | `securityContext` | `allowPrivilegeEscalation: false`, all capabilities dropped | Security context of the container |
 | `resources` | 400m CPU and 1 GiB, up to 2 CPUs and 2 GiB | Requests and limits of the pod. The CPU limit stays at most 5 times the request (see LimitRanges above) |
@@ -248,6 +250,80 @@ oc rollout restart deployment/hub-nvflare-wes-hub
 ```
 
 To limit the FL port to the addresses of nodes, Rahti has a [NetworkPolicy with `externalTrafficPolicy: Local`](https://docs.csc.fi/cloud/rahti/configurations/loadbalancer-service/). The chart doesn't do that yet.
+
+### Tokens for the TES of the sites
+
+!!! warning "Tested with a mock provider only"
+    `tests/tokens_test.py` and `tests/site_config_check.py` check these sources against a mock token endpoint and a fake TES. They haven't run against a real identity provider yet.
+
+Access tokens expire, often after an hour to a few hours. A run that lasts longer, or a hub that runs for days, needs a source that gets new ones. Each site of the sites file has at most one of these keys. Whichever it is, the token only goes to a TES at an `https` URL, never to a gateway (`TES_GATEWAY_URL`), and never into task records or logs.
+
+| Key | What it holds | When the token is renewed |
+|---|---|---|
+| `token` | The token itself | Never. When it expires, the TES answers `401`: write a new sites file, and restart the hub between runs |
+| `token_file` | The absolute path of a file with only the token, without surrounding white space | The file is read before each request to the TES, so whatever writes a new token into it (an updated Secret, a script) needs no restart. It must exist, with a token, when the hub starts: the hub doesn't start otherwise |
+| `oauth` | Where and how to get tokens from an OAuth 2.0 provider | Tokens are cached, and renewed 60 seconds before they expire (at half their lifetime if that's shorter; after 5 minutes if the provider doesn't say, and after a day at the latest). If a renewal fails, the hub keeps using the old token while it's valid, and asks the provider again after 10 seconds. These times are fixed |
+
+With `token_file` and `oauth`, a request that the TES answers with `401` is sent once more, but only with a token other than the refused one: for `token_file`, if the file holds a new one by then; for `oauth`, if the refused token is at least 30 seconds old, so that a TES that refuses every token doesn't make each request a renewal. If that renewal fails, the `401` stands. An `oauth` site looks like this:
+
+```json
+"site-1": {
+  "tes": "https://tes.site-1.example.org",
+  "data": "https://…/site-1.csv",
+  "oauth": {
+    "issuer": "https://login.example.org/oidc/",
+    "grant_type": "refresh_token",
+    "client_id": "<client ID>",
+    "refresh_token_env": "SITE_1_REFRESH_TOKEN",
+    "scope": "openid offline_access"
+  }
+}
+```
+
+| Key of `oauth` | Meaning |
+|---|---|
+| `issuer` | The provider's issuer: the token endpoint comes from its OpenID Connect discovery (`<issuer>/.well-known/openid-configuration`), which must name the same issuer. Or, instead: |
+| `token_endpoint` | The token endpoint itself, for a provider without discovery |
+| `grant_type` | `refresh_token` or `client_credentials` |
+| `client_id` | The client's ID, which isn't a secret |
+| `client_secret_env` | Name of the environment variable with the client secret: required for `client_credentials`, optional for `refresh_token` (without it, the client counts as public) |
+| `refresh_token_env` | Name of the environment variable with the refresh token: required for `refresh_token` |
+| `scope` | Optional: the scopes to ask for, separated by spaces |
+
+**Which grant:** with `refresh_token`, tokens are those of the user whose refresh token it is, so the TES authorizes the tasks as that user, for example by the user's groups. Get the refresh token once, with the `offline_access` scope, for example through the device authorization grant of a client that allows it. With `client_credentials`, tokens are the client's own: only for a TES that accepts tokens of that client. Each site needs a refresh token of its own, in a variable of its own: many providers rotate refresh tokens on use, so a shared one would be spent by one site and refused for the other, and the hub doesn't start with the same refresh token in two sites, by one variable or two.
+
+**Secrets** come in only when the hub starts, as environment variables, which the sites file names: never their values in the sites file, the image, a command line or a log. Once the hub has read them, it drops them from its environment, so that they aren't passed on to its child processes (`nvflare`, the FL server). Those run as the same user, though, so they could still read the hub's initial environment, and the token files: this is no isolation between them. Messages name sites and variables, never values. With a secret, the client authenticates with HTTP Basic (`client_secret_basic`). The hub follows no redirects of the provider, and takes `http` only for addresses of its own host, for tests. If the provider sends a new refresh token, the hub keeps it in memory: after a restart, it starts again from the one in the environment, which the provider may have revoked by then. Then get a new one.
+
+**With Compose,** add an override file, say `compose.tokens.yaml`, which mounts the token files and passes on the variables from the shell that runs `docker compose`, without writing their values to a file:
+
+```yaml
+services:
+  hub:
+    volumes:
+      - ./tes-tokens:/run/secrets/tes-tokens:ro
+    environment:
+      - SITE_1_REFRESH_TOKEN
+```
+
+```sh
+docker compose -f compose.hub.yaml -f compose.tokens.yaml up -d --wait
+```
+
+**With the chart,** create the Secrets from files (not with `--from-literal`, which puts the secret on the command line), and name them in `tokenSecret` and `envSecret`. Each key of `envSecret` becomes a variable, so keys must be valid variable names:
+
+```fish
+oc create secret generic nvflare-wes-tes-tokens --from-file=site-2=site-2.token
+oc create secret generic nvflare-wes-oauth --from-file=SITE_1_REFRESH_TOKEN=site-1.refresh-token
+helm upgrade hub charts/nvflare-wes-hub --reuse-values --set tokenSecret=nvflare-wes-tes-tokens --set envSecret=nvflare-wes-oauth
+```
+
+In the sites file, site 2 then has `"token_file": "/run/secrets/tes-tokens/site-2"`. To renew it, replace the Secret: the pod sees the new file within a minute or two, without a restart. A changed `envSecret` takes a restart, which forgets runs ([H2](../testbed/shortcuts.md#h2)):
+
+```fish
+oc create secret generic nvflare-wes-tes-tokens --from-file=site-2=site-2.token --dry-run=client -o yaml | oc replace -f -
+```
+
+Delete the local files once the Secrets hold them.
 
 ### Checking the hub from outside
 
