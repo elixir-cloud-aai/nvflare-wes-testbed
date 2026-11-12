@@ -1,7 +1,7 @@
 # T8 Real sites
 
-!!! warning "Not run"
-    Planned for the event. See [Real sites](../setup/real-sites.md) for what it takes.
+!!! warning "Not run on partner nodes yet"
+    Ran once to `COMPLETE` on 2026-11-12, as a dress rehearsal (accuracies not checked), with the hub on Rahti and both sites on one TESK in the same cluster: see [Results](../outcomes/results.md). Real nodes elsewhere are planned for the event. See [Real sites](../setup/real-sites.md) for what it takes.
 
 ## Description
 
