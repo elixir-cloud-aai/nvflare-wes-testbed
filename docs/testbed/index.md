@@ -17,7 +17,7 @@ In this order, each one only after the one before:
 2. **Stretch goal 1: integration with Conquest** ([#12](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/12), [#13](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/13)). See [option A](options.md#a-nvflare-inside-conquest).
 3. **Stretch goal 2: integration with proTES** ([#18](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/18)), perhaps with a dedicated plugin later. It already ran locally ([T4](../tests/t4-protes.md)), and isn't a must for the event.
 
-The hub goes on [Rahti](https://docs.csc.fi/cloud/rahti/) if that can expose the FL port, otherwise on a plain VM with Nebius credits ([#4](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/4), [Real sites](../setup/real-sites.md#what-the-hub-needs)).
+The hub runs on [Rahti](https://docs.csc.fi/cloud/rahti/), which exposes the FL port through a `LoadBalancer` Service; a plain VM with Nebius credits is the fallback ([Real sites](../setup/real-sites.md#where-it-goes), [What differed on Rahti](../setup/real-sites.md#what-differed-on-rahti)).
 
 The session plan ([#8](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/8)) goes under [Order for a live session](../tests/index.md#order-for-a-live-session).
 
