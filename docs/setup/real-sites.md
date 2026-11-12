@@ -250,7 +250,7 @@ To limit the FL port to the addresses of nodes, Rahti has a [NetworkPolicy with 
 `tests/outside_check.py` checks a deployed hub as a node, or anyone on the internet, sees it. Run it from a machine outside the hub's network that isn't in `WES_ALLOWED_IPS`, with Python 3.12 or later and a clone of this repository; it needs nothing beyond the standard library. It takes the hub's name, as in the kits, and the host that serves `/kits` and `/sites`: with Compose, both are `FL_SERVER_NAME`.
 
 ```sh
-python3 tests/outside_check.py [--fl-port <port>] [--during-run] <hub name> <kits host>
+python3 tests/outside_check.py [--fl-port <port>] [--admin-port <port>] [--during-run] [--insecure] [--timeout <seconds>] <hub name> <kits host>
 ```
 
 | Check | Passes when |

@@ -184,6 +184,12 @@ class NamesTest(unittest.TestCase):
         with mock.patch.object(outside_check, "resolves", return_value=(False, "not known")):
             self.assertEqual(outside_check.check_resolves("typo.invalid").outcome, "FAIL")
 
+    def test_malformed_name(self) -> None:
+        """A name with an empty label fails each check, without a traceback."""
+        self.assertFalse(outside_check.resolves("hub..example")[0])
+        self.assertFalse(outside_check.tcp_open("hub..example", 8003, timeout=1)[0])
+        self.assertIsNone(outside_check.request("https://hub..example/", timeout=1).status)
+
     def test_hub_name(self) -> None:
         """The hub's name comes without a port."""
         self.assertEqual(outside_check.hub_name("hub.example.org"), "hub.example.org")

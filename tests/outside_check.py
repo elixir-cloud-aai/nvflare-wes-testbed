@@ -1,7 +1,8 @@
 """Check a hub for real sites from outside, as a node or anyone on the internet sees it.
 
 Usage:
-    outside_check.py [--fl-port <port>] [--during-run] [--insecure] <hub name> <kits host>
+    outside_check.py [--fl-port <port>] [--admin-port <port>] [--during-run] [--insecure]
+                     [--timeout <seconds>] <hub name> <kits host>
 
 Run it from a machine outside the hub's network that isn't in `WES_ALLOWED_IPS`.
 The hub name is the name in the kits, without a port; the kits host serves
@@ -120,7 +121,7 @@ def request(url: str, *, method: str = "GET", verify: bool = True, timeout: floa
         return Answer(error.code, read_body(error))
     except urllib.error.URLError as error:
         return Answer(None, error=str(error.reason))
-    except (OSError, http.client.HTTPException) as error:
+    except (OSError, UnicodeError, http.client.HTTPException) as error:
         return Answer(None, error=str(error) or type(error).__name__)
 
 
@@ -135,7 +136,7 @@ def resolves(host: str) -> tuple[bool, str]:
     """
     try:
         socket.getaddrinfo(host, None)
-    except OSError as error:
+    except (OSError, UnicodeError) as error:
         return False, str(error) or type(error).__name__
     return True, ""
 
@@ -154,7 +155,7 @@ def tcp_open(host: str, port: int, *, timeout: float = 5) -> tuple[bool, str]:
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True, ""
-    except OSError as error:
+    except (OSError, UnicodeError) as error:
         return False, str(error) or type(error).__name__
 
 
