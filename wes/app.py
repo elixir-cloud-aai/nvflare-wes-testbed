@@ -18,10 +18,12 @@ Every shortcut in here is listed in `docs/testbed/shortcuts.md`. No
 authentication, one run at a time, state in memory.
 """
 
+import errno
 import json
 import logging
 import os
 import pathlib
+import re
 import secrets
 import shutil
 import socket
@@ -116,6 +118,10 @@ ADMIN_PORT = 8003
 START_TIMEOUT = 180
 JOB_TIMEOUT = 600
 MAX_CSR_SIZE = 1 << 20  # a CSR package is a few KB; this just bounds memory
+# What gRPC logs, in the FL server's output, when it can't bind the FL port; the server starts anyway
+BIND_FAILURE = "Failed to add port"
+# What NVFlare logs for a port it did bind
+BOUND_PORT = r"added (?:secure|insecure) port at \S*:{port}\b"
 TERMINAL_TES = {"COMPLETE", "EXECUTOR_ERROR", "SYSTEM_ERROR", "CANCELED", "PREEMPTED"}
 
 app = FastAPI(title="Thin WES for NVFlare (sandbox)")
@@ -316,6 +322,59 @@ def wait_for_port(host: str, port: int, timeout: float) -> None:
         except OSError:
             time.sleep(1)
     raise TimeoutError(f"Nothing listens on {host}:{port}")
+
+
+def ensure_port_free(port: int) -> None:
+    """Check that nothing in this container listens on a port yet.
+
+    The FL server only logs that it can't bind its port, and starts anyway, so
+    sites would dial out to whatever holds it, never join, and the run would
+    end with a timeout that names no cause.
+
+    Args:
+        port: The port.
+
+    Raises:
+        RuntimeError: Something listens on it, or it can't be bound for another reason.
+    """
+    try:
+        with socket.create_server(("", port)):
+            pass
+    except OSError as error:
+        if error.errno == errno.EADDRINUSE:
+            raise RuntimeError(
+                f"The FL port {port} is in use in the hub's container, such as by a probe listener"
+            ) from error
+        raise RuntimeError(f"The FL port {port} can't be bound: {error.strerror}") from error
+
+
+def check_server_bound(log_path: pathlib.Path, port: int, timeout: float = 10) -> None:
+    """Check that the FL server got its port, by its log.
+
+    `ensure_port_free` can't see a listener that starts after it, or one on
+    another address family, and the FL server starts anyway without its port.
+    It binds the FL and admin ports at the same time, so this waits for the
+    FL port's own line: NVFlare's for a bound port (`BOUND_PORT`), or gRPC's
+    for a failure (`BIND_FAILURE`). With neither in time, as with other
+    wording, the run goes on.
+
+    Args:
+        log_path: File with the output of the server.
+        port: The FL port.
+        timeout: Seconds to wait for either line.
+
+    Raises:
+        RuntimeError: The server logged that it couldn't bind the port.
+    """
+    bound = re.compile(BOUND_PORT.format(port=port))
+    deadline = time.monotonic() + timeout
+    while True:
+        log = log_path.read_text(errors="replace")
+        if BIND_FAILURE in log:
+            raise RuntimeError(f"The FL port {port} is in use in the hub's container: the FL server couldn't bind it")
+        if bound.search(log) or time.monotonic() >= deadline:
+            return
+        time.sleep(0.2)
 
 
 def publish_kit(kit_dir: pathlib.Path, run_dir: pathlib.Path) -> tuple[str, str]:
@@ -611,6 +670,8 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
     final_state = "SYSTEM_ERROR"
     try:
         run["state"] = "INITIALIZING"
+        if FL_SERVER_MODE != "tes":
+            ensure_port_free(FL_PORT)
         project = f"run{run_id[:8]}"
         fingerprint = init_ca(run_dir, project)
         server_kit = provision_locally(run_dir, project, FL_HOST, "server")
@@ -626,6 +687,7 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
         else:
             server = start_server(server_kit, run_dir / "server.log")
             wait_for_port("127.0.0.1", ADMIN_PORT, START_TIMEOUT)
+            check_server_bound(run_dir / "server.log", FL_PORT)
         for site in sites:
             token, csr_url = issue_csr_token(run_id, site)
             slots.append(token)
