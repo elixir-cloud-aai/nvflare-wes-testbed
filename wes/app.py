@@ -318,6 +318,28 @@ def wait_for_port(host: str, port: int, timeout: float) -> None:
     raise TimeoutError(f"Nothing listens on {host}:{port}")
 
 
+def ensure_port_free(port: int) -> None:
+    """Check that nothing in this container listens on a port yet.
+
+    The FL server only logs that it can't bind its port, and starts anyway, so
+    sites would dial out to whatever holds it, never join, and the run would
+    end with a timeout that names no cause.
+
+    Args:
+        port: The port.
+
+    Raises:
+        RuntimeError: Something listens on it.
+    """
+    try:
+        with socket.create_server(("", port)):
+            pass
+    except OSError as error:
+        raise RuntimeError(
+            f"The FL port {port} is in use by another process in the hub's container, such as a probe listener"
+        ) from error
+
+
 def publish_kit(kit_dir: pathlib.Path, run_dir: pathlib.Path) -> tuple[str, str]:
     """Pack a startup kit, and serve it under an unguessable path.
 
@@ -611,6 +633,8 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
     final_state = "SYSTEM_ERROR"
     try:
         run["state"] = "INITIALIZING"
+        if FL_SERVER_MODE != "tes":
+            ensure_port_free(FL_PORT)
         project = f"run{run_id[:8]}"
         fingerprint = init_ca(run_dir, project)
         server_kit = provision_locally(run_dir, project, FL_HOST, "server")

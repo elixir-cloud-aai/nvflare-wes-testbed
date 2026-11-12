@@ -101,6 +101,13 @@ services:
     command: ["python3", "/app/tests/csr_token_check.py"]
     network_mode: none
 
+  # A run fails at once when something else holds the FL port: no network needed
+  fl-port-check:
+    image: nvflare-testbed:local
+    profiles: [test]
+    command: ["python3", "/app/tests/fl_port_check.py"]
+    network_mode: none
+
 networks:
   control: {}
   site-1:
