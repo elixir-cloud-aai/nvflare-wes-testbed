@@ -50,6 +50,12 @@ spec:
             # The arbitrary user has no home directory
             - name: HOME
               value: /tmp
+          {{- with .Values.envSecret }}
+          # The secrets that `oauth` in the sites file names
+          envFrom:
+            - secretRef:
+                name: {{ . | quote }}
+          {{- end }}
           ports:
             - name: http
               containerPort: 8080
@@ -60,6 +66,12 @@ spec:
             - name: sites
               mountPath: /run/secrets/sites
               readOnly: true
+            {{- if .Values.tokenSecret }}
+            # Without `subPath`, so that renewed tokens arrive
+            - name: tes-tokens
+              mountPath: /run/secrets/tes-tokens
+              readOnly: true
+            {{- end }}
           readinessProbe:
             httpGet:
               path: /ga4gh/wes/v1/service-info
@@ -86,3 +98,10 @@ spec:
             items:
               - key: sites.json
                 path: sites.json
+        {{- with .Values.tokenSecret }}
+        # All keys, without `items`, so that renewed and added tokens arrive
+        - name: tes-tokens
+          secret:
+            secretName: {{ . | quote }}
+            defaultMode: 0440
+        {{- end }}

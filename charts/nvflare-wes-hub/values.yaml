@@ -38,6 +38,18 @@ loadBalancerIP: ""
 # create secret`, and never commit it
 sitesSecret: nvflare-wes-sites
 
+# Optional: a Secret with token files for the TES of the sites, one key per
+# file, mounted read-only at `/run/secrets/tes-tokens`, for `"token_file":
+# "/run/secrets/tes-tokens/<key>"` in the sites file. Mounted as a whole, so
+# that a token renewed in the Secret reaches the pod without a restart. Not
+# part of the chart. Empty: none
+tokenSecret: ""
+
+# Optional: a Secret whose keys become environment variables of the hub: the
+# client secrets and refresh tokens that `oauth` in the sites file names
+# (`client_secret_env`, `refresh_token_env`). Not part of the chart. Empty: none
+envSecret: ""
+
 # The security context of the pod. No `runAsUser`: OpenShift picks an
 # arbitrary one. `RuntimeDefault` suits most clusters, but Rahti's admission
 # rejects it and sets a profile of its own when the pod names none: there, add
