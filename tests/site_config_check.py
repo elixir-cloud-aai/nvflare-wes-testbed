@@ -3,6 +3,7 @@
 import json
 import os
 import pathlib
+import re
 import sys
 import tempfile
 from typing import Any
@@ -97,9 +98,20 @@ def main() -> None:
             "a refresh token shared by two sites": {
                 site: {"tes": f"https://{site}", "oauth": tokens_test.oauth(provider.issuer)} for site in ("a", "b")
             },
+            "a refresh token in two variables": {
+                site: {
+                    "tes": f"https://{site}",
+                    "oauth": tokens_test.oauth(provider.issuer, refresh_token_env=variable),
+                }
+                for site, variable in (("a", "SITE_REFRESH_TOKEN"), ("b", "OTHER_REFRESH_TOKEN"))
+            },
         }.items():
             try:
-                wes.load_sites(json.dumps(bad_sites), {"SITE_REFRESH_TOKEN": tokens_test.REFRESH_TOKEN})
+                same = {
+                    "SITE_REFRESH_TOKEN": tokens_test.REFRESH_TOKEN,
+                    "OTHER_REFRESH_TOKEN": tokens_test.REFRESH_TOKEN,
+                }
+                wes.load_sites(json.dumps(bad_sites), same)
                 refusals[name] = "accepted"
             except ValueError as error:
                 refusals[name] = str(error)
@@ -141,8 +153,10 @@ def main() -> None:
         "a TES out of reach leaves the state of a task alone": run["tasks"][0]["state"] == "RUNNING",
         **{f"{name} is refused": refusal != "accepted" for name, refusal in refusals.items()},
         "the refusals don't hold the tokens": "decoy" not in json.dumps(refusals),
-        "a shared refresh token is refused as such": "share the refresh token"
-        in refusals["a refresh token shared by two sites"],
+        "a shared refresh token is refused as such": all(
+            "share a refresh token" in refusals[name]
+            for name in ("a refresh token shared by two sites", "a refresh token in two variables")
+        ),
         "the token of a site doesn't go to a gateway": gateway_headers == [{}, {}],
         "the file wins over the environment": set(wes.SITES) == {*SITES, "site-4"},
         "a site with a token gets it": wes.tes_headers("site-1") == {"Authorization": "Bearer decoy-token-1"},
@@ -167,10 +181,11 @@ def main() -> None:
         and oauth_grants == ["refresh_token", "refresh_token"],
         "a refusal stands if the renewal fails": failed_status == 401
         and "site-4" in logged_retry
-        and "decoy" not in logged_retry,
+        and not re.search("decoy|access-", logged_retry),
         "a failing provider leaves the task alone": run_4["tasks"][0]["state"] == "RUNNING"
         and warning_4.call_count == 2,
-        "a failing provider is logged without secrets": "site-4" in logged_4 and "decoy" not in logged_4,
+        "a failing provider is logged without secrets": "site-4" in logged_4
+        and not re.search("decoy|access-", logged_4),
     }
     for name, passed in checks.items():
         print(f"[{'ok' if passed else 'FAIL'}] {name}")

@@ -118,13 +118,15 @@ class UrllibHttp:
         Raises:
             TokenError: There's no response, e.g., the host is out of reach.
         """
+        # The message names no URL, which could hold credentials in its user info or query
         try:
-            with self._opener.open(request, timeout=self._timeout) as response:
-                status, body = response.status, response.read(MAX_RESPONSE_SIZE)
-        except urllib.error.HTTPError as error:
-            status, body = error.code, error.read(MAX_RESPONSE_SIZE)
-        except (urllib.error.URLError, http.client.HTTPException, OSError) as error:
-            raise TokenError(f"No response from {request.full_url}: {type(error).__name__}") from None
+            try:
+                with self._opener.open(request, timeout=self._timeout) as response:
+                    status, body = response.status, response.read(MAX_RESPONSE_SIZE)
+            except urllib.error.HTTPError as error:
+                status, body = error.code, error.read(MAX_RESPONSE_SIZE)
+        except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as error:
+            raise TokenError(f"No response from the provider: {type(error).__name__}") from None
         try:
             return status, json.loads(body)
         except (ValueError, RecursionError):
@@ -168,6 +170,10 @@ def check_url(url: str, what: str) -> None:
         ValueError: It's neither.
     """
     parts = urllib.parse.urlsplit(url)
+    try:
+        parts.port  # noqa: B018 - raises for a port that isn't a number in range
+    except ValueError:
+        raise ValueError(f"{what} has an invalid port") from None
     if parts.scheme == "https" and parts.hostname:
         return
     if parts.scheme == "http" and parts.hostname in LOOPBACK:
@@ -452,27 +458,29 @@ class OAuthToken:
             headers["Authorization"] = f"Basic {base64.b64encode(pair.encode()).decode()}"
         else:
             form["client_id"] = self._client_id
+        # Discovery first, so that its time doesn't count against the token's lifetime
+        endpoint = self._token_endpoint()
         started = self._clock()
-        status, body = self._call(self._http.post_form, self._token_endpoint(), form, headers)
+        status, body = self._call(self._http.post_form, endpoint, form, headers)
         if status != 200 or not isinstance(body, dict):
             code = body.get("error") if isinstance(body, dict) else None
             detail = f" ({code})" if isinstance(code, str) and ERROR_CODE.fullmatch(code) else ""
             raise TokenError(f"The token endpoint of site {self._site} answered with status {status}{detail}")
-        if str(body.get("token_type", "")).lower() != "bearer":
-            raise TokenError(f"The token endpoint of site {self._site} sent no bearer token")
-        token = check_token(str(body.get("access_token", "")), f"The access token of site {self._site}")
-        lifetime = body.get("expires_in", DEFAULT_LIFETIME)
-        if (
-            not isinstance(lifetime, int | float)
-            or isinstance(lifetime, bool)
-            or not math.isfinite(lifetime)
-            or lifetime <= 0
-        ):
-            lifetime = DEFAULT_LIFETIME
-        lifetime = min(lifetime, MAX_LIFETIME)
-        # Providers that rotate refresh tokens send a new one, and may revoke the old one
+        # Providers that rotate refresh tokens send a new one, and may revoke the old one: keep it
+        # even if the rest of the response is unusable
         if self._grant == "refresh_token" and isinstance(body.get("refresh_token"), str) and body["refresh_token"]:
             self._refresh_token = body["refresh_token"]
+        if str(body.get("token_type", "")).lower() != "bearer":
+            raise TokenError(f"The token endpoint of site {self._site} sent no bearer token")
+        access_token = body.get("access_token")
+        if not isinstance(access_token, str):
+            raise TokenError(f"The token endpoint of site {self._site} sent no access token")
+        token = check_token(access_token, f"The access token of site {self._site}")
+        lifetime = body.get("expires_in", DEFAULT_LIFETIME)
+        if not isinstance(lifetime, int | float) or isinstance(lifetime, bool) or not 0 < lifetime < math.inf:
+            lifetime = DEFAULT_LIFETIME
+        # Comparisons, not a conversion: an integer too large for a float would overflow
+        lifetime = float(min(lifetime, MAX_LIFETIME))
         self._token = token
         self._fetched_at = started
         self._expires_at = started + lifetime
@@ -505,8 +513,10 @@ class OAuthToken:
                 self._request()
             except TokenError:
                 # From when it failed: a provider that times out takes about as long
-                self._retry_at = self._clock() + RETRY_AFTER
-                if usable:
+                failed = self._clock()
+                self._retry_at = failed + RETRY_AFTER
+                # Still valid after a renewal that may have taken a while to fail
+                if usable and failed < self._expires_at:
                     return self._token
                 raise
             self._retry_at = 0.0

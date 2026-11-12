@@ -75,7 +75,9 @@ def load_sites(
     sites: dict[str, dict[str, Any]] = json.loads(text)
     if "server" in sites:
         raise ValueError("A site can't be named server")
+    environ = os.environ if environ is None else environ
     sources: dict[str, tokens.TokenSource] = {}
+    # Refresh token -> site, to find one in two sites, by the same variable or another
     refresh_tokens: dict[str, str] = {}
     for name, site in sites.items():
         source = tokens.from_site(name, site, environ)
@@ -86,18 +88,16 @@ def load_sites(
         # Each source renews on its own: with a provider that rotates refresh tokens, a shared one
         # would be spent by one site and refused (or the whole family revoked) for the other
         variable = site.get("oauth", {}).get("refresh_token_env")
-        if variable in refresh_tokens:
-            raise ValueError(f"Sites {refresh_tokens[variable]} and {name} share the refresh token in {variable}")
         if variable:
-            refresh_tokens[variable] = name
+            value = environ[variable]
+            if value in refresh_tokens:
+                raise ValueError(f"Sites {refresh_tokens[value]} and {name} share a refresh token")
+            refresh_tokens[value] = name
         sources[name] = source
     return sites, sources
 
 
 SITES, TOKENS = load_sites(pathlib.Path(SITES_FILE).read_text() if SITES_FILE else os.environ.get("WES_SITES", "{}"))
-# The sources hold the secrets now: child processes (`nvflare`, the FL server) don't inherit them
-for _name in {name for source in TOKENS.values() for name in source.env_names}:
-    os.environ.pop(_name, None)
 # If set, tasks go to this gateway (proTES), pinned to the TES of the site by tag
 TES_GATEWAY = os.environ.get("TES_GATEWAY_URL", "")
 TES_GATEWAY_TOKEN_URL = os.environ.get("TES_GATEWAY_TOKEN_URL", "")
@@ -106,6 +106,10 @@ FL_SERVER_TES = os.environ.get("FL_SERVER_TES", "")
 # `grpc` or `http`, the latter (WebSocket) for sites that only allow port 443 out
 FL_SCHEME = os.environ.get("FL_SCHEME", "grpc")
 FL_PORT = int(os.environ.get("FL_PORT", "8002"))
+# The sources hold the secrets now, and all settings are read: child processes (`nvflare`, the
+# FL server) aren't passed them
+for _name in {name for source in TOKENS.values() for name in source.env_names}:
+    os.environ.pop(_name, None)
 ORG = "testbed"
 ADMIN = "admin@testbed.invalid"
 ADMIN_PORT = 8003

@@ -41,6 +41,7 @@ class Provider:
         self.rotate = False
         self.redirect = False
         self.garbage = b""
+        self.override: dict[str, Any] = {}
         self.discovery: dict[str, Any] | None = None
 
 
@@ -100,7 +101,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body["expires_in"] = provider.expires_in
         if provider.rotate:
             body["refresh_token"] = f"decoy-refresh-token-{number}"
-        self.reply(200, body)
+        self.reply(200, {**body, **provider.override})
 
     def log_message(self, *args: Any) -> None:
         """Log nothing.
@@ -224,7 +225,14 @@ class SourcesTest(unittest.TestCase):
         """Plain HTTP only goes to this host, for tests: never over a network."""
         for url in ("http://127.0.0.1:1/x", "http://localhost/x", "https://login.example.org/x"):
             tokens.check_url(url, "url")
-        for url in ("http://login.example.org/x", "http://127.0.0.1.example.org/x", "ftp://localhost/x", "https://"):
+        for url in (
+            "http://login.example.org/x",
+            "http://127.0.0.1.example.org/x",
+            "ftp://localhost/x",
+            "https://",
+            "https://login.example.org:99999/x",
+            "https://login.example.org:port/x",
+        ):
             with self.assertRaises(ValueError):
                 tokens.check_url(url, "url")
 
@@ -345,7 +353,8 @@ class OAuthTokenTest(unittest.TestCase):
         """A lifetime of years is believed for a day at most."""
         clock = Clock()
         with provider() as state:
-            state.expires_in = 10**9
+            # Too large for a float, too
+            state.expires_in = 10**400
             source = self.source(oauth(state.issuer), clock)
             source.token()
             clock.now += tokens.MAX_LIFETIME - tokens.RENEW_BEFORE
@@ -426,6 +435,86 @@ class OAuthTokenTest(unittest.TestCase):
             state.status = 200
             clock.now += tokens.RETRY_AFTER
             self.assertEqual(source.token(), "access-5")
+
+    def test_odd_access_tokens(self) -> None:
+        """An access token that isn't a string is refused, not turned into one."""
+        for access_token in (None, 12, True, ["decoy"]):
+            with provider() as state:
+                state.override = {"access_token": access_token}
+                self.assert_fails(state, "no access token")
+
+    def test_rotation_kept_on_bad_response(self) -> None:
+        """A rotated refresh token is kept even if the rest of the response is unusable."""
+        with provider() as state:
+            state.rotate = True
+            state.token_type = "mac"
+            clock = Clock()
+            source = self.source(oauth(state.issuer), clock)
+            with self.assertRaises(tokens.TokenError):
+                source.token()
+            state.token_type = "Bearer"
+            clock.now += tokens.RETRY_AFTER
+            source.token()
+            self.assertEqual(state.requests[1]["form"]["refresh_token"], "decoy-refresh-token-1")
+
+    def test_truncated_error(self) -> None:
+        """An error response cut short fails as a `TokenError`."""
+        with provider() as state:
+            state.garbage = b"HTTP/1.1 400 Bad Request\r\nContent-Length: 100\r\n\r\n{"
+            self.assert_fails(state, "site-1")
+
+    def test_no_url_in_messages(self) -> None:
+        """Messages name no URL, which could hold credentials."""
+        source = self.source(oauth("http://user:decoy-password@127.0.0.1:1/realm"))
+        with self.assertRaises(tokens.TokenError) as caught:
+            source.token()
+        self.assertNotIn("decoy", str(caught.exception))
+        self.assertNotIn("127.0.0.1", str(caught.exception))
+
+    def test_slow_failure_past_expiry(self) -> None:
+        """A renewal that fails after the cached token expired doesn't return the expired token."""
+        clock = Clock()
+
+        class Slow:
+            """A token endpoint that answers once, then times out."""
+
+            def get_json(self, url: str) -> tuple[int, Any]:
+                """Never called: the endpoint is configured.
+
+                Args:
+                    url: Unused.
+
+                Raises:
+                    AssertionError: Always.
+                """
+                raise AssertionError("no discovery")
+
+            def post_form(self, url: str, form: Any, headers: Any) -> tuple[int, Any]:
+                """Answer with a token that lives 100 s, then time out.
+
+                Args:
+                    url: Unused.
+                    form: Unused.
+                    headers: Unused.
+
+                Returns:
+                    The first token.
+
+                Raises:
+                    TokenError: After the first time, after the timeout.
+                """
+                if clock.now == 1000.0:
+                    return 200, {"access_token": "access-1", "token_type": "Bearer", "expires_in": 100}
+                clock.now += tokens.TIMEOUT
+                raise tokens.TokenError("No response")
+
+        config = {**oauth("https://login.example.org/realm"), "token_endpoint": "https://login.example.org/token"}
+        del config["issuer"]
+        source = tokens.OAuthToken("site-1", config, ENVIRON, http=Slow(), clock=clock)
+        self.assertEqual(source.token(), "access-1")
+        clock.now = 1095.0
+        with self.assertRaises(tokens.TokenError):
+            source.token()
 
     def test_slow_failure(self) -> None:
         """The wait after a failed renewal counts from the failure, so a provider that times out isn't asked each call."""
