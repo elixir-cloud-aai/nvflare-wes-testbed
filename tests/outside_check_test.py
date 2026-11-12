@@ -4,6 +4,7 @@ Usage: python3 tests/outside_check_test.py
 """
 
 import argparse
+import contextlib
 import http.server
 import json
 import os
@@ -13,6 +14,7 @@ import ssl
 import sys
 import threading
 import unittest
+from collections.abc import Iterator
 from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
@@ -28,6 +30,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """Answer a GET."""
         if self.path.startswith("/kits/"):
             self.reply(404, json.dumps({"detail": "No such kit"}))
+        elif self.path.startswith("/moved/"):
+            self.send_response(302)
+            self.send_header("Location", "/other")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
         else:
             self.reply(200, "plain text")
 
@@ -63,15 +70,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """
 
 
-def free_port() -> int:
-    """Find a port that nothing listens on.
+@contextlib.contextmanager
+def closed_port() -> Iterator[int]:
+    """Hold a port that nothing listens on: bound, so no one else takes it, but not listening.
 
-    Returns:
+    Yields:
         The port.
     """
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+        yield sock.getsockname()[1]
 
 
 class RequestTest(unittest.TestCase):
@@ -107,15 +115,21 @@ class RequestTest(unittest.TestCase):
 
     def test_no_answer(self) -> None:
         """A closed port gives no status, and a reason."""
-        answer = outside_check.request(f"http://127.0.0.1:{free_port()}/", timeout=2)
+        with closed_port() as port:
+            answer = outside_check.request(f"http://127.0.0.1:{port}/", timeout=2)
         self.assertIsNone(answer.status)
         self.assertTrue(answer.error)
 
     def test_no_proxy(self) -> None:
         """Proxies of the environment aren't used."""
-        proxy = f"http://127.0.0.1:{free_port()}"
-        with mock.patch.dict(os.environ, {"http_proxy": proxy, "https_proxy": proxy, "no_proxy": ""}):
-            self.assertEqual(outside_check.request(f"{self.base}/other").status, 200)
+        with closed_port() as port:
+            proxy = f"http://127.0.0.1:{port}"
+            with mock.patch.dict(os.environ, {"http_proxy": proxy, "https_proxy": proxy, "no_proxy": ""}):
+                self.assertEqual(outside_check.request(f"{self.base}/other").status, 200)
+
+    def test_no_redirect(self) -> None:
+        """A redirect comes back as its status, and isn't followed."""
+        self.assertEqual(outside_check.request(f"{self.base}/moved/x").status, 302)
 
     def test_body_cut_short(self) -> None:
         """A body cut short leaves the status, and no traceback."""
@@ -124,7 +138,8 @@ class RequestTest(unittest.TestCase):
     def test_tcp_open(self) -> None:
         """A listening port is open, and a free one is closed, with a reason."""
         self.assertEqual(outside_check.tcp_open("127.0.0.1", self.server.server_port), (True, ""))
-        is_open, error = outside_check.tcp_open("127.0.0.1", free_port(), timeout=2)
+        with closed_port() as port:
+            is_open, error = outside_check.tcp_open("127.0.0.1", port, timeout=2)
         self.assertFalse(is_open)
         self.assertTrue(error)
 
@@ -160,9 +175,18 @@ class TlsContextTest(unittest.TestCase):
 
     def test_request_uses_it(self) -> None:
         """`request` hands its context to the HTTPS handler."""
-        with mock.patch.object(outside_check, "tls_context", wraps=outside_check.tls_context) as context:
-            outside_check.request(f"http://127.0.0.1:{free_port()}/", verify=False, timeout=1)
-        context.assert_called_once_with(False)
+        context = outside_check.tls_context(False)
+        with (
+            mock.patch.object(outside_check, "tls_context", return_value=context) as make_context,
+            mock.patch.object(
+                outside_check.urllib.request, "build_opener", wraps=outside_check.urllib.request.build_opener
+            ) as build_opener,
+            closed_port() as port,
+        ):
+            outside_check.request(f"http://127.0.0.1:{port}/", verify=False, timeout=1)
+        make_context.assert_called_once_with(False)
+        handlers = [h for h in build_opener.call_args.args if isinstance(h, outside_check.urllib.request.HTTPSHandler)]
+        self.assertEqual([handler._context for handler in handlers], [context])
 
 
 class NamesTest(unittest.TestCase):
@@ -191,10 +215,36 @@ class NamesTest(unittest.TestCase):
         self.assertIsNone(outside_check.request("https://hub..example/", timeout=1).status)
 
     def test_hub_name(self) -> None:
-        """The hub's name comes without a port."""
-        self.assertEqual(outside_check.hub_name("hub.example.org"), "hub.example.org")
-        with self.assertRaises(argparse.ArgumentTypeError):
-            outside_check.hub_name("hub.example.org:30002")
+        """The hub's name or address comes without a port or path."""
+        for value in ["hub.example.org", "hub", "192.0.2.10", "2001:db8::1"]:
+            self.assertEqual(outside_check.hub_name(value), value)
+        for value in ["hub.example.org:30002", "hub.example.org/x", "hub..example", "[2001:db8::1]", "", "-hub"]:
+            with self.assertRaises(argparse.ArgumentTypeError, msg=value):
+                outside_check.hub_name(value)
+
+    def test_kits_host(self) -> None:
+        """The kits host takes an optional port, and nothing else."""
+        for value, host in [
+            ("kits.example.org", "kits.example.org"),
+            ("kits.example.org:8443", "kits.example.org:8443"),
+            ("2001:db8::1", "[2001:db8::1]"),
+            ("[2001:db8::1]:8443", "[2001:db8::1]:8443"),
+        ]:
+            self.assertEqual(outside_check.kits_host(value), host)
+        for value in ["kits/x", "kits:8443/", "kits:99999", "kits:x", "[2001:db8::1", "user@kits", "kits?x", "a..b:1"]:
+            with self.assertRaises(argparse.ArgumentTypeError, msg=value):
+                outside_check.kits_host(value)
+
+    def test_numbers(self) -> None:
+        """Ports from 1 to 65535, and positive timeouts."""
+        self.assertEqual(outside_check.port_number("8003"), 8003)
+        for value in ["0", "65536", "-1", "x"]:
+            with self.assertRaises(argparse.ArgumentTypeError, msg=value):
+                outside_check.port_number(value)
+        self.assertEqual(outside_check.seconds("2.5"), 2.5)
+        for value in ["0", "-1", "nan", "inf", "x"]:
+            with self.assertRaises(argparse.ArgumentTypeError, msg=value):
+                outside_check.seconds(value)
 
     def test_defaults(self) -> None:
         """Ports and options by default."""

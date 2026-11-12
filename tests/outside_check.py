@@ -23,13 +23,20 @@ library, so that it runs with any Python 3.12 or later, also outside the image.
 import argparse
 import dataclasses
 import http.client
+import ipaddress
 import json
+import re
 import socket
 import ssl
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+
+# A DNS name: labels of letters, digits and hyphens, 253 characters at most
+DNS_NAME = re.compile(
+    r"(?=.{1,253}\.?$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.?", re.IGNORECASE
+)
 
 # Enough for the WES' error messages; nothing is read beyond that
 MAX_BODY = 4096
@@ -94,11 +101,24 @@ def read_body(response: http.client.HTTPResponse | urllib.error.HTTPError) -> st
         return ""
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Follows no redirects: a redirect comes back as its own status."""
+
+    def redirect_request(self, *args: object, **kwargs: object) -> None:
+        """Refuse every redirect.
+
+        Args:
+            *args: Ignored.
+            **kwargs: Ignored.
+        """
+
+
 def request(url: str, *, method: str = "GET", verify: bool = True, timeout: float = 10) -> Answer:
     """Send a request without a body, straight to the server, and tell what came back.
 
     Proxies of the environment (`HTTPS_PROXY` and so on) aren't used: the checks
     are about what this machine reaches, and a proxy's refusal isn't the hub's.
+    Redirects aren't followed, so that the checks stay at the names given.
 
     Args:
         url: URL to request.
@@ -110,7 +130,7 @@ def request(url: str, *, method: str = "GET", verify: bool = True, timeout: floa
         The status and the start of the body, or why there's none.
     """
     opener = urllib.request.build_opener(
-        urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=tls_context(verify))
+        urllib.request.ProxyHandler({}), NoRedirect(), urllib.request.HTTPSHandler(context=tls_context(verify))
     )
     data = b"" if method == "POST" else None
     req = urllib.request.Request(url, data=data, method=method)
@@ -284,6 +304,34 @@ def check_resolves(host: str) -> Result:
     return Result("ok" if found else "FAIL", f"name {name}: " + ("resolves" if found else f"doesn't resolve ({error})"))
 
 
+def is_host(value: str) -> bool:
+    """Tell whether a value is a DNS name or an IP address.
+
+    Args:
+        value: The value.
+
+    Returns:
+        Whether it is one.
+    """
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return DNS_NAME.fullmatch(value) is not None
+    return True
+
+
+def url_host(host: str) -> str:
+    """Put a host in a URL, in brackets if it's an IPv6 address.
+
+    Args:
+        host: Host name or address.
+
+    Returns:
+        The host as a URL has it.
+    """
+    return f"[{host}]" if ":" in host else host
+
+
 def hub_name(value: str) -> str:
     """Read the hub's name from the command line.
 
@@ -294,11 +342,85 @@ def hub_name(value: str) -> str:
         The name.
 
     Raises:
-        argparse.ArgumentTypeError: The name has a port.
+        argparse.ArgumentTypeError: It's not a name or address, e.g., as it has a port.
     """
-    if ":" in value:
-        raise argparse.ArgumentTypeError(f"{value!r}: give the hub's name without a port, and the port with --fl-port")
+    if not is_host(value):
+        raise argparse.ArgumentTypeError(
+            f"{value!r}: give the hub's name or address without a port or path, and the port with --fl-port"
+        )
     return value
+
+
+def kits_host(value: str) -> str:
+    """Read the kits host from the command line.
+
+    Args:
+        value: The argument: a name or address, with an optional port.
+
+    Returns:
+        The host, as a URL has it.
+
+    Raises:
+        argparse.ArgumentTypeError: It's not a name or address with an optional port.
+    """
+    if is_host(value):
+        return url_host(value)
+    try:
+        parts = urllib.parse.urlsplit(f"https://{value}")
+        port = parts.port
+    except ValueError:
+        port = None
+        parts = None
+    if (
+        parts is None
+        or parts.path
+        or parts.query
+        or parts.fragment
+        or "@" in parts.netloc
+        or parts.hostname is None
+        or not is_host(parts.hostname)
+        or (port is not None and not 0 < port < 65536)
+    ):
+        raise argparse.ArgumentTypeError(f"{value!r}: give a name or address, with :<port> if not 443")
+    return value
+
+
+def port_number(value: str) -> int:
+    """Read a port from the command line.
+
+    Args:
+        value: The argument.
+
+    Returns:
+        The port.
+
+    Raises:
+        argparse.ArgumentTypeError: It's not a port.
+    """
+    if not value.isdigit() or not 0 < int(value) < 65536:
+        raise argparse.ArgumentTypeError(f"{value!r}: give a port from 1 to 65535")
+    return int(value)
+
+
+def seconds(value: str) -> float:
+    """Read a timeout from the command line.
+
+    Args:
+        value: The argument.
+
+    Returns:
+        The seconds.
+
+    Raises:
+        argparse.ArgumentTypeError: It's not a positive number.
+    """
+    try:
+        number = float(value)
+    except ValueError:
+        number = 0
+    if not 0 < number < float("inf"):
+        raise argparse.ArgumentTypeError(f"{value!r}: give a positive number of seconds")
+    return number
 
 
 def run_checks(args: argparse.Namespace) -> list[Result]:
@@ -311,7 +433,8 @@ def run_checks(args: argparse.Namespace) -> list[Result]:
         One result per check.
     """
     verify = not args.insecure
-    results = [check_resolves(host) for host in dict.fromkeys([args.kits, args.hub])]
+    names = list(dict.fromkeys([args.kits, url_host(args.hub)]))
+    results = [check_resolves(host) for host in names]
     results += [
         check_open_path(
             args.kits, "/kits/no-such-token/site-1.tgz", "GET", "No such kit", verify=verify, timeout=args.timeout
@@ -320,7 +443,7 @@ def run_checks(args: argparse.Namespace) -> list[Result]:
             args.kits, "/sites/no-such-token/csr", "POST", "No such token", verify=verify, timeout=args.timeout
         ),
     ]
-    for host in dict.fromkeys([args.kits, args.hub]):
+    for host in names:
         results.append(check_no_wes(host, timeout=args.timeout))
     results.append(check_fl_port(args.hub, args.fl_port, during_run=args.during_run, timeout=args.timeout))
     results.append(check_admin_closed(args.hub, args.admin_port, timeout=args.timeout))
@@ -338,14 +461,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(description="Check a hub for real sites from outside.")
     parser.add_argument("hub", type=hub_name, help="name of the hub, as in the kits, without the port")
-    parser.add_argument("kits", help="host that serves /kits and /sites over HTTPS, with :<port> if not 443")
-    parser.add_argument("--fl-port", type=int, default=8002, help="FL port (default: %(default)s)")
-    parser.add_argument("--admin-port", type=int, default=8003, help="FLARE admin port (default: %(default)s)")
+    parser.add_argument(
+        "kits", type=kits_host, help="host that serves /kits and /sites over HTTPS, with :<port> if not 443"
+    )
+    parser.add_argument("--fl-port", type=port_number, default=8002, help="FL port (default: %(default)s)")
+    parser.add_argument("--admin-port", type=port_number, default=8003, help="FLARE admin port (default: %(default)s)")
     parser.add_argument("--during-run", action="store_true", help="a run is going on, so the FL port must be open")
     parser.add_argument(
         "--insecure", action="store_true", help="don't check certificates of /kits and /sites, e.g., of a test CA"
     )
-    parser.add_argument("--timeout", type=float, default=10, help="seconds to wait per check (default: %(default)s)")
+    parser.add_argument("--timeout", type=seconds, default=10, help="seconds to wait per check (default: %(default)s)")
     return parser.parse_args(argv)
 
 
