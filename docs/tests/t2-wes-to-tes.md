@@ -10,7 +10,7 @@ The core of [B1](../testbed/options.md#b1-server-beside-the-wes): a WES run, wit
 2. The run goes through `RUNNING` to `COMPLETE`, and the FLARE job to `FINISHED:COMPLETED`.
 3. There's one TES task per site, each `COMPLETE`: the clients ended without errors, after the shutdown through the admin API.
 4. The global model can be downloaded, and beats models trained at either site alone on the holdout set.
-5. The links to the kits are dead after the run.
+5. The links to get certificates from CSR are dead after the run.
 
 ## Steps
 
@@ -37,7 +37,7 @@ Connections from different subnets, with the names `site-1` and `site-2`, show t
 ## Questions it answers
 
 - Can a TES task carry a client for the length of a job, and end properly?
-- Do startup kits as task inputs work?
+- Does dynamic provisioning through `nvflare cert` and `nvflare package` work?
 - Does a WES run map onto a federation?
 
 ## What to record

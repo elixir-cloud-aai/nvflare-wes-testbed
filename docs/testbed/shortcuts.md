@@ -8,9 +8,13 @@ All of them, in one place, each with the proper way. Their numbers are referred 
 
 **Startup kits, with private keys, are inputs of TES tasks.** They come from an unguessable link at the WES, over plain HTTP here. That link is in the task records of TES and proTES, and in Funnel's logs: anyone who can read those can get a site's key while the run lasts. The WES kills the link when the run ends; each run has a CA of its own, valid for 2 days, so a leaked key is useless soon after. **Proper way:** a way of handing secrets to tasks that keeps them out of records. That's missing from TES: site-held keys ([H4](#h4)) avoid the need.
 
+**Update:** a site's task now carries an unguessable link to sign its own certificate signing request (`/sites/{token}/csr`) instead of to download a kit. It's still in the same task records and logs, but what it grants is now one certificate over a key the site already made itself, not the key, and the WES deletes the slot the moment it's used, not only at the run's end. The rest holds: a way of handing even this out of task records would still be better, though there's no longer a private key, or a reusable slot, behind it to leak.
+
 ### H4
 
 **The WES makes all private keys, including the sites'.** It's central provisioning with `nvflare provision`, so the WES can impersonate anyone. **Proper way:** sites generate their keys and send signing requests, for which NVFlare has [`nvflare cert` and `nvflare package`](../about/references.md#nvflare), or per-job certificates.
+
+**Update:** resolved for sites. Each run's FL server and admin are still provisioned centrally, by the WES itself, through `nvflare cert request`, `approve` and `package` run locally one after another: there's no reason not to for these two, and it's the only way to share one CA with the sites, as there's no documented way to import an existing CA into `nvflare cert init`. A site, though, now makes its own key inside its TES task, and sends this service only a signing request over H3's one-time link; the signed certificate it gets back is the only thing that travels. Certificates stay short-lived (`--valid-days 2` on the run's CA), as in the original design.
 
 ### H5
 

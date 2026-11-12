@@ -7,6 +7,11 @@
 		reverse_proxy hub:8080
 	}
 
+	# Sites send their certificate signing requests here, by unguessable links
+	handle /sites/*/csr {
+		reverse_proxy hub:8080
+	}
+
 	# No authentication behind this (hack H5): only from the allowed addresses
 	@wes {
 		path /ga4gh/wes/v1/* /outputs/*

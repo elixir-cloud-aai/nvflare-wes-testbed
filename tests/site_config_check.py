@@ -50,7 +50,8 @@ def main() -> None:
         "a site with a token gets it": wes.tes_headers("site-1") == {"Authorization": "Bearer decoy-token-1"},
         "a site without a token gets none": wes.tes_headers("site-2") == {},
         "no site, no token": wes.tes_headers("server") == {},
-        "the task record holds no token": "decoy-token" not in json.dumps(wes.client_task("r", "site-1", "https://k")),
+        "the task record holds no token": "decoy-token"
+        not in json.dumps(wes.client_task("r", "site-1", "proj", "https://k", "ab:cd")),
         "the service info holds no token": "decoy-token" not in json.dumps(wes.service_info()),
     }
     for name, passed in checks.items():

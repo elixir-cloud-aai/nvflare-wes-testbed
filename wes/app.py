@@ -3,14 +3,16 @@
 Implements the part of the GA4GH WES 1.1 API that the testbed needs, for one
 workflow type, `NVFLARE`. For each run it:
 
-1. provisions a federation for that run alone (fresh CA, kits for the server,
-   the sites and an admin);
+1. creates a root CA for that run alone, through `nvflare cert init`, and
+   provisions the server and an admin itself, through `nvflare cert request`,
+   `cert approve` and `package` run locally, one after another;
 2. starts the FL server, by default as a child process of this service; with
    `FL_SERVER_MODE=tes`, as a TES task of its own (see `compose.server-task.yaml`);
-3. submits one TES task per site, each running an FL client that dials out to
-   the server, with the kit and the site's data as inputs of the task;
+3. submits one TES task per site, each running an FL client that makes its own
+   key, sends this service a signing request over `/sites/{token}/csr`, and
+   dials out to the server with the certificate that comes back;
 4. submits the FLARE job through the FLARE admin API, and waits for it;
-5. downloads the global model, shuts the federation down, deletes the kits.
+5. downloads the global model, shuts the federation down, deletes the CA.
 
 Every shortcut in here is listed in `docs/testbed/shortcuts.md`. No
 authentication, one run at a time, state in memory.
@@ -31,9 +33,10 @@ import time
 import uuid
 from typing import Annotated, Any
 
+import anyio
 import requests
-from fastapi import FastAPI, Form, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi.responses import FileResponse, Response
 
 logger = logging.getLogger("wes")
 
@@ -88,86 +91,166 @@ ADMIN = "admin@testbed.invalid"
 ADMIN_PORT = 8003
 START_TIMEOUT = 180
 JOB_TIMEOUT = 600
+MAX_CSR_SIZE = 1 << 20  # a CSR package is a few KB; this just bounds memory
 TERMINAL_TES = {"COMPLETE", "EXECUTOR_ERROR", "SYSTEM_ERROR", "CANCELED", "PREEMPTED"}
 
 app = FastAPI(title="Thin WES for NVFlare (sandbox)")
 RUNS: dict[str, dict[str, Any]] = {}
 KITS: dict[str, pathlib.Path] = {}
+# Token -> (run_id, site) of a site's one slot to send its certificate signing
+# request. Unlike KITS, what it gives out never includes a private key (H4).
+CSR_TOKENS: dict[str, tuple[str, str]] = {}
 LOCK = threading.Lock()
 
 
-PROJECT = """\
-api_version: 3
+PROFILE = """\
 name: {name}
-description: Federation of one WES run
-participants:
-  - name: {host}
-    type: server
-    org: {org}
-    fed_learn_port: {fl_port}
-    admin_port: {admin_port}
-{clients}
-  - name: {admin}
-    type: admin
-    org: {org}
-    role: project_admin
-builders:
-  - path: nvflare.lighter.impl.workspace.WorkspaceBuilder
-  - path: nvflare.lighter.impl.static_file.StaticFileBuilder
-    args:
-      config_folder: config
-      scheme: {scheme}
-  - path: nvflare.lighter.impl.cert.CertBuilder
-    args:
-      root_valid_days: 2
-  - path: nvflare.lighter.impl.signature.SignatureBuilder
+scheme: {scheme}
+connection_security: mtls
+server:
+  host: {host}
+  fed_learn_port: {fl_port}
+  admin_port: {admin_port}
 """
 
 
-def provision(run_dir: pathlib.Path, name: str, sites: list[str]) -> pathlib.Path:
-    """Create the federation of a run, with a CA of its own.
+def parse_fields(output: str) -> dict[str, str]:
+    """Parse the `key: value` lines an `nvflare cert`/`nvflare package` command prints.
 
     Args:
-        run_dir: Working directory of the run.
-        name: Name of the federation.
-        sites: Names of the sites.
+        output: Its stdout.
 
     Returns:
-        The directory with the startup kits.
+        The fields, by the first colon of each line.
     """
-    clients = "\n".join(f"  - name: {site}\n    type: client\n    org: {ORG}" for site in sites)
-    project = run_dir / "project.yml"
-    project.write_text(
-        PROJECT.format(
-            name=name,
-            host=FL_HOST,
-            org=ORG,
-            fl_port=FL_PORT,
-            scheme=FL_SCHEME,
-            admin_port=ADMIN_PORT,
-            clients=clients,
-            admin=ADMIN,
-        )
+    fields: dict[str, str] = {}
+    for line in output.splitlines():
+        key, sep, value = line.partition(":")
+        if sep:
+            fields[key.strip()] = value.strip()
+    return fields
+
+
+def server_participant_yaml(project: str, name: str, org: str) -> str:
+    """Build the FL server's one-participant descriptor for `nvflare cert request`.
+
+    Args:
+        project: Name of the project, as in its `project_profile.yaml`.
+        name: Name of the server.
+        org: Its organization.
+
+    Returns:
+        The YAML, with the server's own name as a `host_names` entry, as
+        that's the name clients dial out to and must find in its certificate.
+    """
+    return f"name: {project}\n\nparticipants:\n  - name: {name}\n    type: server\n    org: {org}\n    host_names: [{name}]\n"
+
+
+def admin_participant_yaml(project: str, name: str, org: str) -> str:
+    """Build the admin's one-participant descriptor for `nvflare cert request`.
+
+    Args:
+        project: Name of the project, as in its `project_profile.yaml`.
+        name: Name of the admin.
+        org: Its organization.
+
+    Returns:
+        The YAML, with a fixed `role: lead` (NVFlare also allows `org_admin`
+        and `member`; this run only ever has the one admin).
+    """
+    return f"name: {project}\n\nparticipants:\n  - name: {name}\n    type: admin\n    org: {org}\n    role: lead\n"
+
+
+def init_ca(run_dir: pathlib.Path, project: str) -> str:
+    """Create the root CA of a run's federation.
+
+    Args:
+        run_dir: Working directory of the run. Gets `project_profile.yaml` and `ca`.
+        project: Name of the project.
+
+    Returns:
+        The CA's SHA-256 fingerprint, so sites can check it out of band.
+    """
+    (run_dir / "project_profile.yaml").write_text(
+        PROFILE.format(name=project, scheme=FL_SCHEME, host=FL_HOST, fl_port=FL_PORT, admin_port=ADMIN_PORT)
     )
-    subprocess.run(
-        ["nvflare", "provision", "-p", str(project), "-w", str(run_dir / "workspace"), "--force"],
+    result = subprocess.run(
+        ["nvflare", "cert", "init", "--profile", "project_profile.yaml", "-o", "ca", "--valid-days", "2"],
+        cwd=run_dir,
         check=True,
         capture_output=True,
+        text=True,
     )
-    return run_dir / "workspace" / name / "prod_00"
+    return parse_fields(result.stdout)["rootca_fingerprint_sha256"]
 
 
-def start_server(kits: pathlib.Path, log_path: pathlib.Path) -> subprocess.Popen[bytes]:
+def provision_locally(run_dir: pathlib.Path, project: str, name: str, kind: str) -> pathlib.Path:
+    """Provision a participant this service holds itself: the FL server or the admin.
+
+    Unlike a site (`sign_csr`), there's no secret to keep off this service for
+    these two, so it runs all of `nvflare cert request`, `approve` and
+    `package` itself, instead of a site's one network round trip.
+
+    Args:
+        run_dir: Working directory of the run, with `project_profile.yaml` and `ca`.
+        project: Name of the project.
+        name: Name of the participant.
+        kind: `server` or `admin`.
+
+    Returns:
+        The directory of its startup kit.
+    """
+    work = run_dir / name
+    work.mkdir()
+    participant = (
+        server_participant_yaml(project, name, ORG) if kind == "server" else admin_participant_yaml(project, name, ORG)
+    )
+    (work / "participant.yaml").write_text(participant)
+    subprocess.run(
+        ["nvflare", "cert", "request", "--participant", "participant.yaml"],
+        cwd=work,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            "nvflare",
+            "cert",
+            "approve",
+            f"{name}/{name}.request.zip",
+            "--ca-dir",
+            "../ca",
+            "--profile",
+            "../project_profile.yaml",
+            "--out",
+            f"{name}/{name}.signed.zip",
+        ],
+        cwd=work,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["nvflare", "package", f"{name}/{name}.signed.zip"],
+        cwd=work,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return work / "workspace" / project / "prod_00" / name
+
+
+def start_server(kit_dir: pathlib.Path, log_path: pathlib.Path) -> subprocess.Popen[bytes]:
     """Start the FL server as a child process.
 
     Args:
-        kits: Directory with the startup kits.
+        kit_dir: Directory of its startup kit.
         log_path: File for the output of the server.
 
     Returns:
         The process.
     """
-    kit = kits / FL_HOST
     with log_path.open("wb") as log:
         return subprocess.Popen(
             [
@@ -176,7 +259,7 @@ def start_server(kits: pathlib.Path, log_path: pathlib.Path) -> subprocess.Popen
                 "-m",
                 "nvflare.private.fed.app.server.server_train",
                 "-m",
-                str(kit),
+                str(kit_dir),
                 "-s",
                 "fed_server.json",
                 "--set",
@@ -184,7 +267,7 @@ def start_server(kits: pathlib.Path, log_path: pathlib.Path) -> subprocess.Popen
                 f"org={ORG}",
                 "config_folder=config",
             ],
-            cwd=kit,
+            cwd=kit_dir,
             stdout=log,
             stderr=subprocess.STDOUT,
         )
@@ -211,24 +294,27 @@ def wait_for_port(host: str, port: int, timeout: float) -> None:
     raise TimeoutError(f"Nothing listens on {host}:{port}")
 
 
-def publish_kit(kits: pathlib.Path, site: str, run_dir: pathlib.Path) -> tuple[str, str]:
-    """Pack the kit of a site, and serve it under an unguessable path.
+def publish_kit(kit_dir: pathlib.Path, run_dir: pathlib.Path) -> tuple[str, str]:
+    """Pack a startup kit, and serve it under an unguessable path.
+
+    Only the FL server's kit still travels this way (`FL_SERVER_MODE=tes`): a
+    site's kit never exists as a whole in one place (`sign_csr`).
 
     Args:
-        kits: Directory with the startup kits.
-        site: Name of the site.
+        kit_dir: Directory of the startup kit.
         run_dir: Working directory of the run.
 
     Returns:
         The token of the kit and its URL.
     """
+    name = kit_dir.name
     token = secrets.token_urlsafe(32)
-    archive = run_dir / f"{site}.tgz"
+    archive = run_dir / f"{name}.tgz"
     with tarfile.open(archive, "w:gz") as tar:
-        for entry in (kits / site).iterdir():
+        for entry in kit_dir.iterdir():
             tar.add(entry, arcname=entry.name)
     KITS[token] = archive
-    return token, f"{PUBLIC_URL}/kits/{token}/{site}.tgz"
+    return token, f"{PUBLIC_URL}/kits/{token}/{name}.tgz"
 
 
 def tes_headers(site: str) -> dict[str, str]:
@@ -262,29 +348,47 @@ def tes_base(site: str) -> str:
     return f"{TES_GATEWAY or SITES[site]['tes']}/ga4gh/tes/v1"
 
 
-def client_task(run_id: str, site: str, kit_url: str) -> dict[str, Any]:
+def issue_csr_token(run_id: str, site: str) -> tuple[str, str]:
+    """Mint a site's one slot to send its certificate signing request.
+
+    Args:
+        run_id: Identifier of the run.
+        site: Name of the site.
+
+    Returns:
+        The token, and the URL to send the request to.
+    """
+    token = secrets.token_urlsafe(32)
+    CSR_TOKENS[token] = (run_id, site)
+    return token, f"{PUBLIC_URL}/sites/{token}/csr"
+
+
+def client_task(run_id: str, site: str, project: str, csr_url: str, fingerprint: str) -> dict[str, Any]:
     """Build the TES task of an FL client.
 
     Args:
         run_id: Identifier of the run.
         site: Name of the site.
-        kit_url: URL of the site's startup kit.
+        project: Name of the project, so the client's own request names the same one.
+        csr_url: Where the client sends its certificate signing request.
+        fingerprint: SHA-256 fingerprint of the run's root CA, for the client to check out of band.
 
     Returns:
         The task. The data of the site is named by a URL that only resolves at
-        the site: it never passes through this service.
+        the site: it never passes through this service. The site makes its own
+        key here, and never sends it anywhere (H4): only a signing request
+        travels, over `csr_url`, and only once this task is already running.
     """
     task: dict[str, Any] = {
         "name": f"fl-client-{site}-{run_id[:8]}",
         "description": "NVFlare client of a WES run (sandbox)",
         "inputs": [
-            {"name": "kit", "url": kit_url, "path": "/kit/kit.tgz", "type": "FILE"},
             {"name": "data", "url": SITES[site]["data"], "path": f"/data/{site}.csv", "type": "FILE"},
         ],
         "executors": [
             {
                 "image": IMAGE,
-                "command": ["fl-client", site, ORG, "/kit/kit.tgz"],
+                "command": ["fl-client", site, ORG, project, csr_url, fingerprint],
                 "env": {"FL_DATA": f"/data/{site}.csv", "HOME": "/tmp"},
             }
         ],
@@ -431,9 +535,12 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
     final_state = "SYSTEM_ERROR"
     try:
         run["state"] = "INITIALIZING"
-        kits = provision(run_dir, f"run{run_id[:8]}", sites)
+        project = f"run{run_id[:8]}"
+        fingerprint = init_ca(run_dir, project)
+        server_kit = provision_locally(run_dir, project, FL_HOST, "server")
+        admin_kit = provision_locally(run_dir, project, ADMIN, "admin")
         if FL_SERVER_MODE == "tes":
-            token, kit_url = publish_kit(kits, FL_HOST, run_dir)
+            token, kit_url = publish_kit(server_kit, run_dir)
             tokens.append(token)
             base = f"{FL_SERVER_TES}/ga4gh/tes/v1"
             reply = requests.post(f"{base}/tasks", json=server_task(run_id, kit_url), timeout=60)
@@ -441,18 +548,21 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
             run["tasks"].append({"site": "server", "id": reply.json()["id"], "base": base, "state": "QUEUED"})
             wait_for_port(FL_HOST, ADMIN_PORT, START_TIMEOUT)
         else:
-            server = start_server(kits, run_dir / "server.log")
+            server = start_server(server_kit, run_dir / "server.log")
             wait_for_port("127.0.0.1", ADMIN_PORT, START_TIMEOUT)
         for site in sites:
-            token, kit_url = publish_kit(kits, site, run_dir)
+            token, csr_url = issue_csr_token(run_id, site)
             tokens.append(token)
             base = tes_base(site)
             reply = requests.post(
-                f"{base}/tasks", json=client_task(run_id, site, kit_url), headers=tes_headers(site), timeout=60
+                f"{base}/tasks",
+                json=client_task(run_id, site, project, csr_url, fingerprint),
+                headers=tes_headers(site),
+                timeout=60,
             )
             reply.raise_for_status()
             run["tasks"].append({"site": site, "id": reply.json()["id"], "base": base, "state": "QUEUED"})
-        session = new_secure_session(ADMIN, str(kits / ADMIN), timeout=60)
+        session = new_secure_session(ADMIN, str(admin_kit), timeout=60)
         try:
             run["state"] = "RUNNING"
             wait_for_clients(session, run, sites, START_TIMEOUT)
@@ -493,6 +603,7 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
                 server.kill()
         for token in tokens:
             KITS.pop(token, None)
+            CSR_TOKENS.pop(token, None)
         for child in run_dir.iterdir():
             if child.is_dir() or child.suffix == ".tgz":
                 shutil.rmtree(child, ignore_errors=True) if child.is_dir() else child.unlink()
@@ -676,6 +787,63 @@ def get_kit(token: str, name: str) -> FileResponse:
     if archive is None or archive.name != name:
         raise HTTPException(404, "No such kit")
     return FileResponse(archive)
+
+
+@app.post("/sites/{token}/csr")
+async def sign_csr(token: str, request: Request) -> Response:
+    """Sign a site's certificate signing request, as this run's CA (H4).
+
+    Args:
+        token: The site's one slot, from its TES task.
+        request: Body is the site's `*.request.zip`, from `nvflare cert request`.
+
+    Returns:
+        The signed `*.signed.zip`, from `nvflare cert approve`.
+
+    Raises:
+        HTTPException: No such token, or the request isn't that site's own: a
+            different name, a type other than a client's, or any role at all.
+            Also, a request body over `MAX_CSR_SIZE`.
+    """
+    slot = CSR_TOKENS.get(token)
+    if slot is None:
+        raise HTTPException(404, "No such token")
+    CSR_TOKENS.pop(token, None)  # Deleting token on use
+    run_id, site = slot
+    work = BASE / run_id / "csr" / token
+    work.mkdir(parents=True)
+    size = 0
+    with (work / "request.zip").open("wb") as csr_file:
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > MAX_CSR_SIZE:
+                raise HTTPException(413, "Certificate signing request too large")
+            csr_file.write(chunk)
+    result = await anyio.run_process(
+        [
+            "nvflare",
+            "cert",
+            "approve",
+            "request.zip",
+            "--ca-dir",
+            "../../ca",
+            "--profile",
+            "../../project_profile.yaml",
+            "--out",
+            "signed.zip",
+        ],
+        cwd=work,
+        check=True,
+    )
+    fields = parse_fields(result.stdout.decode("utf-8"))
+    if (
+        result.returncode != 0
+        or fields.get("name") != site
+        or fields.get("cert_type") != "client"
+        or fields.get("cert_role") != "None"
+    ):
+        raise HTTPException(400, "The request doesn't match the site of this token")
+    return Response((work / "signed.zip").read_bytes(), media_type="application/zip")
 
 
 @app.get("/outputs/{run_id}/global_model.npy")
