@@ -399,7 +399,8 @@ def tes_request(method: str, site: str, url: str, **kwargs: Any) -> requests.Res
             renewed = tes_headers(site)
         except tokens.TokenError as error:
             # The refusal stands, as for a token that can't be renewed
-            logger.warning("Couldn't renew the token of %s: %s", site, error)
+            # TokenError messages hold no token or secret (wes/tokens.py, tests/tokens_test.py)
+            logger.warning("Couldn't renew the token of %s: %s", site, error)  # nosemgrep
             return reply
         if renewed != headers:
             reply = requests.request(method, url, headers=renewed, **kwargs)
@@ -545,7 +546,8 @@ def update_tasks(run: dict[str, Any], wait: float = 0) -> None:
                 logger.warning("TES of %s is out of reach", task["site"])
                 continue
             except tokens.TokenError as error:
-                logger.warning("No token for the TES of %s: %s", task["site"], error)
+                # TokenError messages hold no token or secret (wes/tokens.py, tests/tokens_test.py)
+                logger.warning("No token for the TES of %s: %s", task["site"], error)  # nosemgrep
                 continue
             except Exception as error:  # noqa: BLE001 - e.g. a malformed reply: the cleanup of a run must go on
                 logger.warning("Couldn't update the task of %s: %s", task["site"], type(error).__name__)
