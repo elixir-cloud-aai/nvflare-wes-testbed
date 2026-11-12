@@ -42,7 +42,7 @@ echo "${log}"
 # Funnel marks a task as canceled first, and stops its container a little later
 left=1
 for _ in $(seq 1 30); do
-    left="$(docker ps -q --filter label=nvflare-wes-testbed=task | wc -l)"
+    left="$(docker ps -q --filter label=nvflare-wes-testbed=task | wc -l | tr -d ' ')"
     [ "${left}" = "0" ] && break
     sleep 1
 done

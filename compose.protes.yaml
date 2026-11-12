@@ -5,6 +5,7 @@ x-protes: &protes
   image: nvflare-testbed-protes:local
   build:
     context: https://github.com/elixir-cloud-aai/proTES.git#v0.4.0
+  platform: linux/amd64
   environment: &protes-env
     CELERY_BROKER_URL: pyamqp://protes:protes@rabbitmq:5672//
     FOCA_CONFIG_OVERLAY: /etc/protes/testbed.yaml
