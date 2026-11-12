@@ -33,7 +33,14 @@ echo "[ok] no Docker socket, admin port or TES in the hub's Compose file"
 "${hub[@]}" --profile test run --rm -T e2e
 "${hub[@]}" up -d --wait proxy
 "${hub[@]}" --profile test run --rm -T proxy-check
+"${hub[@]}" --profile test run --rm -T outside-check
 
 WES_ALLOWED_IPS=0.0.0.0/0 "${hub[@]}" up -d --wait --force-recreate proxy
 WES_EXPECTED=200 "${hub[@]}" --profile test run --rm -T proxy-check
+# The checks from outside must fail on a WES that answers
+if "${hub[@]}" --profile test run --rm -T outside-check; then
+    echo "[FAIL] the checks from outside passed, although the WES answers"
+    exit 1
+fi
+echo "[ok] the checks from outside fail on a WES that answers"
 echo "[ok] the hub ran a job, and its proxy lets through what it should"

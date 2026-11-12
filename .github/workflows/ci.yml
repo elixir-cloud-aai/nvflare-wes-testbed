@@ -90,6 +90,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Unit-test the checks from outside
+        run: python3 tests/outside_check_test.py
       - name: Check that the image holds no site data or secrets
         run: tests/image-contents.sh
       - name: Build images
