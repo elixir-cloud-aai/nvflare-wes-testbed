@@ -1,7 +1,7 @@
 # Real sites
 
 !!! warning "Tried once, without partner nodes"
-    The hub has run on Rahti, with the chart, and [T8](../tests/t8-real-sites.md) passed there on 2026-11-12, with both sites on one TES in the same cluster as the hub: see [What differed on Rahti](#what-differed-on-rahti). No node outside that cluster has taken part yet, and the hub hasn't run with Compose on a VM. The rest is what we expect it to take: see the [issues](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues).
+    The hub has run on Rahti, with the chart, and a [T8](../tests/t8-real-sites.md) run there ended `COMPLETE` on 2026-11-12 (accuracies not checked), with both sites on one TES in the same cluster as the hub: see [What differed on Rahti](#what-differed-on-rahti). No node outside that cluster has taken part yet, and the hub hasn't run with Compose on a VM. The rest is what we expect it to take: see the [issues](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues).
 
 ## What the hub needs
 
@@ -82,7 +82,7 @@ The probe doesn't show that a node can fetch a startup kit from the hub, as its 
 ## Deploying the hub
 
 !!! warning "Run on Rahti only"
-    The chart has run on Rahti, on 2026-11-12, with a public address for the FL port, and T8 passed: see [What differed on Rahti](#what-differed-on-rahti). `tests/hub.sh` runs `compose.hub.yaml` in CI, with local sites that dial the hub by its name, as an arbitrary non-root user, and it checks what the proxy lets through; `tests/chart.sh` checks the chart without a cluster. Compose on a real machine, certificates from Let's Encrypt and anything on Nebius are untested: what's below about Nebius comes from its public docs, read on 2026-11-04.
+    The chart has run on Rahti, on 2026-11-12, with a public address for the FL port, and a T8 run ended `COMPLETE`: see [What differed on Rahti](#what-differed-on-rahti). `tests/hub.sh` runs `compose.hub.yaml` in CI, with local sites that dial the hub by its name, as an arbitrary non-root user, and it checks what the proxy lets through; `tests/chart.sh` checks the chart without a cluster. Compose on a real machine, certificates from Let's Encrypt and anything on Nebius are untested: what's below about Nebius comes from its public docs, read on 2026-11-04.
 
 ### Where it goes
 
@@ -147,7 +147,7 @@ Tokens in the sites file stay out of task records and logs, and the file stays o
 ### Running it on Rahti
 
 !!! note "Run on Rahti on 2026-11-12"
-    The chart ran there as described below, and T8 passed. CI checks it with `helm lint`, OpenShift's schemas and `tests/chart.sh`, without a cluster. What differed from what we expected is in [What differed on Rahti](#what-differed-on-rahti).
+    The chart ran there as described below, and a T8 run ended `COMPLETE`. CI checks it with `helm lint`, OpenShift's schemas and `tests/chart.sh`, without a cluster. What differed from what we expected is in [What differed on Rahti](#what-differed-on-rahti).
 
 The chart [`charts/nvflare-wes-hub`](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/tree/dev/charts/nvflare-wes-hub) holds the hub alone: the thin WES with its FL server, no proxy, no TES. It's a chart rather than plain manifests with Kustomize, as names, port and address are set with `--set`, so nothing about a deployment goes into a file of the repository, and its schema refuses what can't work on Rahti. It makes:
 
@@ -268,7 +268,7 @@ The first install on Rahti, on 2026-11-12, with sites on a TESK in the same clus
 | What's public | The Routes expose `/kits` and `/sites` on the kits name, and nothing else of the WES. The WES API answered neither on the kits name nor on the hub's name, and the admin port was closed | Nothing: reach the WES with `oc port-forward` |
 | Tasks in the same cluster | A TES task on Rahti reached the FL port at the public address: the probe said `open`, and the sites joined. Traffic from inside goes out and back in (hairpin) | Nothing. Nodes elsewhere still need the [probe](#probing-a-node) |
 | Probe listener | A listener started in the hub's pod for the probe stayed behind and held the FL port. The FL server started without it, no site joined, and the first T8 ended in `SYSTEM_ERROR` after the start timeout | Runs fail at once now, with "The FL port … is in use" ([#41](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/pull/41)). Start a listener only with `oc exec -it`, stop it with Ctrl-C, and restart the pod if one stayed behind |
-| T8 | After a restart of the pod, the run over both sites, on the same TESK, ended `COMPLETE`, with the NVFlare job `FINISHED:COMPLETED` | See [Results](../outcomes/results.md) |
+| T8 | After a restart of the pod, the run over both sites, on the same TESK, ended `COMPLETE`, with the NVFlare job `FINISHED:COMPLETED`. The accuracies weren't checked | See [Results](../outcomes/results.md) |
 
 The NetworkPolicies that Rahti puts in every project didn't keep the FL port or the Routes out. T8 ran within the 2 GiB memory limit.
 

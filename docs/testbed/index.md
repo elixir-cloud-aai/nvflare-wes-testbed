@@ -6,8 +6,8 @@ The [Background](../background/use-case.md) describes an end state. This testbed
 
 The question is whether a federated job fits WES and TES at all, as TES tasks are batch and FL participants must reach each other. See [Options](options.md) for what was evaluated, and the recommendation. This is a sandbox: see [Shortcuts and hacks](shortcuts.md).
 
-!!! warning "Status: this has only run on one laptop"
-    See [Home](../index.md#status). Results of the local runs are in [Tests](../tests/index.md#local-runs). Nothing has run on a real site.
+!!! warning "Status: this has only run on one laptop, and once on one cluster"
+    See [Home](../index.md#status). Results of the local runs are in [Tests](../tests/index.md#local-runs). The hub has run once on Rahti, with both sites on one TESK in the same cluster: see [Results](../outcomes/results.md). Nothing has run at a partner's node.
 
 ## Goals
 
