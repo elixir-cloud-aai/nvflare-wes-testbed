@@ -45,5 +45,5 @@ On 2026-11-04, on one laptop with Docker 28.3, with NVFlare 2.9.0 from PyPI, Fun
 | Node probe (`tests/probe-node.sh`) | Ran against the local Funnel of site 1, directly and through proTES. Tells a node that can take part from one that can't |
 | Hub of `compose.hub.yaml` (`tests/hub.sh`) | 10/10 checks with local sites, as an arbitrary non-root user. The proxy passes `/kits` and `/sites`, and the WES only from allowed addresses. The [checks from outside](../setup/real-sites.md#checking-the-hub-from-outside) pass, with a warning for the FL port outside a run, and fail on the WES alone once it's open to all |
 | Checks from outside (`tests/outside_check_test.py`) | Unit tests of `tests/outside_check.py`, with a local server and mocks, in CI |
-| Chart for Rahti (`tests/chart.sh`) | Lint, what it exposes and refuses, and OpenShift's schemas, in CI. No cluster: not installed anywhere yet |
+| Chart for Rahti (`tests/chart.sh`) | Lint, what it exposes and refuses, a CPU limit at most 5 times the request, and OpenShift's schemas, in CI. No cluster: not installed anywhere yet |
 | T8 | Not run |

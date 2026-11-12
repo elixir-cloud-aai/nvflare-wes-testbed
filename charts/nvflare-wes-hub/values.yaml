@@ -65,9 +65,11 @@ securityContext:
   capabilities:
     drop: ["ALL"]
 
+# Limits at most 5 times the requests, as clusters with a LimitRange often
+# refuse more (`maxLimitRequestRatio`). Change requests and limits together
 resources:
   requests:
-    cpu: 250m
+    cpu: 400m
     memory: 1Gi
   limits:
     cpu: "2"

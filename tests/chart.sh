@@ -192,6 +192,36 @@ expect "the sites file still from its Secret" \
 expect "environment from the Secret" "${ctr} | .envFrom[0].secretRef.name" "tes-oauth"
 expect "no secret as a value of the chart" "[${env} | select(.name | test(\"TOKEN|SECRET\"))] | length" "0"
 
+# Clusters with a LimitRange often allow a CPU limit of at most 5 times the
+# request (`maxLimitRequestRatio`), and refuse pods above it. Every container
+# of the defaults sets both, as such a LimitRange fills in a missing one
+max_ratio=5
+# Millicores of a CPU quantity, in whole numbers: `400m`, `2` or `0.5`. Other
+# forms (such as `1e3` or `0.0005`) fail the check, rather than pass unchecked
+millicores() {
+    awk -v q="$1" 'BEGIN {
+        if (q ~ /^[0-9]+m$/) { print substr(q, 1, length(q) - 1) + 0; exit }
+        if (q ~ /^[0-9]+(\.[0-9]{1,3})?$/) {
+            n = split(q, p, ".")
+            print p[1] * 1000 + (n > 1 ? substr(p[2] "00", 1, 3) : 0)
+            exit
+        }
+        exit 1
+    }'
+}
+containers="$(yq ea -r "${dep} | .spec.template.spec | (.initContainers // []) + .containers | .[] |
+    .name + \" \" + (.resources.requests.cpu // \"-\") + \" \" + (.resources.limits.cpu // \"-\")" "${out}")"
+[[ -n "${containers}" ]] || fail "no containers in the defaults"
+while read -r name request limit; do
+    if ! req_m="$(millicores "${request}")" || ! lim_m="$(millicores "${limit}")" || ((req_m == 0)); then
+        fail "CPU request and limit of ${name} by default: got '${request}' and '${limit}'"
+    elif ((lim_m <= max_ratio * req_m)); then
+        ok "CPU limit at most ${max_ratio} times the request of ${name} by default (${limit}/${request})"
+    else
+        fail "CPU limit more than ${max_ratio} times the request of ${name} by default (${limit}/${request})"
+    fi
+done <<<"${containers}"
+
 # Rahti's admission rejects RuntimeDefault, and sets a profile of its own when
 # the pod names none: the override in the docs removes it and nothing else
 helm template hub "${chart}" "${args[@]}" --set podSecurityContext.seccompProfile=null >"${out}"
