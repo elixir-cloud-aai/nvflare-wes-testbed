@@ -127,8 +127,8 @@ def main() -> None:
             return 200
 
         wes.RUNS["run-a"] = {"state": "COMPLETE", "submitter": "researcher-1"}
-        runs_as_owner = {r["run_id"] for r in wes.list_runs(identity="researcher-1")["runs"]}
-        runs_as_other = {r["run_id"] for r in wes.list_runs(identity="someone-else")["runs"]}
+        runs_as_owner = {r["run_id"] for r in wes.list_runs(submitter="researcher-1")["runs"]}
+        runs_as_other = {r["run_id"] for r in wes.list_runs(submitter="someone-else")["runs"]}
         checks["the owner's run list includes it"] = "run-a" in runs_as_owner
         checks["someone else's run list doesn't"] = "run-a" not in runs_as_other
         checks["the owner can fetch it"] = run_status("run-a", "researcher-1") == 200

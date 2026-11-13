@@ -67,6 +67,6 @@ Same versions as above, ARM64 laptop, tests ran after adding the WES's own OIDC 
 | T7 | 10/10 checks passed. `http` on port 443 |
 | Hub of `compose.hub.yaml` (`tests/hub.sh`), now also running `auth-check` | All checks passed |
 | `tests/auth_check.py` (claim checks against a fake key, no network) | All checks passed, via `tests/hub.sh` |
-| T9 (`docker compose -f compose.yaml -f compose.auth.yaml --profile test run --rm auth-e2e-check`) | All checks passed |
+| T9 (`docker compose --profile test run --rm auth-e2e-check`) | All checks passed |
 | Chart for Rahti (`tests/chart.sh`) | All checks passed |
 | T8 | Not run, no real site yet |

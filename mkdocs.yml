@@ -82,6 +82,7 @@ nav:
   - T6 Losing a site: tests/t6-site-loss.md
   - T7 Only port 443: tests/t7-port-443.md
   - T8 Real sites: tests/t8-real-sites.md
+  - "T9 The WES's OIDC gate": tests/t9-auth.md
 - Outcomes:
   - Open questions: outcomes/open-questions.md
   - Results: outcomes/results.md

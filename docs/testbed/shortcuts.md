@@ -46,6 +46,8 @@ All of them, in one place, each with the proper way. Their numbers are referred 
 
 **A fake identity provider for proTES hands out tokens to anyone.** **Proper way:** LS Login, as in the [token exchange testbed](https://github.com/elixir-cloud-aai/token-exchange-flow-testbed).
 
+**Update:** it's no longer proTES-only. The WES's own OIDC gate ([H5](#h5)) needs a trusted issuer too, so `compose.yaml` now always runs it, and every local run (not only T4) gets a token from it.
+
 ## Scheduling
 
 ### H1
