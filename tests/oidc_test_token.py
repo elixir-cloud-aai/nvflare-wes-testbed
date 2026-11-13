@@ -9,7 +9,7 @@ import os
 import requests
 
 
-def fetch(sub: str = "researcher-1@testbed.invalid") -> str:
+def fetch(sub: str = "researcher-1") -> str:
     """Get an access token for a subject, from `WES_OIDC_TOKEN_URL`.
 
     Args:
@@ -22,7 +22,7 @@ def fetch(sub: str = "researcher-1@testbed.invalid") -> str:
     return reply.json()["access_token"]
 
 
-def header(sub: str = "researcher-1@testbed.invalid") -> dict[str, str]:
+def header(sub: str = "researcher-1") -> dict[str, str]:
     """Build the `Authorization` header a WES call needs.
 
     Args:
