@@ -790,8 +790,10 @@ def authenticated(credentials: Annotated[HTTPAuthorizationCredentials | None, De
             otherwise doesn't check out against it.
     """
     if not OIDC_ISSUER:
+        logger.warning("Auth: no trusted OIDC issuer is configured")
         raise HTTPException(401, "No trusted OIDC issuer is configured")
     if credentials is None:
+        logger.warning("Auth: a caller sent no bearer token")
         raise HTTPException(401, "Bearer token required")
     try:
         key = jwk_client().get_signing_key_from_jwt(credentials.credentials).key
@@ -799,6 +801,7 @@ def authenticated(credentials: Annotated[HTTPAuthorizationCredentials | None, De
             credentials.credentials, key, algorithms=OIDC_ALGORITHMS, audience=OIDC_AUDIENCE, issuer=OIDC_ISSUER
         )
     except jwt.InvalidTokenError as error:
+        logger.warning("Auth: rejected a bearer token: %s", error)
         raise HTTPException(401, f"Invalid token: {error}") from None
 
 
@@ -821,13 +824,17 @@ def identity(claims: dict[str, Any] = AUTH_DEPENDENCY) -> str:
     """
     sub = claims.get("sub")
     if not sub:
+        logger.warning("Auth: a token had no 'sub' claim")
         raise HTTPException(400, "Bearer token is missing required 'sub' claim")
     if ALLOWED_SUBS and sub not in ALLOWED_SUBS:
+        logger.warning("Auth: rejected disallowed subject %r", sub)
         raise HTTPException(403, "This identity isn't allowed to use this WES")
     email = claims.get("email")
     if not email:
+        logger.warning("Auth: subject %r has a token with no email claim", sub)
         raise HTTPException(400, "The provided token is missing email claim")
     if not re.fullmatch(r"[A-Za-z0-9._@-]{1,80}", email):
+        logger.warning("Auth: subject %r has an unsafe email claim %r", sub, email)
         raise HTTPException(400, "The submitter email has characters that can't name a FLARE admin")
     return email
 
@@ -863,11 +870,11 @@ def service_info() -> dict[str, Any]:
 
 @app.post("/ga4gh/wes/v1/runs")
 def run_workflow(
-    workflow_type: Annotated[str, Form()],
-    workflow_type_version: Annotated[str, Form()],
-    workflow_url: Annotated[str, Form()],
-    workflow_params: Annotated[str, Form()] = "{}",
-    tags: Annotated[str, Form()] = "{}",
+    workflow_type: Annotated[str, Form(max_length=20)],
+    workflow_type_version: Annotated[str, Form(max_length=20)],
+    workflow_url: Annotated[str, Form(max_length=256)],
+    workflow_params: Annotated[str, Form(max_length=8192)] = "{}",
+    tags: Annotated[str, Form(max_length=8192)] = "{}",
     submitter: str = IDENTITY_DEPENDENCY,
 ) -> dict[str, str]:
     """Start a run.
