@@ -98,6 +98,10 @@ def main() -> None:
             "the wrong audience is rejected": status(bearer(token(key, **{**good, "aud": "someone-else"}))) == 401,
             "the wrong issuer is rejected": status(bearer(token(key, **{**good, "iss": "https://else.test/"}))) == 401,
             "an expired token is rejected": status(bearer(token(key, **{**good, "exp": now - 1}))) == 401,
+            "a token with no expiry at all is rejected": status(
+                bearer(token(key, **{k: v for k, v in good.items() if k != "exp"}))
+            )
+            == 401,
         }
 
         def id_status(claims: dict[str, object]) -> int:

@@ -801,7 +801,12 @@ def authenticated(credentials: Annotated[HTTPAuthorizationCredentials | None, De
     try:
         key = jwk_client().get_signing_key_from_jwt(credentials.credentials).key
         return jwt.decode(
-            credentials.credentials, key, algorithms=OIDC_ALGORITHMS, audience=OIDC_AUDIENCE, issuer=OIDC_ISSUER
+            credentials.credentials,
+            key,
+            algorithms=OIDC_ALGORITHMS,
+            audience=OIDC_AUDIENCE,
+            issuer=OIDC_ISSUER,
+            options={"require": ["exp"]},
         )
     except jwt.InvalidTokenError as error:
         logger.warning("Auth: rejected a bearer token: %s", error)
