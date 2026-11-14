@@ -132,6 +132,8 @@ OIDC_AUDIENCE = os.environ.get("WES_OIDC_AUDIENCE", "fl-wes")
 OIDC_ALGORITHMS = [a.strip() for a in os.environ.get("WES_OIDC_ALGORITHMS", "RS256").split(",") if a.strip()]
 # Empty allows any authenticated subject (H22): a shortcut, not group/role RBAC
 ALLOWED_SUBS = {s.strip() for s in os.environ.get("WES_OIDC_ALLOWED_SUBS", "").split(",") if s.strip()}
+if not OIDC_ISSUER:
+    logger.warning("No WES_OIDC_ISSUER is configured: every run and most endpoints will be refused")
 
 app = FastAPI(title="Thin WES for NVFlare (sandbox)")
 RUNS: dict[str, dict[str, Any]] = {}
