@@ -33,6 +33,20 @@ flScheme: grpc
 # address. Empty: MetalLB picks one of the pool's
 loadBalancerIP: ""
 
+# Required: the trusted OIDC issuer (e.g. LS Login's), https (H5). The WES
+# refuses every run and most endpoints without one; see docs/testbed/shortcuts.md#h5
+oidcIssuer: ""
+
+# The aud a token must carry, matching this deployment's registration at the issuer
+oidcAudience: fl-wes
+
+# Signing algorithms accepted from the issuer, comma-separated
+oidcAlgorithms: RS256
+
+# Subjects allowed to use the WES, comma-separated; a static allow-list, not
+# real access control (H22). Empty: any subject the issuer vouches for
+oidcAllowedSubs: ""
+
 # The Secret with the sites file under the key `sites.json` (see
 # `compose/sites.example.json`). Not part of the chart: create it with `oc
 # create secret`, and never commit it

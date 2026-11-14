@@ -102,6 +102,8 @@ jobs:
         run: docker compose --profile test run --rm -T simulator
       - name: Run one WES run (T2)
         run: docker compose --profile test run --rm -T e2e
+      - name: Check the WES's own OIDC gate, over HTTP (T9)
+        run: docker compose --profile test run --rm -T auth-e2e-check
       - name: Check what tasks can reach (T3)
         run: |
           docker compose --profile test run --rm -T probe-site-1

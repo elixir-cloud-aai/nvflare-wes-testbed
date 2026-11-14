@@ -15,6 +15,7 @@
 | [T6 Losing a site](t6-site-loss.md) | A run fails soon and cleanly if a client dies | Local | Yes |
 | [T7 Only port 443](t7-port-443.md) | Works with a port that's more often open | Local | No |
 | [T8 Real sites](t8-real-sites.md) | The direct run, on real nodes. Conquest and proTES are [tracked separately](../testbed/index.md#goals) | Event | No |
+| [T9 The WES's OIDC gate](t9-auth.md) | The WES refuses a caller with no token; every run needs one, mandatory ([H5](../testbed/shortcuts.md#h5)) | Local | Yes |
 
 ## Order for a live session
 
@@ -30,7 +31,8 @@ Then: T8, with T7's port if T3's question came out badly. If that's a dead end a
 
 ## Local runs
 
-On 2026-11-04, on one laptop with Docker 28.3, with NVFlare 2.9.0 from PyPI, Funnel v0.11.14 and proTES v0.4.0, with the test set. No real site was involved.
+### 2026-11-04
+One laptop with Docker 28.3, with NVFlare 2.9.0 from PyPI, Funnel v0.11.14 and proTES v0.4.0, with the test set. No real site was involved.
 
 | Test | Result |
 |---|---|
@@ -48,3 +50,23 @@ On 2026-11-04, on one laptop with Docker 28.3, with NVFlare 2.9.0 from PyPI, Fun
 | Checks from outside (`tests/outside_check_test.py`) | Unit tests of `tests/outside_check.py`, with a local server and mocks, in CI |
 | Chart for Rahti (`tests/chart.sh`) | Lint, what it exposes and refuses, a CPU limit at most 5 times the request, and OpenShift's schemas, in CI, without a cluster. Installed on Rahti on 2026-11-12: see [What differed on Rahti](../setup/real-sites.md#what-differed-on-rahti) |
 | T8 | Not a local run: on Rahti, 2026-11-12, with both sites on one TESK in the hub's cluster. The first run: `SYSTEM_ERROR` after the start timeout, no site joined. The node probe's listener, left running in the hub's pod, held the FL port, and the FL server started without it. Runs now fail at once in that case. After a restart of the pod: `COMPLETE`, accuracies not checked. See [Results](../outcomes/results.md) |
+| T9 | Not run |
+
+### 2026-11-11
+
+Same versions as above, ARM64 laptop, tests ran after adding the WES's own OIDC gate ([H5](../testbed/shortcuts.md#h5)) and the dynamic provisioning ([H4](../testbed/shortcuts.md#h4) and [H3](../testbed/shortcuts.md#h3).
+
+| Test | Result |
+|---|---|
+| T1 | Ran. Holdout accuracy: federated 0.975, site-1 alone 0.825, site-2 alone 0.875 |
+| T2 | 10/10 checks, 44.6 seconds from container creation to run `COMPLETE`, same accuracies |
+| T3 | Ran. Hub is reachable, site-1 and internet are not. No data in the hub.  |
+| T4 | 12/12 checks passed |
+| T5 | 10/10 checks passed |
+| T6 | Run ended with SYSTEM_ERROR, 5 s after the kill. No task container left |
+| T7 | 10/10 checks passed. `http` on port 443 |
+| Hub of `compose.hub.yaml` (`tests/hub.sh`), now also running `auth-check` | All checks passed |
+| `tests/auth_check.py` (claim checks against a fake key, no network) | All checks passed, via `tests/hub.sh` |
+| T9 (`docker compose --profile test run --rm auth-e2e-check`) | All checks passed |
+| Chart for Rahti (`tests/chart.sh`) | All checks passed |
+| T8 | Not run, no real site yet |

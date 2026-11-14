@@ -5,6 +5,7 @@ x-protes: &protes
   image: nvflare-testbed-protes:local
   build:
     context: https://github.com/elixir-cloud-aai/proTES.git#v0.4.0
+  platform: linux/amd64
   environment: &protes-env
     CELERY_BROKER_URL: pyamqp://protes:protes@rabbitmq:5672//
     FOCA_CONFIG_OVERLAY: /etc/protes/testbed.yaml
@@ -43,14 +44,6 @@ services:
     command: ["celery", "--app", "pro_tes.celery_worker", "worker", "--loglevel=info"]
     healthcheck:
       disable: true
-
-  fake-idp:
-    image: nvflare-testbed:local
-    command: ["python3", "/app/tests/fake_idp.py"]
-    depends_on:
-      flare-image:
-        condition: service_completed_successfully
-    networks: [control]
 
   mongodb:
     image: mongo:7.0

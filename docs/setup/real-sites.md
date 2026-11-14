@@ -5,7 +5,7 @@
 
 ## What the hub needs
 
-A public address, with these open: the FL port, straight through to the FL server, as its TLS is mutual, and HTTPS for the links to kits, which nodes fetch. It needs a stable name, set in `FL_SERVER_NAME`: the kits contain it. The WES has no authentication ([H5](../testbed/shortcuts.md#h5)), so only some addresses may reach `/ga4gh/wes/v1`, and `/kits` stays open for nodes.
+A public address, with these open: the FL port, straight through to the FL server, as its TLS is mutual, and HTTPS for the links to kits, which nodes fetch. It needs a stable name, set in `FL_SERVER_NAME`: the kits contain it. The WES itself checks every caller against a trusted OIDC issuer, such as LS Login, mandatory, with no local-only bypass ([H5](../testbed/shortcuts.md#h5)): set `WES_OIDC_ISSUER`, and `WES_OIDC_AUDIENCE` if it differs from the default `fl-wes`. Only some addresses may also reach `/ga4gh/wes/v1`, and `/kits` stays open for nodes.
 
 See [Deploying the hub](#deploying-the-hub) for where it goes, and how.
 
@@ -138,6 +138,11 @@ Caddy gets a certificate for that name, which needs ports 80 and 443 reachable. 
 | `FL_IMAGE` | `elixircloud/nvflare-wes-testbed:dev` | Image of the hub and the tasks. Use `sha-<commit>` |
 | `FL_PORT`, `FL_SCHEME` | `8002`, `grpc` | FL port. For 443, use `http`: see [T7](../tests/t7-port-443.md) |
 | `WES_ALLOWED_IPS` | `127.0.0.1` | Addresses or ranges that reach the WES, separated by spaces |
+| `WES_OIDC_ISSUER` | None, required | Trusted OIDC issuer, e.g. LS Login's. `/runs*` and `/outputs` need a bearer token it issued; there's no way to start a run without one ([H5](../testbed/shortcuts.md#h5)) |
+| `WES_OIDC_AUDIENCE` | `fl-wes` | The `aud` a token must carry, matching this deployment's registration at the issuer |
+| `WES_OIDC_ALGORITHMS` | `RS256` | Signing algorithms accepted from the issuer, comma-separated |
+| `WES_OIDC_ALLOWED_SUBS` | None, any caller | Subjects allowed to use the WES, comma-separated; a static allow-list, not real access control ([H22](../testbed/shortcuts.md#h22)) |
+| `WES_OIDC_ALLOW_HTTP` | None, https required | Local tests only: allows the issuer and its JWKS over plain HTTP. Never set it on a real deployment; an on-path attacker with it set could forge tokens |
 | `WES_INTERNAL_URL` | `https://<FL_SERVER_NAME>` | Base of the links to kits. Keep it `https`, as kits hold private keys |
 | `WES_SITES_FILE` | `./sites.json` | The sites file: name, `tes` and `data`. Add a [token source](#tokens-for-the-tes-of-the-sites) for a TES that needs one, which must then be at an `https` URL |
 | `HUB_HTTPS_PORT` | `443` | Another port for HTTPS, if the FL port is 443. Then set `WES_INTERNAL_URL` to match, and Let's Encrypt still needs port 80. The redirect from HTTP still points to 443, so use the `https` URL with its port |
@@ -188,6 +193,7 @@ helm install hub charts/nvflare-wes-hub \
     --set image.tag=sha-<commit> \
     --set hubName=<hub name> \
     --set kitsHost=<kits name> \
+    --set oidcIssuer=<trusted OIDC issuer, https> \
     --set flPort=30002 \
     --set podSecurityContext.seccompProfile=null
 oc rollout status deployment/hub-nvflare-wes-hub
@@ -212,6 +218,10 @@ The Route must say `Admitted=True`. If another project already has its name, the
 | `flPort` | `30002` | FL port, on the address and in the pod: 30000 to 35000 |
 | `flScheme` | `grpc` | `grpc`, or `http` (WebSocket, see [T7](../tests/t7-port-443.md)) |
 | `loadBalancerIP` | Empty | Internal address of the project's pool (`192.168.…`), not the public one. Empty: one of the pool's |
+| `oidcIssuer` | None, required | Trusted OIDC issuer, https (e.g. LS Login's). The WES refuses every run and most endpoints without one ([H5](../testbed/shortcuts.md#h5)) |
+| `oidcAudience` | `fl-wes` | The `aud` a token must carry, matching this deployment's registration at the issuer |
+| `oidcAlgorithms` | `RS256` | Signing algorithms accepted from the issuer, comma-separated |
+| `oidcAllowedSubs` | Empty, any caller | Subjects allowed to use the WES, comma-separated; a static allow-list, not real access control ([H22](../testbed/shortcuts.md#h22)) |
 | `sitesSecret` | `nvflare-wes-sites` | Secret with the sites file under the key `sites.json` |
 | `tokenSecret` | Empty | Secret with [token files](#tokens-for-the-tes-of-the-sites), one key per site, mounted whole at `/run/secrets/tes-tokens`, so that renewed tokens arrive without a restart. Empty: none |
 | `envSecret` | Empty | Secret whose keys become environment variables of the hub: the secrets that [`oauth`](#tokens-for-the-tes-of-the-sites) sources name. Empty: none |

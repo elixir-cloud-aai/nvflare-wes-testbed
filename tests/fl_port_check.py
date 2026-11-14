@@ -67,13 +67,13 @@ def main() -> None:
             wes.FL_SERVER_MODE = "local"
             wes.RUNS["r"] = {"state": "QUEUED", "tasks": [], "outputs": {}}
             started = time.monotonic()
-            wes.execute("r", pathlib.Path(directory) / "job", ["site-1"])
+            wes.execute("r", pathlib.Path(directory) / "job", ["site-1"], "probe@testbed.invalid")
             took = time.monotonic() - started
             run = wes.RUNS["r"]
             # The FL server of a TES task doesn't run here, so the port of this container doesn't matter
             wes.FL_SERVER_MODE = "tes"
             wes.RUNS["t"] = {"state": "QUEUED", "tasks": [], "outputs": {}}
-            wes.execute("t", pathlib.Path(directory) / "job", ["site-1"])
+            wes.execute("t", pathlib.Path(directory) / "job", ["site-1"], "probe@testbed.invalid")
             tes_run = wes.RUNS["t"]
             wes.FL_SERVER_MODE = "local"
 

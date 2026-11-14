@@ -10,6 +10,10 @@ export HUB_TLS="tls internal"
 export WES_SITES_FILE=tests/sites.hub-test.json
 # Nodes here can't check the certificate of `tls internal`, so kits go over HTTP
 export WES_INTERNAL_URL="http://${FL_SERVER_NAME}:8080"
+# Auth is mandatory, so the hub needs a trusted issuer: the fake identity
+# provider, which has no TLS of its own
+export WES_OIDC_ISSUER=http://fake-idp:8080/oidc/
+export WES_OIDC_ALLOW_HTTP=1
 hub=(docker compose -f compose.hub.yaml -f tests/compose.hub-test.yaml --project-directory .)
 trap '"${hub[@]}" --profile test down -v' EXIT
 
@@ -31,6 +35,7 @@ echo "[ok] no Docker socket, admin port or TES in the hub's Compose file"
 "${hub[@]}" --profile test run --rm -T site-config-check
 "${hub[@]}" --profile test run --rm -T csr-token-check
 "${hub[@]}" --profile test run --rm -T fl-port-check
+"${hub[@]}" --profile test run --rm -T auth-check
 "${hub[@]}" --profile test run --rm -T e2e
 "${hub[@]}" up -d --wait proxy
 "${hub[@]}" --profile test run --rm -T proxy-check

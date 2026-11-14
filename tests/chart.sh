@@ -22,11 +22,13 @@ tag=sha-0123456789abcdef0123456789abcdef01234567
 image="docker.io/elixircloud/nvflare-wes-testbed:${tag}"
 hub=flare-wes.example.invalid
 kits=flare-wes-kits.example.rahtiapp.fi
+issuer=https://login.example.invalid/oidc/
 wes=hub-nvflare-wes-hub-wes
 tag_arg=(--set "image.tag=${tag}")
 hub_arg=(--set "hubName=${hub}")
 kits_arg=(--set "kitsHost=${kits}")
-args=("${tag_arg[@]}" "${hub_arg[@]}" "${kits_arg[@]}")
+oidc_arg=(--set "oidcIssuer=${issuer}")
+args=("${tag_arg[@]}" "${hub_arg[@]}" "${kits_arg[@]}" "${oidc_arg[@]}")
 failed=0
 
 ok() { echo "[ok] $1"; }
@@ -58,9 +60,11 @@ refuse() {
 }
 
 refuse "without values"
-refuse "without hubName" "${tag_arg[@]}" "${kits_arg[@]}"
-refuse "without kitsHost" "${tag_arg[@]}" "${hub_arg[@]}"
-refuse "without an image tag" "${hub_arg[@]}" "${kits_arg[@]}"
+refuse "without hubName" "${tag_arg[@]}" "${kits_arg[@]}" "${oidc_arg[@]}"
+refuse "without kitsHost" "${tag_arg[@]}" "${hub_arg[@]}" "${oidc_arg[@]}"
+refuse "without an image tag" "${hub_arg[@]}" "${kits_arg[@]}" "${oidc_arg[@]}"
+refuse "without an oidcIssuer" "${tag_arg[@]}" "${hub_arg[@]}" "${kits_arg[@]}"
+refuse "an oidcIssuer that isn't https" "${tag_arg[@]}" "${hub_arg[@]}" "${kits_arg[@]}" --set "oidcIssuer=http://login.example.invalid/oidc/"
 refuse "a moving image tag" "${args[@]}" --set image.tag=dev
 refuse "a hub name under rahtiapp.fi" "${args[@]}" --set hubName=flare-wes.2.rahtiapp.fi
 refuse "a hub name without a domain" "${args[@]}" --set hubName=flare-wes
@@ -112,6 +116,10 @@ expect "HOME for an arbitrary user" "${env} | select(.name == \"HOME\") | .value
 expect "no fixed user, as OpenShift picks one" \
     "[${dep} | .. | select(tag == \"!!map\") | select(has(\"runAsUser\"))] | length" "0"
 expect "the hub's name" "${env} | select(.name == \"FL_SERVER_NAME\") | .value" "${hub}"
+expect "the OIDC issuer" "${env} | select(.name == \"WES_OIDC_ISSUER\") | .value" "${issuer}"
+expect "the OIDC audience default" "${env} | select(.name == \"WES_OIDC_AUDIENCE\") | .value" "fl-wes"
+expect "the OIDC algorithms default" "${env} | select(.name == \"WES_OIDC_ALGORITHMS\") | .value" "RS256"
+expect "no allow-list by default" "[${env} | select(.name == \"WES_OIDC_ALLOWED_SUBS\")] | length" "0"
 expect "kits by the Route's name, over https" "${env} | select(.name == \"WES_INTERNAL_URL\") | .value" \
     "https://${kits}"
 expect "the FL port" "${env} | select(.name == \"FL_PORT\") | .value" "30123"
@@ -173,6 +181,13 @@ expect "no token Secret by default" \
     "[${dep} | .spec.template.spec.volumes[] | select(.name == \"tes-tokens\")] | length" "0"
 expect "no token mount by default" "[${ctr} | .volumeMounts[] | select(.name == \"tes-tokens\")] | length" "0"
 expect "no environment from a Secret by default" "[${ctr} | .envFrom // [] | .[]] | length" "0"
+
+# Non-default OIDC values, to see them arrive
+helm template hub "${chart}" "${args[@]}" --set oidcAudience=other-aud --set 'oidcAlgorithms=RS256\,ES256' \
+    --set 'oidcAllowedSubs=researcher-1\,researcher-2' >"${out}"
+expect "the OIDC audience" "${env} | select(.name == \"WES_OIDC_AUDIENCE\") | .value" "other-aud"
+expect "the OIDC algorithms" "${env} | select(.name == \"WES_OIDC_ALGORITHMS\") | .value" "RS256,ES256"
+expect "the allow-list" "${env} | select(.name == \"WES_OIDC_ALLOWED_SUBS\") | .value" "researcher-1,researcher-2"
 
 # Tokens that get renewed: files from a Secret, mounted as a whole (no
 # `subPath`, no `items`), so that a renewed token reaches the pod; and the

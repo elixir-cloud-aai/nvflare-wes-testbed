@@ -14,8 +14,10 @@ workflow type, `NVFLARE`. For each run it:
 4. submits the FLARE job through the FLARE admin API, and waits for it;
 5. downloads the global model, shuts the federation down, deletes the CA.
 
-Every shortcut in here is listed in `docs/testbed/shortcuts.md`. No
-authentication, one run at a time, state in memory.
+Every shortcut in here is listed in `docs/testbed/shortcuts.md`. Authentication
+is mandatory, OIDC bearer tokens against one trusted issuer (H5); a caller
+only sees and acts on its own runs, and may also be checked against a static
+allow-list (H22). One run at a time, state in memory.
 """
 
 import errno
@@ -33,12 +35,14 @@ import threading
 import time
 import uuid
 from collections.abc import Mapping
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 
 import anyio
+import jwt
 import requests
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, Response
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from wes import tokens
 
@@ -113,7 +117,6 @@ FL_PORT = int(os.environ.get("FL_PORT", "8002"))
 for _name in {name for source in TOKENS.values() for name in source.env_names}:
     os.environ.pop(_name, None)
 ORG = "testbed"
-ADMIN = "admin@testbed.invalid"
 ADMIN_PORT = 8003
 START_TIMEOUT = 180
 JOB_TIMEOUT = 600
@@ -123,6 +126,17 @@ BIND_FAILURE = "Failed to add port"
 # What NVFlare logs for a port it did bind
 BOUND_PORT = r"added (?:secure|insecure) port at \S*:{port}\b"
 TERMINAL_TES = {"COMPLETE", "EXECUTOR_ERROR", "SYSTEM_ERROR", "CANCELED", "PREEMPTED"}
+# Mandatory (H5): empty means no issuer is trusted, so no caller can check out
+OIDC_ISSUER = os.environ.get("WES_OIDC_ISSUER", "")
+OIDC_AUDIENCE = os.environ.get("WES_OIDC_AUDIENCE", "fl-wes")
+OIDC_ALGORITHMS = [a.strip() for a in os.environ.get("WES_OIDC_ALGORITHMS", "RS256").split(",") if a.strip()]
+# Discovery and the JWKS it names must be https, except for an explicit local
+# escape hatch: the sandbox's own fake identity provider (H10) has no TLS
+OIDC_ALLOW_HTTP = bool(os.environ.get("WES_OIDC_ALLOW_HTTP", ""))
+# Empty allows any authenticated subject (H22): a shortcut, not group/role RBAC
+ALLOWED_SUBS = {s.strip() for s in os.environ.get("WES_OIDC_ALLOWED_SUBS", "").split(",") if s.strip()}
+if not OIDC_ISSUER:
+    logger.warning("No WES_OIDC_ISSUER is configured: every run and most endpoints will be refused")
 
 app = FastAPI(title="Thin WES for NVFlare (sandbox)")
 RUNS: dict[str, dict[str, Any]] = {}
@@ -652,30 +666,31 @@ def cancel_tasks(run: dict[str, Any]) -> None:
                 logger.warning("Couldn't cancel the task of %s", task["site"])
 
 
-def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
+def execute(run_id: str, job_dir: pathlib.Path, sites: list[str], submitter: str) -> None:
     """Carry out a run, in the background.
 
     Args:
         run_id: Identifier of the run.
         job_dir: Directory of the FLARE job.
         sites: Names of the sites.
+        submitter: The caller's validated identity, as the FLARE admin's name.
     """
     from nvflare.fuel.flare_api.flare_api import new_secure_session
 
     run = RUNS[run_id]
     run_dir = BASE / run_id
-    run_dir.mkdir(parents=True)
     server: subprocess.Popen[bytes] | None = None
     slots: list[str] = []
     final_state = "SYSTEM_ERROR"
     try:
         run["state"] = "INITIALIZING"
+        run_dir.mkdir(parents=True)
         if FL_SERVER_MODE != "tes":
             ensure_port_free(FL_PORT)
         project = f"run{run_id[:8]}"
         fingerprint = init_ca(run_dir, project)
         server_kit = provision_locally(run_dir, project, FL_HOST, "server")
-        admin_kit = provision_locally(run_dir, project, ADMIN, "admin")
+        admin_kit = provision_locally(run_dir, project, submitter, "admin")
         if FL_SERVER_MODE == "tes":
             token, kit_url = publish_kit(server_kit, run_dir)
             slots.append(token)
@@ -697,7 +712,7 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
             )
             reply.raise_for_status()
             run["tasks"].append({"site": site, "id": reply.json()["id"], "base": base, "state": "QUEUED"})
-        session = new_secure_session(ADMIN, str(admin_kit), timeout=60)
+        session = new_secure_session(submitter, str(admin_kit), timeout=60)
         try:
             run["state"] = "RUNNING"
             wait_for_clients(session, run, sites, START_TIMEOUT)
@@ -739,12 +754,128 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str]) -> None:
         for token in slots:
             KITS.pop(token, None)
             CSR_TOKENS.pop(token, None)
-        for child in run_dir.iterdir():
-            if child.is_dir() or child.suffix == ".tgz":
-                shutil.rmtree(child, ignore_errors=True) if child.is_dir() else child.unlink()
+        if run_dir.is_dir():
+            for child in run_dir.iterdir():
+                if child.is_dir() or child.suffix == ".tgz":
+                    shutil.rmtree(child, ignore_errors=True) if child.is_dir() else child.unlink()
         run["end_time"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         run["state"] = final_state
         logger.info("Run %s: %s", run_id, final_state)
+
+
+_jwk_client: jwt.PyJWKClient | None = None
+
+
+def jwk_client() -> jwt.PyJWKClient:
+    """Get this process's JWKS client for `OIDC_ISSUER`, fetching its discovery document once.
+
+    Returns:
+        The client, caching the issuer's keys.
+
+    Raises:
+        ValueError: The issuer or the JWKS it names aren't reachable over https, and
+            `WES_OIDC_ALLOW_HTTP` isn't set: an on-path attacker between the WES and
+            the issuer could otherwise replace the discovery document or signing
+            keys, and have forged tokens pass the checks that follow.
+    """
+    global _jwk_client
+    if _jwk_client is None:
+        if not OIDC_ALLOW_HTTP:
+            tokens.check_url(OIDC_ISSUER, "WES_OIDC_ISSUER")
+        discovery = requests.get(f"{OIDC_ISSUER.rstrip('/')}/.well-known/openid-configuration", timeout=10).json()
+        jwks_uri = discovery["jwks_uri"]
+        if not OIDC_ALLOW_HTTP:
+            tokens.check_url(jwks_uri, "the issuer's jwks_uri")
+        _jwk_client = jwt.PyJWKClient(jwks_uri)
+    return _jwk_client
+
+
+bearer = HTTPBearer(auto_error=False)
+
+
+def authenticated(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]) -> dict[str, Any]:
+    """Check a caller's bearer token against `OIDC_ISSUER`.
+
+    Args:
+        credentials: The `Authorization` header, if the request has one.
+
+    Returns:
+        The token's claims.
+
+    Raises:
+        HTTPException: No issuer is configured, the token is missing, expired, or
+            otherwise doesn't check out against it, or the issuer can't be reached
+            to verify it.
+    """
+    if not OIDC_ISSUER:
+        logger.warning("Auth: no trusted OIDC issuer is configured")
+        raise HTTPException(401, "No trusted OIDC issuer is configured")
+    if credentials is None:
+        logger.warning("Auth: a caller sent no bearer token")
+        raise HTTPException(401, "Bearer token required")
+    try:
+        key = jwk_client().get_signing_key_from_jwt(credentials.credentials).key
+        return jwt.decode(
+            credentials.credentials,
+            key,
+            algorithms=OIDC_ALGORITHMS,
+            audience=OIDC_AUDIENCE,
+            issuer=OIDC_ISSUER,
+            options={"require": ["exp"]},
+        )
+    except jwt.InvalidTokenError as error:
+        logger.warning("Auth: rejected a bearer token: %s", error)
+        raise HTTPException(401, f"Invalid token: {error}") from None
+    except Exception as error:  # noqa: BLE001 - a key with an unknown kid, or the issuer out of reach
+        logger.warning("Auth: couldn't verify a bearer token: %s", type(error).__name__)
+        raise HTTPException(503, "Can't reach the trusted issuer right now") from None
+
+
+AUTH_DEPENDENCY = Depends(authenticated)
+
+
+class Identity(NamedTuple):
+    """A caller's validated identity: `sub` to own runs by, `email` to name the FLARE admin."""
+
+    sub: str
+    email: str
+
+
+def identity(claims: dict[str, Any] = AUTH_DEPENDENCY) -> Identity:
+    """The caller's identity: its `sub`, checked and allowed (H22), and its `email`.
+
+    Args:
+        claims: The caller's validated claims.
+
+    Returns:
+        The identity: `sub`, to own runs by, and `email`, as the FLARE admin's
+        name for a run it starts. Two subjects must never share ownership of a
+        run through a shared or reassigned email, so `sub`, not `email`, is
+        what run lookups are keyed on.
+
+    Raises:
+        HTTPException: The subject is missing or not a string, `WES_OIDC_ALLOWED_SUBS`
+            is set and doesn't list it, or the email is missing, not a string, or
+            unsafe to use as a FLARE admin's name.
+    """
+    sub = claims.get("sub")
+    if not isinstance(sub, str) or not sub:
+        logger.warning("Auth: a token had no 'sub' claim")
+        raise HTTPException(400, "Bearer token is missing required 'sub' claim")
+    if ALLOWED_SUBS and sub not in ALLOWED_SUBS:
+        logger.warning("Auth: rejected disallowed subject %r", sub)
+        raise HTTPException(403, "This identity isn't allowed to use this WES")
+    email = claims.get("email")
+    if not isinstance(email, str) or not email:
+        logger.warning("Auth: subject %r has a token with no email claim", sub)
+        raise HTTPException(400, "The provided token is missing email claim")
+    if not re.fullmatch(r"[A-Za-z0-9._@-]{1,80}", email):
+        logger.warning("Auth: subject %r has an unsafe email claim %r", sub, email)
+        raise HTTPException(400, "The submitter email has characters that can't name a FLARE admin")
+    return Identity(sub, email)
+
+
+IDENTITY_DEPENDENCY = Depends(identity)
 
 
 @app.get("/ga4gh/wes/v1/service-info")
@@ -766,18 +897,23 @@ def service_info() -> dict[str, Any]:
         "workflow_engine_versions": {"nvflare": {"workflow_engine_version": ["2.9.0"]}},
         "default_workflow_engine_parameters": [],
         "system_state_counts": {},
-        "auth_instructions_url": "https://example.org/no-auth-this-is-a-sandbox",
+        "auth_instructions_url": (
+            f"{OIDC_ISSUER.rstrip('/')}/.well-known/openid-configuration"
+            if OIDC_ISSUER
+            else "https://example.org/no-issuer-configured-auth-is-unavailable"
+        ),
         "tags": {"sites": ",".join(SITES)},
     }
 
 
 @app.post("/ga4gh/wes/v1/runs")
 def run_workflow(
-    workflow_type: Annotated[str, Form()],
-    workflow_type_version: Annotated[str, Form()],
-    workflow_url: Annotated[str, Form()],
-    workflow_params: Annotated[str, Form()] = "{}",
-    tags: Annotated[str, Form()] = "{}",
+    workflow_type: Annotated[str, Form(max_length=20)],
+    workflow_type_version: Annotated[str, Form(max_length=20)],
+    workflow_url: Annotated[str, Form(max_length=256)],
+    workflow_params: Annotated[str, Form(max_length=8192)] = "{}",
+    tags: Annotated[str, Form(max_length=8192)] = "{}",
+    caller: Identity = IDENTITY_DEPENDENCY,
 ) -> dict[str, str]:
     """Start a run.
 
@@ -787,6 +923,7 @@ def run_workflow(
         workflow_url: Name of a job in the image (no uploads, so no user code).
         workflow_params: JSON object, with the sites to use (`sites`).
         tags: JSON object with tags of the run.
+        caller: The caller's identity.
 
     Returns:
         The identifier of the run.
@@ -809,6 +946,9 @@ def run_workflow(
         run_id = str(uuid.uuid4())
         RUNS[run_id] = {
             "state": "QUEUED",
+            # Runs are owned by `sub`: two subjects could share or swap an email
+            "sub": caller.sub,
+            "submitter": caller.email,
             "request": {
                 "workflow_type": workflow_type,
                 "workflow_type_version": workflow_type_version,
@@ -820,48 +960,63 @@ def run_workflow(
             "outputs": {},
             "start_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
-    threading.Thread(target=execute, args=(run_id, job_dir, sites), daemon=True).start()
+    threading.Thread(target=execute, args=(run_id, job_dir, sites, caller.email), daemon=True).start()
     return {"run_id": run_id}
 
 
-def get_run(run_id: str) -> dict[str, Any]:
-    """Look up a run.
+def get_run(run_id: str, sub: str) -> dict[str, Any]:
+    """Look up a run, if the caller is the one who started it.
 
     Args:
         run_id: Identifier of the run.
+        sub: The caller's subject.
 
     Returns:
         The run.
 
     Raises:
-        HTTPException: There is no such run.
+        HTTPException: There is no such run, or it isn't this caller's own.
     """
-    if run_id not in RUNS:
+    run = RUNS.get(run_id)
+    if run is None or run["sub"] != sub:
         raise HTTPException(404, "No such run")
-    return RUNS[run_id]
+    return run
 
 
 @app.get("/ga4gh/wes/v1/runs")
-def list_runs() -> dict[str, Any]:
-    """List the runs.
+def list_runs(caller: Identity = IDENTITY_DEPENDENCY) -> dict[str, Any]:
+    """List this caller's own runs.
+
+    Args:
+        caller: The caller's identity.
 
     Returns:
         Identifiers and states of the runs.
     """
-    return {"runs": [{"run_id": key, "state": run["state"]} for key, run in RUNS.items()], "next_page_token": ""}
+    with LOCK:
+        runs = list(RUNS.items())
+    return {
+        "runs": [
+            {"run_id": key, "state": run["state"], "submitter": run["submitter"]}
+            for key, run in runs
+            if run["sub"] == caller.sub
+        ],
+        "next_page_token": "",
+    }
 
 
 @app.get("/ga4gh/wes/v1/runs/{run_id}/status")
-def run_status(run_id: str) -> dict[str, str]:
+def run_status(run_id: str, caller: Identity = IDENTITY_DEPENDENCY) -> dict[str, str]:
     """Get the state of a run.
 
     Args:
         run_id: Identifier of the run.
+        caller: The caller's identity.
 
     Returns:
         Identifier and state of the run.
     """
-    return {"run_id": run_id, "state": get_run(run_id)["state"]}
+    return {"run_id": run_id, "state": get_run(run_id, caller.sub)["state"]}
 
 
 def task_name(task: dict[str, str]) -> str:
@@ -877,19 +1032,21 @@ def task_name(task: dict[str, str]) -> str:
 
 
 @app.get("/ga4gh/wes/v1/runs/{run_id}")
-def run_log(run_id: str) -> dict[str, Any]:
+def run_log(run_id: str, caller: Identity = IDENTITY_DEPENDENCY) -> dict[str, Any]:
     """Get the log of a run.
 
     Args:
         run_id: Identifier of the run.
+        caller: The caller's identity.
 
     Returns:
         The run log, with the TES tasks under `task_logs`.
     """
-    run = get_run(run_id)
+    run = get_run(run_id, caller.sub)
     return {
         "run_id": run_id,
         "state": run["state"],
+        "submitter": run["submitter"],
         "request": run["request"],
         "run_log": {
             "name": f"flare job {run.get('flare_job_id', '')}",
@@ -982,19 +1139,22 @@ async def sign_csr(token: str, request: Request) -> Response:
 
 
 @app.get("/outputs/{run_id}/global_model.npy")
-def get_model(run_id: str) -> FileResponse:
+def get_model(run_id: str, caller: Identity = IDENTITY_DEPENDENCY) -> FileResponse:
     """Serve the global model of a run.
 
     Args:
         run_id: Identifier of the run.
+        caller: The caller's identity.
 
     Returns:
         The model.
 
     Raises:
-        HTTPException: There is no model.
+        HTTPException: There is no model, or the run isn't COMPLETE.
     """
-    get_run(run_id)
+    run = get_run(run_id, caller.sub)
+    if run["state"] != "COMPLETE":
+        raise HTTPException(404, "No model")
     path = BASE / run_id / "global_model.npy"
     if not path.is_file():
         raise HTTPException(404, "No model")
