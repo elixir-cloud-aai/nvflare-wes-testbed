@@ -115,7 +115,9 @@ def main() -> None:
             id_status({"sub": "researcher-1", "email": "researcher-1@testbed.invalid"}) == 200
         )
         checks["a missing subject is rejected"] = id_status({}) == 400
+        checks["a non-string subject is rejected"] = id_status({"sub": 1, "email": "x@testbed.invalid"}) == 400
         checks["an unsafe email is rejected"] = id_status({"sub": "researcher-1", "email": "not a safe email!"}) == 400
+        checks["a non-string email is rejected"] = id_status({"sub": "researcher-1", "email": 1}) == 400
         wes.ALLOWED_SUBS = {"researcher-1"}
         checks["an allowed subject is accepted"] = (
             id_status({"sub": "researcher-1", "email": "researcher-1@testbed.invalid"}) == 200
@@ -130,13 +132,17 @@ def main() -> None:
                 return error.status_code
             return 200
 
-        wes.RUNS["run-a"] = {"state": "COMPLETE", "submitter": "researcher-1"}
-        runs_as_owner = {r["run_id"] for r in wes.list_runs(submitter="researcher-1")["runs"]}
-        runs_as_other = {r["run_id"] for r in wes.list_runs(submitter="someone-else")["runs"]}
+        # Same email on purpose: ownership is keyed on sub, so a shared or
+        # reassigned email must not let another subject see or reach this run
+        wes.RUNS["run-a"] = {"state": "COMPLETE", "sub": "researcher-1", "submitter": "researcher-1@testbed.invalid"}
+        owner = wes.Identity("researcher-1", "researcher-1@testbed.invalid")
+        other = wes.Identity("someone-else", "researcher-1@testbed.invalid")
+        runs_as_owner = {r["run_id"] for r in wes.list_runs(owner)["runs"]}
+        runs_as_other = {r["run_id"] for r in wes.list_runs(other)["runs"]}
         checks["the owner's run list includes it"] = "run-a" in runs_as_owner
-        checks["someone else's run list doesn't"] = "run-a" not in runs_as_other
+        checks["someone else's run list doesn't, even with the same email"] = "run-a" not in runs_as_other
         checks["the owner can fetch it"] = run_status("run-a", "researcher-1") == 200
-        checks["someone else gets 404, not a peek"] = run_status("run-a", "someone-else") == 404
+        checks["someone else gets 404, not a peek, even with the same email"] = run_status("run-a", "someone-else") == 404
 
         wes.OIDC_ISSUER = ""
         checks["no issuer configured is itself rejected"] = status(None) == 401

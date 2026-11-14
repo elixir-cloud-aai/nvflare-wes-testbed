@@ -35,7 +35,7 @@ import threading
 import time
 import uuid
 from collections.abc import Mapping
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 
 import anyio
 import jwt
@@ -834,35 +834,45 @@ def authenticated(credentials: Annotated[HTTPAuthorizationCredentials | None, De
 AUTH_DEPENDENCY = Depends(authenticated)
 
 
-def identity(claims: dict[str, Any] = AUTH_DEPENDENCY) -> str:
-    """The caller's identity: a token's `email`, if its `sub` checks out and is allowed (H22).
+class Identity(NamedTuple):
+    """A caller's validated identity: `sub` to own runs by, `email` to name the FLARE admin."""
+
+    sub: str
+    email: str
+
+
+def identity(claims: dict[str, Any] = AUTH_DEPENDENCY) -> Identity:
+    """The caller's identity: its `sub`, checked and allowed (H22), and its `email`.
 
     Args:
         claims: The caller's validated claims.
 
     Returns:
-        The identity, as the FLARE admin's name for a run it starts.
+        The identity: `sub`, to own runs by, and `email`, as the FLARE admin's
+        name for a run it starts. Two subjects must never share ownership of a
+        run through a shared or reassigned email, so `sub`, not `email`, is
+        what run lookups are keyed on.
 
     Raises:
-        HTTPException: The subject is missing, or `WES_OIDC_ALLOWED_SUBS` is set
-            and doesn't list it, or the email is missing or unsafe to use as a
-            FLARE admin's name.
+        HTTPException: The subject is missing or not a string, `WES_OIDC_ALLOWED_SUBS`
+            is set and doesn't list it, or the email is missing, not a string, or
+            unsafe to use as a FLARE admin's name.
     """
     sub = claims.get("sub")
-    if not sub:
+    if not isinstance(sub, str) or not sub:
         logger.warning("Auth: a token had no 'sub' claim")
         raise HTTPException(400, "Bearer token is missing required 'sub' claim")
     if ALLOWED_SUBS and sub not in ALLOWED_SUBS:
         logger.warning("Auth: rejected disallowed subject %r", sub)
         raise HTTPException(403, "This identity isn't allowed to use this WES")
     email = claims.get("email")
-    if not email:
+    if not isinstance(email, str) or not email:
         logger.warning("Auth: subject %r has a token with no email claim", sub)
         raise HTTPException(400, "The provided token is missing email claim")
     if not re.fullmatch(r"[A-Za-z0-9._@-]{1,80}", email):
         logger.warning("Auth: subject %r has an unsafe email claim %r", sub, email)
         raise HTTPException(400, "The submitter email has characters that can't name a FLARE admin")
-    return email
+    return Identity(sub, email)
 
 
 IDENTITY_DEPENDENCY = Depends(identity)
@@ -903,7 +913,7 @@ def run_workflow(
     workflow_url: Annotated[str, Form(max_length=256)],
     workflow_params: Annotated[str, Form(max_length=8192)] = "{}",
     tags: Annotated[str, Form(max_length=8192)] = "{}",
-    submitter: str = IDENTITY_DEPENDENCY,
+    caller: Identity = IDENTITY_DEPENDENCY,
 ) -> dict[str, str]:
     """Start a run.
 
@@ -913,7 +923,7 @@ def run_workflow(
         workflow_url: Name of a job in the image (no uploads, so no user code).
         workflow_params: JSON object, with the sites to use (`sites`).
         tags: JSON object with tags of the run.
-        submitter: The caller's identity, as its FLARE admin's name.
+        caller: The caller's identity.
 
     Returns:
         The identifier of the run.
@@ -936,7 +946,9 @@ def run_workflow(
         run_id = str(uuid.uuid4())
         RUNS[run_id] = {
             "state": "QUEUED",
-            "submitter": submitter,
+            # Runs are owned by `sub`: two subjects could share or swap an email
+            "sub": caller.sub,
+            "submitter": caller.email,
             "request": {
                 "workflow_type": workflow_type,
                 "workflow_type_version": workflow_type_version,
@@ -948,16 +960,16 @@ def run_workflow(
             "outputs": {},
             "start_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
-    threading.Thread(target=execute, args=(run_id, job_dir, sites, submitter), daemon=True).start()
+    threading.Thread(target=execute, args=(run_id, job_dir, sites, caller.email), daemon=True).start()
     return {"run_id": run_id}
 
 
-def get_run(run_id: str, submitter: str) -> dict[str, Any]:
+def get_run(run_id: str, sub: str) -> dict[str, Any]:
     """Look up a run, if the caller is the one who started it.
 
     Args:
         run_id: Identifier of the run.
-        submitter: The caller's identity.
+        sub: The caller's subject.
 
     Returns:
         The run.
@@ -966,17 +978,17 @@ def get_run(run_id: str, submitter: str) -> dict[str, Any]:
         HTTPException: There is no such run, or it isn't this caller's own.
     """
     run = RUNS.get(run_id)
-    if run is None or run["submitter"] != submitter:
+    if run is None or run["sub"] != sub:
         raise HTTPException(404, "No such run")
     return run
 
 
 @app.get("/ga4gh/wes/v1/runs")
-def list_runs(submitter: str = IDENTITY_DEPENDENCY) -> dict[str, Any]:
+def list_runs(caller: Identity = IDENTITY_DEPENDENCY) -> dict[str, Any]:
     """List this caller's own runs.
 
     Args:
-        submitter: The caller's identity.
+        caller: The caller's identity.
 
     Returns:
         Identifiers and states of the runs.
@@ -985,24 +997,24 @@ def list_runs(submitter: str = IDENTITY_DEPENDENCY) -> dict[str, Any]:
         "runs": [
             {"run_id": key, "state": run["state"], "submitter": run["submitter"]}
             for key, run in RUNS.items()
-            if run["submitter"] == submitter
+            if run["sub"] == caller.sub
         ],
         "next_page_token": "",
     }
 
 
 @app.get("/ga4gh/wes/v1/runs/{run_id}/status")
-def run_status(run_id: str, submitter: str = IDENTITY_DEPENDENCY) -> dict[str, str]:
+def run_status(run_id: str, caller: Identity = IDENTITY_DEPENDENCY) -> dict[str, str]:
     """Get the state of a run.
 
     Args:
         run_id: Identifier of the run.
-        submitter: The caller's identity.
+        caller: The caller's identity.
 
     Returns:
         Identifier and state of the run.
     """
-    return {"run_id": run_id, "state": get_run(run_id, submitter)["state"]}
+    return {"run_id": run_id, "state": get_run(run_id, caller.sub)["state"]}
 
 
 def task_name(task: dict[str, str]) -> str:
@@ -1018,17 +1030,17 @@ def task_name(task: dict[str, str]) -> str:
 
 
 @app.get("/ga4gh/wes/v1/runs/{run_id}")
-def run_log(run_id: str, submitter: str = IDENTITY_DEPENDENCY) -> dict[str, Any]:
+def run_log(run_id: str, caller: Identity = IDENTITY_DEPENDENCY) -> dict[str, Any]:
     """Get the log of a run.
 
     Args:
         run_id: Identifier of the run.
-        submitter: The caller's identity.
+        caller: The caller's identity.
 
     Returns:
         The run log, with the TES tasks under `task_logs`.
     """
-    run = get_run(run_id, submitter)
+    run = get_run(run_id, caller.sub)
     return {
         "run_id": run_id,
         "state": run["state"],
@@ -1125,12 +1137,12 @@ async def sign_csr(token: str, request: Request) -> Response:
 
 
 @app.get("/outputs/{run_id}/global_model.npy")
-def get_model(run_id: str, submitter: str = IDENTITY_DEPENDENCY) -> FileResponse:
+def get_model(run_id: str, caller: Identity = IDENTITY_DEPENDENCY) -> FileResponse:
     """Serve the global model of a run.
 
     Args:
         run_id: Identifier of the run.
-        submitter: The caller's identity.
+        caller: The caller's identity.
 
     Returns:
         The model.
@@ -1138,7 +1150,7 @@ def get_model(run_id: str, submitter: str = IDENTITY_DEPENDENCY) -> FileResponse
     Raises:
         HTTPException: There is no model.
     """
-    get_run(run_id, submitter)
+    get_run(run_id, caller.sub)
     path = BASE / run_id / "global_model.npy"
     if not path.is_file():
         raise HTTPException(404, "No model")
