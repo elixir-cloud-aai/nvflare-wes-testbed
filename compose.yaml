@@ -50,8 +50,9 @@ services:
       WES_SITES: >-
         {"site-1": {"tes": "http://funnel-site-1:8000", "data": "file:///data/site-1.csv"},
         "site-2": {"tes": "http://funnel-site-2:8000", "data": "file:///data/site-2.csv"}}
-      # Fake identity provider for the sandbox
+      # Fake identity provider for the sandbox, with no TLS of its own
       WES_OIDC_ISSUER: http://fake-idp:8080/oidc/
+      WES_OIDC_ALLOW_HTTP: "1"
       WES_OIDC_TOKEN_URL: http://fake-idp:8080/oidc/token
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://localhost:8080/ga4gh/wes/v1/service-info')"]

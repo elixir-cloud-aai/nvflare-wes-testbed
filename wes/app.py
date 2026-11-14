@@ -130,6 +130,9 @@ TERMINAL_TES = {"COMPLETE", "EXECUTOR_ERROR", "SYSTEM_ERROR", "CANCELED", "PREEM
 OIDC_ISSUER = os.environ.get("WES_OIDC_ISSUER", "")
 OIDC_AUDIENCE = os.environ.get("WES_OIDC_AUDIENCE", "fl-wes")
 OIDC_ALGORITHMS = [a.strip() for a in os.environ.get("WES_OIDC_ALGORITHMS", "RS256").split(",") if a.strip()]
+# Discovery and the JWKS it names must be https, except for an explicit local
+# escape hatch: the sandbox's own fake identity provider (H10) has no TLS
+OIDC_ALLOW_HTTP = bool(os.environ.get("WES_OIDC_ALLOW_HTTP", ""))
 # Empty allows any authenticated subject (H22): a shortcut, not group/role RBAC
 ALLOWED_SUBS = {s.strip() for s in os.environ.get("WES_OIDC_ALLOWED_SUBS", "").split(",") if s.strip()}
 if not OIDC_ISSUER:
@@ -768,11 +771,22 @@ def jwk_client() -> jwt.PyJWKClient:
 
     Returns:
         The client, caching the issuer's keys.
+
+    Raises:
+        ValueError: The issuer or the JWKS it names aren't reachable over https, and
+            `WES_OIDC_ALLOW_HTTP` isn't set: an on-path attacker between the WES and
+            the issuer could otherwise replace the discovery document or signing
+            keys, and have forged tokens pass the checks that follow.
     """
     global _jwk_client
     if _jwk_client is None:
+        if not OIDC_ALLOW_HTTP:
+            tokens.check_url(OIDC_ISSUER, "WES_OIDC_ISSUER")
         discovery = requests.get(f"{OIDC_ISSUER.rstrip('/')}/.well-known/openid-configuration", timeout=10).json()
-        _jwk_client = jwt.PyJWKClient(discovery["jwks_uri"])
+        jwks_uri = discovery["jwks_uri"]
+        if not OIDC_ALLOW_HTTP:
+            tokens.check_url(jwks_uri, "the issuer's jwks_uri")
+        _jwk_client = jwt.PyJWKClient(jwks_uri)
     return _jwk_client
 
 
@@ -789,8 +803,9 @@ def authenticated(credentials: Annotated[HTTPAuthorizationCredentials | None, De
         The token's claims.
 
     Raises:
-        HTTPException: No issuer is configured, or the token is missing, expired, or
-            otherwise doesn't check out against it.
+        HTTPException: No issuer is configured, the token is missing, expired, or
+            otherwise doesn't check out against it, or the issuer can't be reached
+            to verify it.
     """
     if not OIDC_ISSUER:
         logger.warning("Auth: no trusted OIDC issuer is configured")
@@ -811,6 +826,9 @@ def authenticated(credentials: Annotated[HTTPAuthorizationCredentials | None, De
     except jwt.InvalidTokenError as error:
         logger.warning("Auth: rejected a bearer token: %s", error)
         raise HTTPException(401, f"Invalid token: {error}") from None
+    except Exception as error:  # noqa: BLE001 - a key with an unknown kid, or the issuer out of reach
+        logger.warning("Auth: couldn't verify a bearer token: %s", type(error).__name__)
+        raise HTTPException(503, "Can't reach the trusted issuer right now") from None
 
 
 AUTH_DEPENDENCY = Depends(authenticated)

@@ -25,6 +25,8 @@ services:
       WES_OIDC_ISSUER: ${WES_OIDC_ISSUER:-}
       WES_OIDC_AUDIENCE: ${WES_OIDC_AUDIENCE:-fl-wes}
       WES_OIDC_ALGORITHMS: ${WES_OIDC_ALGORITHMS:-RS256}
+      # For tests only: the sandbox's own fake identity provider has no TLS
+      WES_OIDC_ALLOW_HTTP: ${WES_OIDC_ALLOW_HTTP:-}
     # The WES talks to its FL server by the name in the kits, so that name has to
     # lead back here, and not out through the public address
     extra_hosts:

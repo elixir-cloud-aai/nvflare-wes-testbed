@@ -142,6 +142,7 @@ Caddy gets a certificate for that name, which needs ports 80 and 443 reachable. 
 | `WES_OIDC_AUDIENCE` | `fl-wes` | The `aud` a token must carry, matching this deployment's registration at the issuer |
 | `WES_OIDC_ALGORITHMS` | `RS256` | Signing algorithms accepted from the issuer, comma-separated |
 | `WES_OIDC_ALLOWED_SUBS` | None, any caller | Subjects allowed to use the WES, comma-separated; a static allow-list, not real access control ([H22](../testbed/shortcuts.md#h22)) |
+| `WES_OIDC_ALLOW_HTTP` | None, https required | Local tests only: allows the issuer and its JWKS over plain HTTP. Never set it on a real deployment; an on-path attacker with it set could forge tokens |
 | `WES_INTERNAL_URL` | `https://<FL_SERVER_NAME>` | Base of the links to kits. Keep it `https`, as kits hold private keys |
 | `WES_SITES_FILE` | `./sites.json` | The sites file: name, `tes` and `data`. Add a [token source](#tokens-for-the-tes-of-the-sites) for a TES that needs one, which must then be at an `https` URL |
 | `HUB_HTTPS_PORT` | `443` | Another port for HTTPS, if the FL port is 443. Then set `WES_INTERNAL_URL` to match, and Let's Encrypt still needs port 80. The redirect from HTTP still points to 443, so use the `https` URL with its port |
