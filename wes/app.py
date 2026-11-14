@@ -676,12 +676,12 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str], submitter: str
 
     run = RUNS[run_id]
     run_dir = BASE / run_id
-    run_dir.mkdir(parents=True)
     server: subprocess.Popen[bytes] | None = None
     slots: list[str] = []
     final_state = "SYSTEM_ERROR"
     try:
         run["state"] = "INITIALIZING"
+        run_dir.mkdir(parents=True)
         if FL_SERVER_MODE != "tes":
             ensure_port_free(FL_PORT)
         project = f"run{run_id[:8]}"
@@ -751,9 +751,10 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str], submitter: str
         for token in slots:
             KITS.pop(token, None)
             CSR_TOKENS.pop(token, None)
-        for child in run_dir.iterdir():
-            if child.is_dir() or child.suffix == ".tgz":
-                shutil.rmtree(child, ignore_errors=True) if child.is_dir() else child.unlink()
+        if run_dir.is_dir():
+            for child in run_dir.iterdir():
+                if child.is_dir() or child.suffix == ".tgz":
+                    shutil.rmtree(child, ignore_errors=True) if child.is_dir() else child.unlink()
         run["end_time"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         run["state"] = final_state
         logger.info("Run %s: %s", run_id, final_state)
