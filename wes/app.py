@@ -129,7 +129,7 @@ TERMINAL_TES = {"COMPLETE", "EXECUTOR_ERROR", "SYSTEM_ERROR", "CANCELED", "PREEM
 # Mandatory (H5): empty means no issuer is trusted, so no caller can check out
 OIDC_ISSUER = os.environ.get("WES_OIDC_ISSUER", "")
 OIDC_AUDIENCE = os.environ.get("WES_OIDC_AUDIENCE", "fl-wes")
-OIDC_ALGORITHMS = os.environ.get("WES_OIDC_ALGORITHMS", "RS256").split(",")
+OIDC_ALGORITHMS = [a.strip() for a in os.environ.get("WES_OIDC_ALGORITHMS", "RS256").split(",") if a.strip()]
 # Empty allows any authenticated subject (H22): a shortcut, not group/role RBAC
 ALLOWED_SUBS = {s.strip() for s in os.environ.get("WES_OIDC_ALLOWED_SUBS", "").split(",") if s.strip()}
 
