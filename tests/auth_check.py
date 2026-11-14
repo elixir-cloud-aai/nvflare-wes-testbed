@@ -142,7 +142,9 @@ def main() -> None:
         checks["the owner's run list includes it"] = "run-a" in runs_as_owner
         checks["someone else's run list doesn't, even with the same email"] = "run-a" not in runs_as_other
         checks["the owner can fetch it"] = run_status("run-a", "researcher-1") == 200
-        checks["someone else gets 404, not a peek, even with the same email"] = run_status("run-a", "someone-else") == 404
+        checks["someone else gets 404, not a peek, even with the same email"] = (
+            run_status("run-a", "someone-else") == 404
+        )
 
         wes.OIDC_ISSUER = ""
         checks["no issuer configured is itself rejected"] = status(None) == 401
