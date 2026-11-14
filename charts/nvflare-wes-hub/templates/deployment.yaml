@@ -47,6 +47,16 @@ spec:
               value: {{ .Values.flPort | quote }}
             - name: WES_SITES_FILE
               value: /run/secrets/sites/sites.json
+            - name: WES_OIDC_ISSUER
+              value: {{ .Values.oidcIssuer | quote }}
+            - name: WES_OIDC_AUDIENCE
+              value: {{ .Values.oidcAudience | quote }}
+            - name: WES_OIDC_ALGORITHMS
+              value: {{ .Values.oidcAlgorithms | quote }}
+            {{- with .Values.oidcAllowedSubs }}
+            - name: WES_OIDC_ALLOWED_SUBS
+              value: {{ . | quote }}
+            {{- end }}
             # The arbitrary user has no home directory
             - name: HOME
               value: /tmp

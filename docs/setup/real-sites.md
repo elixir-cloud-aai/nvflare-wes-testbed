@@ -193,6 +193,7 @@ helm install hub charts/nvflare-wes-hub \
     --set image.tag=sha-<commit> \
     --set hubName=<hub name> \
     --set kitsHost=<kits name> \
+    --set oidcIssuer=<trusted OIDC issuer, https> \
     --set flPort=30002 \
     --set podSecurityContext.seccompProfile=null
 oc rollout status deployment/hub-nvflare-wes-hub
@@ -217,6 +218,10 @@ The Route must say `Admitted=True`. If another project already has its name, the
 | `flPort` | `30002` | FL port, on the address and in the pod: 30000 to 35000 |
 | `flScheme` | `grpc` | `grpc`, or `http` (WebSocket, see [T7](../tests/t7-port-443.md)) |
 | `loadBalancerIP` | Empty | Internal address of the project's pool (`192.168.…`), not the public one. Empty: one of the pool's |
+| `oidcIssuer` | None, required | Trusted OIDC issuer, https (e.g. LS Login's). The WES refuses every run and most endpoints without one ([H5](../testbed/shortcuts.md#h5)) |
+| `oidcAudience` | `fl-wes` | The `aud` a token must carry, matching this deployment's registration at the issuer |
+| `oidcAlgorithms` | `RS256` | Signing algorithms accepted from the issuer, comma-separated |
+| `oidcAllowedSubs` | Empty, any caller | Subjects allowed to use the WES, comma-separated; a static allow-list, not real access control ([H22](../testbed/shortcuts.md#h22)) |
 | `sitesSecret` | `nvflare-wes-sites` | Secret with the sites file under the key `sites.json` |
 | `tokenSecret` | Empty | Secret with [token files](#tokens-for-the-tes-of-the-sites), one key per site, mounted whole at `/run/secrets/tes-tokens`, so that renewed tokens arrive without a restart. Empty: none |
 | `envSecret` | Empty | Secret whose keys become environment variables of the hub: the secrets that [`oauth`](#tokens-for-the-tes-of-the-sites) sources name. Empty: none |

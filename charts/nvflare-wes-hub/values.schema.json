@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
   "additionalProperties": false,
-  "required": ["image", "hubName", "kitsHost", "flPort", "flScheme", "sitesSecret"],
+  "required": ["image", "hubName", "kitsHost", "flPort", "flScheme", "oidcIssuer", "sitesSecret"],
   "properties": {
     "image": {
       "type": "object",
@@ -40,6 +40,21 @@
       "description": "Internal IPv4 address of the project's pool (not the public one), or empty",
       "type": "string",
       "pattern": "^$|^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$"
+    },
+    "oidcIssuer": {
+      "description": "Trusted OIDC issuer, https (e.g. LS Login's); the WES refuses every run without one",
+      "type": "string",
+      "pattern": "^https://\\S+$"
+    },
+    "oidcAudience": {"type": "string", "minLength": 1},
+    "oidcAlgorithms": {
+      "description": "Signing algorithms accepted from the issuer, comma-separated",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9]+(,[A-Za-z0-9]+)*$"
+    },
+    "oidcAllowedSubs": {
+      "description": "Subjects allowed to use the WES, comma-separated, or empty for any the issuer vouches for",
+      "type": "string"
     },
     "sitesSecret": {"type": "string", "minLength": 1},
     "tokenSecret": {
