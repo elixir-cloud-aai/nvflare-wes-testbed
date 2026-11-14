@@ -887,9 +887,11 @@ def service_info() -> dict[str, Any]:
         "workflow_engine_versions": {"nvflare": {"workflow_engine_version": ["2.9.0"]}},
         "default_workflow_engine_parameters": [],
         "system_state_counts": {},
-        "auth_instructions_url": f"{OIDC_ISSUER.rstrip('/')}/.well-known/openid-configuration"
-        if OIDC_ISSUER
-        else "https://example.org/no-auth-this-is-a-sandbox",
+        "auth_instructions_url": (
+            f"{OIDC_ISSUER.rstrip('/')}/.well-known/openid-configuration"
+            if OIDC_ISSUER
+            else "https://example.org/no-issuer-configured-auth-is-unavailable"
+        ),
         "tags": {"sites": ",".join(SITES)},
     }
 
