@@ -21,10 +21,12 @@ These are what we hope for. Anything else is a result.
 
 1. Deploy the hub, following [Real sites](../setup/real-sites.md#deploying-the-hub).
 2. Run the probe task at each node.
-3. Start a run with one site, then with two:
+3. Get a bearer token from the trusted OIDC issuer (`WES_OIDC_ISSUER`), for a subject the hub allows ([H22](../testbed/shortcuts.md#h22) if `WES_OIDC_ALLOWED_SUBS` is set): every request below needs one, mandatory, with no local-only bypass ([H5](../testbed/shortcuts.md#h5)).
+4. Start a run with one site, then with two:
 
     ```sh
-    curl -F workflow_type=NVFLARE -F workflow_type_version=2.9 \
+    curl -H "Authorization: Bearer <token>" \
+        -F workflow_type=NVFLARE -F workflow_type_version=2.9 \
         -F workflow_url=logreg-fedavg \
         -F 'workflow_params={"sites": ["<site>"]}' \
         https://<hub>/ga4gh/wes/v1/runs
@@ -32,7 +34,7 @@ These are what we hope for. Anything else is a result.
 
     The job has `min_clients: 2`: with one site, export it with `min_clients` of 1 first.
 
-4. Follow it with `GET /ga4gh/wes/v1/runs/<id>`, and at the node with its operator.
+5. Follow it with `curl -H "Authorization: Bearer <token>" https://<hub>/ga4gh/wes/v1/runs/<id>`, and at the node with its operator.
 
 ## Questions it answers
 
