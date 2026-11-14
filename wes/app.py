@@ -1150,9 +1150,11 @@ def get_model(run_id: str, caller: Identity = IDENTITY_DEPENDENCY) -> FileRespon
         The model.
 
     Raises:
-        HTTPException: There is no model.
+        HTTPException: There is no model, or the run isn't COMPLETE.
     """
-    get_run(run_id, caller.sub)
+    run = get_run(run_id, caller.sub)
+    if run["state"] != "COMPLETE":
+        raise HTTPException(404, "No model")
     path = BASE / run_id / "global_model.npy"
     if not path.is_file():
         raise HTTPException(404, "No model")
