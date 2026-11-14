@@ -993,10 +993,12 @@ def list_runs(caller: Identity = IDENTITY_DEPENDENCY) -> dict[str, Any]:
     Returns:
         Identifiers and states of the runs.
     """
+    with LOCK:
+        runs = list(RUNS.items())
     return {
         "runs": [
             {"run_id": key, "state": run["state"], "submitter": run["submitter"]}
-            for key, run in RUNS.items()
+            for key, run in runs
             if run["sub"] == caller.sub
         ],
         "next_page_token": "",
