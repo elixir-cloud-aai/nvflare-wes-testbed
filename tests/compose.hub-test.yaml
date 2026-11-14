@@ -73,7 +73,9 @@ services:
       - ./testset/data:/testset-data:ro
     networks: [control]
 
-  # Plays someone on the internet, in front of the proxy
+  # Plays someone on the internet, in front of the proxy. Only on `hub`: the
+  # hub service's own alias for `${FL_SERVER_NAME}` on `control` would
+  # otherwise collide with the proxy's, on a container that joins both
   proxy-check:
     image: nvflare-testbed:local
     profiles: [test]
@@ -81,7 +83,7 @@ services:
     environment:
       WES_EXPECTED: ${WES_EXPECTED:-403}
       WES_OIDC_TOKEN_URL: http://fake-idp:8080/oidc/token
-    networks: [hub, control]
+    networks: [hub]
 
   # The checks from outside of `docs/setup/real-sites.md`, with the name of the
   # hub for both names, and the proxy's test CA
@@ -119,11 +121,13 @@ services:
     command: ["python3", "/app/tests/auth_check.py"]
     network_mode: none
 
-  # Hands access tokens to anyone, as the trusted issuer of the sandbox
+  # Hands access tokens to anyone, as the trusted issuer of the sandbox. Also
+  # on `hub`, so that `proxy-check` can reach it without joining `control`
+  # (where it would hit the hub service's own alias for `${FL_SERVER_NAME}`)
   fake-idp:
     image: nvflare-testbed:local
     command: ["python3", "/app/tests/fake_idp.py"]
-    networks: [control]
+    networks: [control, hub]
 
 networks:
   control: {}
