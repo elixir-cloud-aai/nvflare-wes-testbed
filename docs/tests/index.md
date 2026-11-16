@@ -10,16 +10,16 @@
 | [T1 Simulator](t1-simulator.md) | The job and data work, without any service | Local | Yes |
 | [T2 WES to TES](t2-wes-to-tes.md) | A WES run with clients as TES tasks ends with a model | Local | Yes |
 | [T3 Isolation](t3-isolation.md) | Tasks reach the hub only; data doesn't reach the hub | Local | Yes |
-| [T4 Through proTES](t4-protes.md) | The same through a gateway, with tasks pinned to sites ([stretch goal 2](../testbed/index.md#goals)) | Local | No (slow build) |
+| [T4 Through proTES](t4-protes.md) | The same through a gateway, with tasks pinned to sites ([stretch goal](../testbed/index.md#goals)) | Local | No (slow build) |
 | [T5 Server as a TES task](t5-server-task.md) | What it takes to have all participants as TES tasks | Local | No |
 | [T6 Losing a site](t6-site-loss.md) | A run fails soon and cleanly if a client dies | Local | Yes |
 | [T7 Only port 443](t7-port-443.md) | Works with a port that's more often open | Local | No |
-| [T8 Real sites](t8-real-sites.md) | The direct run, on real nodes. Conquest and proTES are [tracked separately](../testbed/index.md#goals) | Event | No |
+| [T8 Real sites](t8-real-sites.md) | The direct run, on real nodes. proTES is [tracked separately](../testbed/index.md#goals) | Event | No |
 | [T9 The WES's OIDC gate](t9-auth.md) | The WES refuses a caller with no token; every run needs one, mandatory ([H5](../testbed/shortcuts.md#h5)) | Local | Yes |
 
 ## Order for a live session
 
-The [goals](../testbed/index.md#goals) set the order: first the direct run, with the WES calling each TES. Conquest and proTES only follow if that's done. The session plan ([#8](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/8)) goes here.
+The [goals](../testbed/index.md#goals) set the order: first the direct run, with the WES calling each TES. proTES only follows if that's done. The session plan ([#8](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/8)) goes here.
 
 Prepare, as early as possible:
 

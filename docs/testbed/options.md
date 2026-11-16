@@ -17,11 +17,11 @@ Effort is in hours for one person, for a first demonstration, as local work on t
 
 ## Recommendation
 
-**B1**, with the WES calling the TES of each site directly, as [decided](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/9) for the event. C4 is the fallback, and A comes once Conquest can use an external TES. Going through proTES isn't part of the recommendation: it's [stretch goal 2](index.md#goals), and T4 shows that it works locally.
+**B1**, with the WES calling the TES of each site directly, as [decided](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/9) for the event. C4 is the fallback. Option A is out of scope for the testbed ([generic-issues#117](https://github.com/elixir-cloud-aai/generic-issues/issues/117)). Going through proTES isn't part of the recommendation: it's the [stretch goal](index.md#goals), and T4 shows that it works locally.
 
 - It's the only option that ran, across TES instances and through proTES, that needs nothing from a site beyond a task that can dial out to one port. FLARE clients only dial out ([T3](../tests/t3-isolation.md)), and that port can be 443 ([T7](../tests/t7-port-443.md)).
 - Everything it hacks is ours, and listed. It needs nothing from anyone else's roadmap, so it can be tried at the event.
-- Its logic is a port away from Conquest, should [option A](#a-nvflare-inside-conquest) become attractive: the steps of a run are the same, with a Go adapter and a runner image instead of a thin service.
+- Its logic is a port away from Conquest, should [option A](#a-nvflare-inside-conquest) be taken up: the steps of a run are the same, with a Go adapter and a runner image instead of a thin service.
 - Its risk is at the sites, not in the software: whether a task at a real node may reach the hub. So the first thing to do is to find that out, with a probe task ([#2](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/2)). If nodes don't allow it, C4 still gets a federated model through the same services, but without NVFlare.
 
 **What this means for the M4.5 report:** it can point to a run through standard APIs across TES instances, with NVFlare, and to a clear list of what's missing. It can't claim that "ELIXIR Cloud is available" for this: there's no authentication, one run at a time, and keys travel in task records. A real-site run at the event would make it a demonstration on real nodes; without one, it's a local proof of concept and an architecture analysis.
@@ -45,6 +45,9 @@ How TES fits:
 ## A: NVFlare inside Conquest
 
 [Conquest](https://github.com/anuragxxd/conquest) is a WES (1.1) in Go with Nextflow, WDL and Snakemake, which starts a runner pod per run on Kubernetes, with tasks through its internal TES, also on Kubernetes. Read at commit `900e625`. Nothing was run.
+
+!!! note "Out of scope for the testbed"
+    The testbed runs through its own thin WES only. This analysis stays as background for NVFlare in Conquest, which is tracked in a separate epic ([generic-issues#117](https://github.com/elixir-cloud-aai/generic-issues/issues/117)).
 
 Applies to both variants:
 
@@ -83,7 +86,7 @@ Applies to both variants:
 
 ### B1: Server beside the WES
 
-**How it works:** the FL server runs next to the WES, at one reachable address: the hub. Clients are TES tasks at the TES of their site, which the WES calls directly. They dial out. Through proTES ([stretch goal 2](index.md#goals)), the tag [`gateway.backends`](https://github.com/elixir-cloud-aai/proTES/blob/dev/docs/plugins.md#choices-of-clients) pins them to their site instead.
+**How it works:** the FL server runs next to the WES, at one reachable address: the hub. Clients are TES tasks at the TES of their site, which the WES calls directly. They dial out. Through proTES (the [stretch goal](index.md#goals)), the tag [`gateway.backends`](https://github.com/elixir-cloud-aai/proTES/blob/dev/docs/plugins.md#choices-of-clients) pins them to their site instead.
 
 **What's hacked:** [all of these](shortcuts.md). The worst: kits with private keys through task records ([H3](shortcuts.md#h3)), and no authentication ([H5](shortcuts.md#h5)).
 
