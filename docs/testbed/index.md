@@ -14,8 +14,7 @@ The question is whether a federated job fits WES and TES at all, as TES tasks ar
 In this order, each one only after the one before:
 
 1. **Main goal: the direct run.** A WES run on real nodes, with the WES calling the TES of each site directly, and no gateway in between ([#10](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/10)). Fewer things can go wrong that way.
-2. **Stretch goal 1: integration with Conquest** ([#12](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/12), [#13](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/13)). See [option A](options.md#a-nvflare-inside-conquest).
-3. **Stretch goal 2: integration with proTES** ([#18](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/18)), perhaps with a dedicated plugin later. It already ran locally ([T4](../tests/t4-protes.md)), and isn't a must for the event.
+2. **Stretch goal: integration with proTES** ([#18](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/18)), perhaps with a dedicated plugin later. It already ran locally ([T4](../tests/t4-protes.md)), and isn't a must for the event.
 
 The hub runs on [Rahti](https://docs.csc.fi/cloud/rahti/), which exposes the FL port through a `LoadBalancer` Service; a plain VM with Nebius credits is the fallback ([Real sites](../setup/real-sites.md#where-it-goes), [What differed on Rahti](../setup/real-sites.md#what-differed-on-rahti)).
 
@@ -35,4 +34,4 @@ The session plan ([#8](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/i
 - Production use, and any real data. **Public or synthetic data only, tiny, with its source and licence stated. No clinical data and no data from Trusted Research Environments, ever, not even as an example.**
 - Authentication and access control: the [token exchange testbed](https://github.com/elixir-cloud-aai/token-exchange-flow-testbed) is about that.
 - Models and training that are worth anything, and performance.
-- NVFlare work inside [Conquest](https://github.com/anuragxxd/conquest) upstream: [option A](options.md#a-nvflare-inside-conquest) is evaluated by reading its code only, and stretch goal 1 stays on a local branch.
+- Any WES other than this repository's own: runs go through its thin WES only. NVFlare in [Conquest](https://github.com/anuragxxd/conquest) ([option A](options.md#a-nvflare-inside-conquest)) was evaluated by reading its code only, and is tracked in a separate epic ([generic-issues#117](https://github.com/elixir-cloud-aai/generic-issues/issues/117)).

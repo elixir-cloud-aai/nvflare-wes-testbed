@@ -1,6 +1,6 @@
 # Testbed design
 
-The design of [B1](options.md#b1-server-beside-the-wes), the recommended option, with the WES calling the TES of each site directly. The dashed path through proTES is [stretch goal 2](index.md#goals). Compared to the [ideal design](../background/design.md), it has a hub in place of a rendezvous service, and credentials made centrally. All that's listed under [Shortcuts and hacks](shortcuts.md).
+The design of [B1](options.md#b1-server-beside-the-wes), the recommended option, with the WES calling the TES of each site directly. The dashed path through proTES is the [stretch goal](index.md#goals). Compared to the [ideal design](../background/design.md), it has a hub in place of a rendezvous service, and credentials made centrally. All that's listed under [Shortcuts and hacks](shortcuts.md).
 
 ```mermaid
 flowchart LR
@@ -10,7 +10,7 @@ flowchart LR
     end
     W -- "TES task" --> F1
     W -- "TES task" --> F2
-    W -. "stretch goal 2: pinned by tag" .-> P[proTES]
+    W -. "stretch goal: pinned by tag" .-> P[proTES]
     P -.-> F1
     P -.-> F2
     subgraph s1 [site-1: no way out but to the hub]

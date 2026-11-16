@@ -11,7 +11,7 @@ See [Deploying the hub](#deploying-the-hub) for where it goes, and how.
 
 ## What each site needs
 
-- A TES that the WES can call directly, with a token if needed, one per site in the sites file. Only for [stretch goal 2](../testbed/index.md#goals): the TES is known to the proTES in use.
+- A TES that the WES can call directly, with a token if needed, one per site in the sites file. Only for the [stretch goal](../testbed/index.md#goals): the TES is known to the proTES in use.
 - A task may open connections to the hub's FL port and HTTPS, may pull the public image, and may write to `/tmp`.
 - A way to fetch its share of the [test set](#the-test-set) from a public `https` URL.
 
@@ -380,4 +380,4 @@ It prints a line for each check, `[ok]`, `[warn]` or `[FAIL]`, and ends with 1 i
 - A sites file holds the real TES URLs, their tokens, and the [data URLs](#the-test-set).
 - `FL_IMAGE` names the [image](#the-image), at a fixed commit.
 - `compose.hub.yaml` runs the hub alone, in place of `compose.yaml`; on Rahti, the chart `charts/nvflare-wes-hub` does.
-- Only for [stretch goal 2](../testbed/index.md#goals): `compose/protes.yaml` lists the real TES instances, with their `auth`.
+- Only for the [stretch goal](../testbed/index.md#goals): `compose/protes.yaml` lists the real TES instances, with their `auth`.

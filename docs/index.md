@@ -7,13 +7,13 @@ It's work towards milestone M4.5 of ECP work package 4 ("ELIXIR Cloud is availab
 ## Status
 
 !!! warning "This has only run on one laptop, and once on one cluster"
-    What ran: a WES run, through a thin WES in this repository, with one NVFlare client per site as a TES task on two local [Funnel](https://github.com/calypr/funnel) instances, also through [proTES](https://github.com/elixir-cloud-aai/proTES), with mutual TLS and a federated model that beats local ones ([results of the local runs](tests/index.md#local-runs)). Once, on 2026-11-12, as a dress rehearsal: the hub on Rahti, with both sites as tasks on one TESK in the same cluster, ending `COMPLETE` ([results](outcomes/results.md)). What didn't: anything at a partner's node, on Poiesis, or in Conquest. There's no authentication, private keys pass through task records, and the "sites" share a kernel. A passing run shows that the pieces fit, and says nothing about whether a real node lets a task reach the FL server.
+    What ran: a WES run, through a thin WES in this repository, with one NVFlare client per site as a TES task on two local [Funnel](https://github.com/calypr/funnel) instances, also through [proTES](https://github.com/elixir-cloud-aai/proTES), with mutual TLS and a federated model that beats local ones ([results of the local runs](tests/index.md#local-runs)). Once, on 2026-11-12, as a dress rehearsal: the hub on Rahti, with both sites as tasks on one TESK in the same cluster, ending `COMPLETE` ([results](outcomes/results.md)). What didn't: anything at a partner's node, or on Poiesis. There's no authentication, private keys pass through task records, and the "sites" share a kernel. A passing run shows that the pieces fit, and says nothing about whether a real node lets a task reach the FL server.
 
 The [Outcomes](outcomes/open-questions.md) stay empty until the tests have run on real sites, apart from the dress rehearsal in [Results](outcomes/results.md).
 
 ## Goals
 
-The main goal is a direct run on real nodes, with the WES calling the TES of each site. Integration with Conquest and with proTES are stretch goals, in that order. See [Goals](testbed/index.md#goals).
+The main goal is a direct run on real nodes, with the WES calling the TES of each site. Integration with proTES is the stretch goal. See [Goals](testbed/index.md#goals).
 
 ## Quick start
 

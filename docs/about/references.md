@@ -20,7 +20,7 @@
 
 ## Implementations
 
-- [Conquest](https://github.com/anuragxxd/conquest): the WES of [option A](../testbed/options.md#a-nvflare-inside-conquest).
+- [Conquest](https://github.com/anuragxxd/conquest): the WES of [option A](../testbed/options.md#a-nvflare-inside-conquest), out of scope for the testbed ([generic-issues#117](https://github.com/elixir-cloud-aai/generic-issues/issues/117)).
 - [proTES](https://github.com/elixir-cloud-aai/proTES): the TES gateway, used in [T4](../tests/t4-protes.md).
 - [Funnel](https://github.com/calypr/funnel): the TES used here.
 - [TESK](https://github.com/elixir-cloud-aai/TESK): a TES on Kubernetes, which real nodes may run.
