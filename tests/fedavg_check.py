@@ -10,6 +10,7 @@ the run, and cancels its tasks.
 A standalone script, run once per process: it changes globals of the WES.
 """
 
+import importlib.util
 import json
 import os
 import pathlib
@@ -118,23 +119,64 @@ def update(weights: list[float], rows: int) -> str:
     return "local training done\nFEDAVG_UPDATE " + json.dumps({"weights": weights, "rows": rows}) + "\n"
 
 
-def run(wes: Any, outcome: Outcome, rounds: int = 2) -> tuple[dict[str, Any], FakeTes]:
+def run(wes: Any, outcome: Outcome, rounds: int = 2, timeout: float = 300) -> tuple[str, dict[str, Any], FakeTes]:
     """Carry out one FedAvg run of two sites against a fake TES.
 
     Args:
         wes: The WES module.
         outcome: How each task ends.
         rounds: Number of rounds.
+        timeout: Seconds for a round.
 
     Returns:
-        The run, and the fake TES.
+        The identifier of the run, the run, and the fake TES.
     """
     tes = FakeTes(outcome)
     run_id = f"run-{len(wes.RUNS)}"
     wes.RUNS[run_id] = {"state": "QUEUED", "tasks": [], "outputs": {}}
-    with mock.patch.object(wes, "tes_request", tes.request), mock.patch.object(wes.time, "sleep", lambda _: None):
+    with (
+        mock.patch.object(wes, "tes_request", tes.request),
+        mock.patch.object(wes.time, "sleep", lambda _: None),
+        mock.patch.object(wes, "ROUND_TIMEOUT", timeout),
+    ):
         wes.execute_fedavg(run_id, "logreg", ["site-1", "site-2"], rounds)
-    return wes.RUNS[run_id], tes
+    return run_id, wes.RUNS[run_id], tes
+
+
+def refusal(wes: Any, **form: str) -> int:
+    """Ask the WES for a run, and get the status it refuses it with.
+
+    Args:
+        wes: The WES module.
+        **form: The form fields; `workflow_type`, `workflow_type_version` and
+            `workflow_url` default to a good `FEDAVG` run.
+
+    Returns:
+        The status, or 0 if the run was accepted (which no case here should be).
+    """
+    fields = {"workflow_type": "FEDAVG", "workflow_type_version": "1.0", "workflow_url": "logreg", **form}
+    try:
+        wes.run_workflow(caller=wes.Identity("checker", "checker@testbed.invalid"), **fields)
+    except wes.HTTPException as error:
+        return error.status_code
+    return 0
+
+
+def load_module(name: str, path: str) -> Any:
+    """Load a script of the image as a module.
+
+    Args:
+        name: Name to give it.
+        path: Its path.
+
+    Returns:
+        The module.
+    """
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def main() -> None:
@@ -159,8 +201,8 @@ def main() -> None:
             step, rows = (1.0, 10) if task["tags"]["site"] == "site-1" else (3.0, 30)
             return "COMPLETE", update([w + step for w in model], rows)
 
-        good, good_tes = run(wes, trains, rounds=3)
-        model_path = pathlib.Path(directory) / "run-0" / "global_model.npy"
+        good_id, good, good_tes = run(wes, trains, rounds=3)
+        model_path = pathlib.Path(directory) / good_id / "global_model.npy"
         model = np.load(model_path).tolist() if model_path.is_file() else None
 
         def fails(task: dict[str, Any], _number: int) -> tuple[str, str]:
@@ -168,17 +210,47 @@ def main() -> None:
                 return "EXECUTOR_ERROR", ""
             return "RUNNING", ""
 
-        failed, failed_tes = run(wes, fails)
+        _, failed, failed_tes = run(wes, fails)
 
         def lies(task: dict[str, Any], _number: int) -> tuple[str, str]:
             if task["tags"]["site"] == "site-2":
                 return "COMPLETE", "FEDAVG_UPDATE " + json.dumps({"weights": ["decoy-output"], "rows": 1})
             return trains(task, _number)
 
-        bad, _ = run(wes, lies)
+        _, bad, _ = run(wes, lies)
 
-        wes.ROUND_TIMEOUT = 0
-        stuck, stuck_tes = run(wes, lambda _task, _number: ("RUNNING", ""))
+        # An integer too large for a float, which once got past the checks as an OverflowError
+        def overflows(task: dict[str, Any], _number: int) -> tuple[str, str]:
+            if task["tags"]["site"] == "site-2":
+                return "COMPLETE", 'FEDAVG_UPDATE {"weights": [1' + "0" * 400 + ', 0, 0], "rows": 1}'
+            return trains(task, _number)
+
+        _, huge, _ = run(wes, overflows)
+        _, stuck, stuck_tes = run(wes, lambda _task, _number: ("RUNNING", ""), timeout=0)
+
+        refusals = {
+            "workflow_params that isn't JSON": refusal(wes, workflow_params="{"),
+            "workflow_params that isn't an object": refusal(wes, workflow_params="[]"),
+            "sites that aren't a list": refusal(wes, workflow_params='{"sites": "site-1"}'),
+            "sites that aren't names": refusal(wes, workflow_params='{"sites": [1]}'),
+            "an unknown site": refusal(wes, workflow_params='{"sites": ["site-3"]}'),
+            "an unknown workflow type": refusal(wes, workflow_type="CWL"),
+            "FEDAVG of version 2.9": refusal(wes, workflow_type_version="2.9"),
+            "NVFLARE of version 1.0": refusal(wes, workflow_type="NVFLARE", workflow_url="logreg-fedavg"),
+        }
+        started = [run_id for run_id in wes.RUNS if not run_id.startswith("run-")]
+
+        # The round of a site trains as the NVFlare client does, so that T10 and T2 compare
+        site_round = load_module("site_round", "/app/testset/fedavg/site_round.py")
+        client = load_module("client", "/app/testset/job_src/client.py")
+        rng = np.random.default_rng(0)
+        x = np.column_stack([rng.uniform(-2, 2, (30, 2)), np.ones(30)])
+        y = (rng.uniform(size=30) > 0.5).astype(float)
+        start = np.array([0.1, -0.2, 0.3])
+        same_training = (site_round.LEARNING_RATE, site_round.LOCAL_STEPS) == (
+            client.LEARNING_RATE,
+            client.LOCAL_STEPS,
+        ) and np.array_equal(site_round.train(start, x, y), client.train(start, x, y))
 
     rounds = [[model_of(task) for task in good_tes.tasks[i : i + 2]] for i in range(0, 6, 2)]
     checks = {
@@ -206,6 +278,11 @@ def main() -> None:
         "a round that doesn't end in time fails the run": stuck["state"] == "SYSTEM_ERROR"
         and "in time" in stuck.get("error", ""),
         "its tasks are canceled": sorted(stuck_tes.canceled) == [0, 1],
+        "an integer too large for a float ends the run as EXECUTOR_ERROR": huge["state"] == "EXECUTOR_ERROR"
+        and "site-2" in huge.get("error", ""),
+        **{f"{name} is refused": status == 400 for name, status in refusals.items()},
+        "no refused request starts a run": started == [],
+        "a site's round trains as the NVFlare client": same_training,
     }
     for name, passed in checks.items():
         print(f"[{'ok' if passed else 'FAIL'}] {name}")

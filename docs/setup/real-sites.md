@@ -140,6 +140,7 @@ Caddy gets a certificate for that name, which needs ports 80 and 443 reachable. 
 | `FL_IMAGE` | `elixircloud/nvflare-wes-testbed:dev` | Image of the hub and the tasks. Use `sha-<commit>` |
 | `FL_PORT`, `FL_SCHEME` | `8002`, `grpc` | FL port. For 443, use `http`: see [T7](../tests/t7-port-443.md) |
 | `FL_PROBE_RESPONDER` | `1` | Answer [node probes](#probing-a-node) on the FL port while no run is active. `0` switches it off: then start a listener for a probe. Other values than `1`, `0`, `true`, `false`, `yes`, `no`, `on` and `off` stop the hub from starting |
+| `FEDAVG_ROUND_TIMEOUT` | `300` | Seconds for all tasks of a round of a `FEDAVG` run ([C4](../testbed/options.md#c4-fedavg-as-a-plain-workflow)) to end; after that, the run fails and its tasks are canceled |
 | `WES_ALLOWED_IPS` | `127.0.0.1` | Addresses or ranges that reach the WES, separated by spaces |
 | `WES_OIDC_ISSUER` | None, required | Trusted OIDC issuer, e.g. LS Login's. `/runs*` and `/outputs` need a bearer token it issued; there's no way to start a run without one ([H5](../testbed/shortcuts.md#h5)) |
 | `WES_OIDC_AUDIENCE` | `fl-wes` | The `aud` a token must carry, matching this deployment's registration at the issuer |

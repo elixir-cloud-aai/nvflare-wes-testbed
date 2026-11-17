@@ -118,6 +118,9 @@ class ParseUpdateTest(unittest.TestCase):
             "booleans": stdout({"weights": [True, 2, 3], "rows": 40}),
             "not finite": f'{fedavg.MARKER}{{"weights": [NaN, 2, 3], "rows": 40}}\n',
             "infinite": f'{fedavg.MARKER}{{"weights": [Infinity, 2, 3], "rows": 40}}\n',
+            "an integer too large for a float": f'{fedavg.MARKER}{{"weights": [1{"0" * 400}, 2, 3], "rows": 1}}\n',
+            "a weight out of bounds": stdout({"weights": [fedavg.MAX_WEIGHT * 2, 2, 3], "rows": 40}),
+            "a float that overflows a sum": stdout({"weights": [1e308, 2, 3], "rows": 40}),
             "no rows": stdout({"weights": [1, 2, 3]}),
             "zero rows": stdout({"weights": [1, 2, 3], "rows": 0}),
             "fractional rows": stdout({"weights": [1, 2, 3], "rows": 1.5}),
@@ -147,6 +150,16 @@ class AggregateTest(unittest.TestCase):
         """With equal rows, the plain mean, as NVFlare's FedAvg in the job of T1."""
         result = fedavg.aggregate([fedavg.Update([1.0, -1.0, 2.0], 40), fedavg.Update([3.0, 1.0, 0.0], 40)])
         self.assertEqual(result, [2.0, 0.0, 1.0])
+
+    def test_bounds_keep_the_average_finite(self) -> None:
+        """Updates at the bounds, of the most rows, still average to finite numbers."""
+        extreme = fedavg.Update([fedavg.MAX_WEIGHT, -fedavg.MAX_WEIGHT], fedavg.MAX_ROWS)
+        self.assertEqual(fedavg.aggregate([extreme] * 10), [fedavg.MAX_WEIGHT, -fedavg.MAX_WEIGHT])
+
+    def test_not_finite(self) -> None:
+        """An average that isn't finite is refused, should updates get past the bounds."""
+        with self.assertRaisesRegex(ValueError, "finite"):
+            fedavg.aggregate([fedavg.Update([1e308], 10), fedavg.Update([1e308], 10)])
 
     def test_no_updates(self) -> None:
         """No update, no model."""

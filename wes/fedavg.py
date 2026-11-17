@@ -30,6 +30,8 @@ MARKER = "FEDAVG_UPDATE "
 # An update line is a few hundred bytes; this bounds what a site can make the WES parse
 MAX_LINE = 4096
 MAX_ROWS = 10**9
+# Far beyond any weight of the workloads here; keeps every weighted sum of updates finite
+MAX_WEIGHT = 1e6
 SCRIPT = "/app/testset/fedavg/site_round.py"
 MODEL_PATH = "/model/model.json"
 
@@ -185,12 +187,21 @@ def parse_update(output: str, size: int) -> Update:
     weights = update.get("weights")
     if not isinstance(weights, list) or len(weights) != size:
         raise ValueError(f"The update doesn't have {size} weights")
-    if not all(isinstance(w, int | float) and not isinstance(w, bool) and math.isfinite(w) for w in weights):
-        raise ValueError("The weights aren't all finite numbers")
+    values: list[float] = []
+    for w in weights:
+        if isinstance(w, bool) or not isinstance(w, int | float):
+            raise ValueError("The weights aren't all numbers")  # noqa: TRY004 - as above
+        try:
+            value = float(w)
+        except OverflowError:  # an integer too large for a float
+            raise ValueError(f"The weights aren't all within ±{MAX_WEIGHT:g}") from None
+        if not math.isfinite(value) or abs(value) > MAX_WEIGHT:
+            raise ValueError(f"The weights aren't all within ±{MAX_WEIGHT:g}")
+        values.append(value)
     rows = update.get("rows")
     if isinstance(rows, bool) or not isinstance(rows, int) or not 1 <= rows <= MAX_ROWS:
         raise ValueError(f"The update's rows aren't a whole number from 1 to {MAX_ROWS}")
-    return Update([float(w) for w in weights], rows)
+    return Update(values, rows)
 
 
 def aggregate(updates: Sequence[Update]) -> list[float]:
@@ -203,9 +214,13 @@ def aggregate(updates: Sequence[Update]) -> list[float]:
         The new global model.
 
     Raises:
-        ValueError: There are no updates.
+        ValueError: There are no updates, or the average isn't finite, which
+            `parse_update`'s bounds rule out.
     """
     if not updates:
         raise ValueError("No updates to average")
     total = sum(update.rows for update in updates)
-    return [sum(update.weights[i] * update.rows for update in updates) / total for i in range(len(updates[0].weights))]
+    model = [sum(update.weights[i] * update.rows for update in updates) / total for i in range(len(updates[0].weights))]
+    if not all(math.isfinite(value) for value in model):
+        raise ValueError("The average isn't finite")
+    return model
