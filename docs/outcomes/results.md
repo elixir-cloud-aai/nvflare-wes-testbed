@@ -24,7 +24,7 @@ A short text for the report of milestone M4.5 of ECP work package 4, whose agree
 
 **What didn't run.** No partner node has taken part yet: the run with two or more nodes of other organizations is still to come ([#10](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/10)). No TES that checks tokens took part, nor proTES on a real node. The accuracies of the runs on Rahti weren't recorded. So far, this is a proof of concept on one cluster, and an analysis of what's missing, not a demonstration across organizations.
 
-**What's missing.** TES has no service-like tasks (an address, a name and a port that others reach), no time limits, no way to hand a secret to a task outside its records, and no way to pin a task to a site by a property of the site rather than by an address. The FL server therefore runs outside TES, at a hub with a public port. See the [Gap analysis](gap-analysis.md) and the [Open questions](open-questions.md).
+**What's missing.** TES has no service-like tasks (an address, a name and a port that others reach), no time limits, no way to hand a secret to a task outside its records, and no way to pin a task to a site by a property of the site rather than by an address. The FL server therefore runs outside TES, at a hub with a public port. See the [Gap analysis](gap-analysis.md), the [Open questions](open-questions.md), and the draft [Proposals](proposals.md) for TES.
 
 **What this does not deliver.** ELIXIR Cloud is not "available" for federated learning in the sense of the milestone:
 
