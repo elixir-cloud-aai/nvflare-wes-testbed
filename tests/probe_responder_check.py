@@ -150,12 +150,21 @@ class ProbeResponderCheck(unittest.TestCase):
         self.assertEqual(wait_until_open(self.port), "open")
 
     def test_responder_that_holds_on_fails_the_run_by_name(self) -> None:
-        """Should the responder not let go of the port in time, the run says so, rather than blame a listener."""
+        """Should the responder still hold the port after its time to stop, the run says so, not blame a listener."""
+        self.responder.start()
+        self.assertEqual(wait_until_open(self.port), "open")
         with mock.patch.object(self.responder, "stop", return_value=False):
             run = self.run_once()
         self.assertEqual(self.seen, [])
         self.assertEqual(run["state"], "SYSTEM_ERROR")
         self.assertIn("probe responder didn't release", run.get("error", ""))
+
+    def test_slow_responder_that_let_go_leaves_the_run_alone(self) -> None:
+        """A responder that is slow to end, but no longer holds the port, doesn't fail the run."""
+        with mock.patch.object(self.responder, "stop", return_value=False):
+            run = self.run_once()
+        self.assertEqual(self.seen, [{"listening": False, "port_free": True}])
+        self.assertIn(STUB_ERROR, run.get("error", ""))
 
     def test_failing_restart_leaves_the_run_alone(self) -> None:
         """A responder that can't start (e.g. no thread left) still lets the run end, and the next one start."""

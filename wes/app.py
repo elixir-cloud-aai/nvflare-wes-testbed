@@ -748,10 +748,15 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str], submitter: str
         run["state"] = "INITIALIZING"
         run_dir.mkdir(parents=True)
         if FL_SERVER_MODE != "tes":
-            # The probe responder hands the port over first; a listener of anyone else still fails the run
-            if RESPONDER is not None and not RESPONDER.stop():
-                raise RuntimeError(f"The probe responder didn't release the FL port {FL_PORT}")
-            ensure_port_free(FL_PORT)
+            # The probe responder hands the port over first; a listener of anyone else still fails the run.
+            # A responder that is slow to end fails the run only if it still holds the port
+            released = RESPONDER is None or RESPONDER.stop()
+            try:
+                ensure_port_free(FL_PORT)
+            except RuntimeError as error:
+                if not released:
+                    raise RuntimeError(f"The probe responder didn't release the FL port {FL_PORT}") from error
+                raise
         project = f"run{run_id[:8]}"
         fingerprint = init_ca(run_dir, project)
         server_kit = provision_locally(run_dir, project, FL_HOST, "server")

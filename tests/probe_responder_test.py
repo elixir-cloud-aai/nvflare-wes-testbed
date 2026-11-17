@@ -4,6 +4,7 @@ Usage: python3 tests/probe_responder_test.py
 """
 
 import pathlib
+import errno
 import socket
 import sys
 import threading
@@ -126,6 +127,61 @@ class ProbeResponderTest(unittest.TestCase):
             self.assertEqual(wait_until_open(self.port), "open")
         self.assertTrue(self.responder.stop())
         self.assertTrue(can_bind(self.port))
+
+    def test_thread_that_cant_start(self) -> None:
+        """No thread left: `start` says so and keeps none, so that `stop` (before a run) doesn't fail on it."""
+        with mock.patch("threading.Thread.start", side_effect=RuntimeError("can't start new thread")):
+            with self.assertRaises(RuntimeError):
+                self.responder.start()
+        self.assertTrue(self.responder.stop())
+        self.responder.start()
+        self.assertEqual(wait_until_open(self.port), "open")
+
+    def test_gives_up_on_a_port_it_may_not_bind(self) -> None:
+        """A reason not to bind that waiting doesn't cure, such as permissions: it gives up, and its thread ends."""
+        denied = OSError(errno.EACCES, "Permission denied")
+        with mock.patch("wes.probe_responder.socket.create_server", side_effect=denied) as bind:
+            self.responder.start()
+            time.sleep(0.5)
+        self.assertEqual(bind.call_count, 1)
+        self.assertFalse(self.responder.listening)
+        self.assertTrue(self.responder.stop(timeout=1))
+        # A later start, such as after a run, tries again
+        self.responder.start()
+        self.assertEqual(wait_until_open(self.port), "open")
+
+    def test_retries_after_a_failure_while_answering(self) -> None:
+        """An error while answering, such as no descriptor left for the selector: it closes the port, and retries."""
+        failures = iter([OSError(errno.EMFILE, "Too many open files")])
+        real = ProbeResponder._answer
+
+        def answer(*args: object) -> None:
+            """Fail once, then answer.
+
+            Args:
+                *args: Those of `_answer`.
+
+            Raises:
+                OSError: The first time.
+            """
+            error = next(failures, None)
+            if error is not None:
+                raise error
+            real(*args)  # type: ignore[arg-type]
+
+        with mock.patch.object(ProbeResponder, "_answer", answer):
+            self.responder.start()
+            self.assertEqual(wait_until_open(self.port), "open")
+        self.assertTrue(self.responder.stop())
+        self.assertTrue(can_bind(self.port))
+
+    def test_start_right_after_the_thread_has_let_go(self) -> None:
+        """A start that comes after the stopping thread's last look at it still starts a new one."""
+        self.responder.start()
+        self.assertEqual(wait_until_open(self.port), "open")
+        self.assertTrue(self.responder.stop())
+        self.responder.start()
+        self.assertEqual(wait_until_open(self.port), "open")
 
 
 class ResponderEnabledTest(unittest.TestCase):

@@ -10,6 +10,7 @@ and after each run, and stops it before the FL server of a run starts.
 Standard library only, so that its unit tests run without the image.
 """
 
+import errno
 import logging
 import selectors
 import socket
@@ -80,8 +81,12 @@ class ProbeResponder:
         Does nothing if it already runs. If a thread that was told to stop still
         hasn't ended, the new one starts once it has: two would only compete for
         the port.
+
+        Raises:
+            RuntimeError: No thread could be started; then none is kept.
         """
         with self._lock:
+            # A thread that has ended, or has passed its last look at `_restart`, leaves `_thread` empty
             if self._thread is not None and self._thread.is_alive():
                 if self._stop.is_set():
                     logger.warning("The probe responder on port %d is still stopping: starts once it has", self.port)
@@ -90,13 +95,21 @@ class ProbeResponder:
             self._spawn()
 
     def _spawn(self) -> None:
-        """Start a thread with events of its own. The caller holds the lock."""
+        """Start a thread with events of its own. The caller holds the lock.
+
+        Raises:
+            RuntimeError: No thread could be started; then none is kept, so that `stop` doesn't wait for it.
+        """
         self._stop = threading.Event()
         self._listening = threading.Event()
         self._thread = threading.Thread(
             target=self._serve, args=(self._stop, self._listening), name="probe-responder", daemon=True
         )
-        self._thread.start()
+        try:
+            self._thread.start()
+        except BaseException:
+            self._thread = None
+            raise
 
     def stop(self, timeout: float = 10) -> bool:
         """Stop answering, and wait until the port is closed.
@@ -129,28 +142,52 @@ class ProbeResponder:
             stop: Set to stop.
             listening: Set while it answers.
         """
+        try:
+            self._bind_and_answer(stop, listening)
+        finally:
+            # The last look at `_restart`: from here on, `start` sees no thread, and starts one itself
+            with self._lock:
+                if self._thread is threading.current_thread():
+                    self._thread = None
+                    if self._restart:
+                        self._restart = False
+                        self._spawn()
+
+    def _bind_and_answer(self, stop: threading.Event, listening: threading.Event) -> None:
+        """Bind the port, retrying while something else holds it, and answer until told to stop.
+
+        Other reasons not to bind, such as a port this user may not bind, don't
+        go away by waiting: then it gives up, and says so.
+
+        Args:
+            stop: Set to stop.
+            listening: Set while it answers.
+        """
         warned = False
         while not stop.is_set():
             try:
                 server = socket.create_server(("", self.port))
             except OSError as error:
-                if not warned:
-                    logger.warning(
-                        "The probe responder can't bind port %d yet (%s): retrying", self.port, error.strerror
+                if error.errno != errno.EADDRINUSE:
+                    logger.error(
+                        "The probe responder can't bind port %d (%s): no answers to probes", self.port, error.strerror
                     )
+                    return
+                if not warned:
+                    logger.warning("The probe responder's port %d is in use: retrying", self.port)
                     warned = True
                 stop.wait(self._retry)
                 continue
             try:
                 self._answer(server, stop, listening)
+            except OSError as error:
+                # Such as no descriptor left for the selector: close the port, and try again in a while
+                logger.warning("The probe responder failed on port %d (%s): retrying", self.port, error.strerror)
+                stop.wait(self._retry)
             finally:
                 listening.clear()
                 server.close()
             logger.info("The probe responder stopped answering on port %d", self.port)
-        with self._lock:
-            if self._restart and self._thread is threading.current_thread():
-                self._restart = False
-                self._spawn()
 
     def _answer(self, server: socket.socket, stop: threading.Event, listening: threading.Event) -> None:
         """Accept connections and close them, until told to stop.
