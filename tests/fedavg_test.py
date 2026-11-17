@@ -181,6 +181,20 @@ class TaskOutputTest(unittest.TestCase):
             with self.subTest(record=record):
                 self.assertEqual(fedavg.task_stdout(record), "")
 
+    def test_malformed(self) -> None:
+        """A record of the wrong shape is refused as a bad output, not as a crash."""
+        records = (
+            ["not", "an", "object"],
+            {"logs": {"a": 1}},
+            {"logs": ["x"]},
+            {"logs": [{"logs": {"k": 1}}]},
+            {"logs": [{"logs": ["x"]}]},
+            {"logs": [{"logs": [{"stdout": 5}]}]},
+        )
+        for record in records:
+            with self.subTest(record=record), self.assertRaises(ValueError):
+                fedavg.task_stdout(record)
+
 
 if __name__ == "__main__":
     unittest.main()

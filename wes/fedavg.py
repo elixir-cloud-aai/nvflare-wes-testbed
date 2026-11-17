@@ -138,10 +138,23 @@ def task_stdout(record: Mapping[str, Any]) -> str:
 
     Returns:
         The output of the last executor of the last attempt, or `""` if there's none.
+
+    Raises:
+        ValueError: The record isn't shaped as TES says, as from a TES that
+            can't be trusted to be one.
     """
+    if not isinstance(record, Mapping):
+        raise ValueError("The task's record isn't an object")  # noqa: TRY004 - bad reply of a TES
     attempts = record.get("logs") or []
+    if not isinstance(attempts, list) or not all(isinstance(attempt, Mapping) for attempt in attempts):
+        raise ValueError("The task's logs aren't a list of attempts")
     executors = (attempts[-1].get("logs") or []) if attempts else []
-    return (executors[-1].get("stdout") or "") if executors else ""
+    if not isinstance(executors, list) or not all(isinstance(executor, Mapping) for executor in executors):
+        raise ValueError("The task's attempt doesn't list its executors")
+    stdout = (executors[-1].get("stdout") or "") if executors else ""
+    if not isinstance(stdout, str):
+        raise ValueError("The task's output isn't text")  # noqa: TRY004 - bad reply of a TES
+    return stdout
 
 
 def _refuse_constant(name: str) -> None:
@@ -190,7 +203,7 @@ def parse_update(output: str, size: int) -> Update:
     values: list[float] = []
     for w in weights:
         if isinstance(w, bool) or not isinstance(w, int | float):
-            raise ValueError("The weights aren't all numbers")  # noqa: TRY004 - as above
+            raise ValueError("The weights aren't all numbers")  # noqa: TRY004 - bad output of a site
         try:
             value = float(w)
         except OverflowError:  # an integer too large for a float

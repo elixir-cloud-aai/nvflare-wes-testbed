@@ -82,7 +82,7 @@ Same versions as above, x86-64 laptop with Docker 28, after adding the workflow 
 | T1 | Ran. Holdout accuracy: federated 0.975, site-1 alone 0.825, site-2 alone 0.875 |
 | T2 | 11/11 checks |
 | T9 | All checks passed |
-| T10 (`tests/fedavg_test.py`) | 19 unit tests passed, without the image |
+| T10 (`tests/fedavg_test.py`) | 20 unit tests passed, without the image |
 | T10 (`tests/fedavg_check.py`, fake TES) | 27/27 checks |
 | T10 (`fedavg-e2e`, two Funnels) | 18/18 checks; 12 seconds from request to `COMPLETE` for 5 rounds, 10 tasks; the same accuracies as T1 |
 | Hub of `compose.hub.yaml` (`tests/hub.sh`) | All checks passed |
