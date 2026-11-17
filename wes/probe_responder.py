@@ -18,7 +18,7 @@ import threading
 logger = logging.getLogger("wes")
 
 ON = {"1", "true", "yes", "on"}
-OFF = {"0", "false", "no", "off", ""}
+OFF = {"0", "false", "no", "off"}
 
 
 def responder_enabled(value: str | None) -> bool:
@@ -28,19 +28,18 @@ def responder_enabled(value: str | None) -> bool:
         value: Its value, or `None` if it isn't set.
 
     Returns:
-        Whether the responder runs: by default, yes.
+        Whether the responder runs: by default, yes. An empty value counts as
+        unset, as Compose's `${FL_PROBE_RESPONDER:-1}` reads it.
 
     Raises:
         ValueError: The value is neither on nor off, so that a typo doesn't pick a side.
     """
-    if value is None:
-        return True
-    word = value.strip().lower()
-    if word in ON:
+    word = (value or "").strip().lower()
+    if not word or word in ON:
         return True
     if word in OFF:
         return False
-    raise ValueError(f"FL_PROBE_RESPONDER must be one of {sorted(ON)} or {sorted(OFF - {''})}, not {value!r}")
+    raise ValueError(f"FL_PROBE_RESPONDER must be one of {sorted(ON)} or {sorted(OFF)}, not {value!r}")
 
 
 class ProbeResponder:
@@ -48,7 +47,7 @@ class ProbeResponder:
 
     While something else holds the port, such as a probe listener started by
     hand, it retries, and answers once the port is free. It never holds the
-    port after `stop` returns.
+    port after `stop` has returned `True`.
     """
 
     def __init__(self, port: int, *, retry: float = 1.0, poll: float = 0.2) -> None:
@@ -63,6 +62,7 @@ class ProbeResponder:
         self._retry = retry
         self._poll = poll
         self._lock = threading.Lock()
+        # Each thread gets events of its own, so that one that is still ending can't touch the next one's
         self._stop = threading.Event()
         self._listening = threading.Event()
         self._thread: threading.Thread | None = None
@@ -73,13 +73,20 @@ class ProbeResponder:
         return self._listening.is_set()
 
     def start(self) -> None:
-        """Start answering, in the background. Does nothing if it already runs."""
+        """Start answering, in the background.
+
+        Does nothing if it already runs, or if a thread that was told to stop
+        still hasn't ended: a second one would only wait for its port.
+        """
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
+                if self._stop.is_set():
+                    logger.warning("The probe responder on port %d is still stopping: not started", self.port)
                 return
             self._stop = threading.Event()
+            self._listening = threading.Event()
             self._thread = threading.Thread(
-                target=self._serve, args=(self._stop,), name="probe-responder", daemon=True
+                target=self._serve, args=(self._stop, self._listening), name="probe-responder", daemon=True
             )
             self._thread.start()
 
@@ -93,7 +100,7 @@ class ProbeResponder:
             Whether it ended in time, or never ran: then the port is free of it.
         """
         with self._lock:
-            thread, self._thread = self._thread, None
+            thread = self._thread
             self._stop.set()
         if thread is None:
             return True
@@ -101,13 +108,17 @@ class ProbeResponder:
         if thread.is_alive():
             logger.warning("The probe responder on port %d didn't stop in %s s", self.port, timeout)
             return False
+        with self._lock:
+            if self._thread is thread:
+                self._thread = None
         return True
 
-    def _serve(self, stop: threading.Event) -> None:
+    def _serve(self, stop: threading.Event, listening: threading.Event) -> None:
         """Bind the port, retrying while it's held, and answer until told to stop.
 
         Args:
             stop: Set to stop.
+            listening: Set while it answers.
         """
         warned = False
         while not stop.is_set():
@@ -122,23 +133,24 @@ class ProbeResponder:
                 stop.wait(self._retry)
                 continue
             try:
-                self._answer(server, stop)
+                self._answer(server, stop, listening)
             finally:
-                self._listening.clear()
+                listening.clear()
                 server.close()
             logger.info("The probe responder stopped answering on port %d", self.port)
 
-    def _answer(self, server: socket.socket, stop: threading.Event) -> None:
+    def _answer(self, server: socket.socket, stop: threading.Event, listening: threading.Event) -> None:
         """Accept connections and close them, until told to stop.
 
         Args:
             server: The listening socket.
             stop: Set to stop.
+            listening: Set while it answers.
         """
         server.setblocking(False)
         with selectors.DefaultSelector() as selector:
             selector.register(server, selectors.EVENT_READ)
-            self._listening.set()
+            listening.set()
             logger.info("The probe responder answers on port %d", self.port)
             while not stop.is_set():
                 if not selector.select(self._poll):

@@ -27,6 +27,7 @@ HERE = pathlib.Path(__file__).parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 
+from port_helpers import can_bind, free_port, wait_until_open
 from probe import connect
 
 WORKDIR = tempfile.TemporaryDirectory()
@@ -38,50 +39,6 @@ from wes import app as wes
 from wes.probe_responder import ProbeResponder
 
 STUB_ERROR = "stopped here by the check"
-
-
-def free_port() -> int:
-    """Find a port that nothing listens on.
-
-    Returns:
-        The port.
-    """
-    with socket.create_server(("", 0)) as server:
-        return server.getsockname()[1]
-
-
-def can_bind(port: int) -> bool:
-    """Tell whether a port is free to listen on, as the FL server needs it.
-
-    Args:
-        port: The port.
-
-    Returns:
-        Whether it could be bound.
-    """
-    try:
-        with socket.create_server(("", port)):
-            return True
-    except OSError:
-        return False
-
-
-def wait_until_open(port: int, timeout: float = 5) -> str:
-    """Wait until a port of this host answers.
-
-    Args:
-        port: The port.
-        timeout: Seconds to wait.
-
-    Returns:
-        What the probe saw last: `open`, or why not.
-    """
-    deadline = time.monotonic() + timeout
-    outcome = connect("127.0.0.1", port)
-    while outcome != "open" and time.monotonic() < deadline:
-        time.sleep(0.05)
-        outcome = connect("127.0.0.1", port)
-    return outcome
 
 
 class ProbeResponderCheck(unittest.TestCase):
@@ -191,6 +148,22 @@ class ProbeResponderCheck(unittest.TestCase):
             self.assertFalse(self.responder.listening)
         # Once it's gone, the responder takes over
         self.assertEqual(wait_until_open(self.port), "open")
+
+    def test_responder_that_holds_on_fails_the_run_by_name(self) -> None:
+        """Should the responder not let go of the port in time, the run says so, rather than blame a listener."""
+        with mock.patch.object(self.responder, "stop", return_value=False):
+            run = self.run_once()
+        self.assertEqual(self.seen, [])
+        self.assertEqual(run["state"], "SYSTEM_ERROR")
+        self.assertIn("probe responder didn't release", run.get("error", ""))
+
+    def test_failing_restart_leaves_the_run_alone(self) -> None:
+        """A responder that can't start (e.g. no thread left) still lets the run end, and the next one start."""
+        with mock.patch.object(self.responder, "start", side_effect=RuntimeError("can't start new thread")):
+            run = self.run_once()
+        self.assertEqual(run["state"], "SYSTEM_ERROR")
+        self.assertIn(STUB_ERROR, run.get("error", ""))
+        self.assertIn("end_time", run)
 
     def test_switched_off(self) -> None:
         """Without a responder, nothing answers before or after a run, and runs go on as before."""

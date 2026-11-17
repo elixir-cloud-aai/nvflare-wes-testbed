@@ -6,59 +6,18 @@ Usage: python3 tests/probe_responder_test.py
 import pathlib
 import socket
 import sys
+import threading
 import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 
+from port_helpers import can_bind, free_port, wait_until_open
 from probe import connect
 
 from wes.probe_responder import ProbeResponder, responder_enabled
-
-
-def free_port() -> int:
-    """Find a port that nothing listens on.
-
-    Returns:
-        The port.
-    """
-    with socket.create_server(("", 0)) as server:
-        return server.getsockname()[1]
-
-
-def can_bind(port: int) -> bool:
-    """Tell whether a port is free to listen on, as the FL server needs it.
-
-    Args:
-        port: The port.
-
-    Returns:
-        Whether it could be bound.
-    """
-    try:
-        with socket.create_server(("", port)):
-            return True
-    except OSError:
-        return False
-
-
-def wait_until_open(port: int, timeout: float = 5) -> str:
-    """Wait until a port of this host answers.
-
-    Args:
-        port: The port.
-        timeout: Seconds to wait.
-
-    Returns:
-        What the probe saw last: `open`, or why not.
-    """
-    deadline = time.monotonic() + timeout
-    outcome = connect("127.0.0.1", port)
-    while outcome != "open" and time.monotonic() < deadline:
-        time.sleep(0.05)
-        outcome = connect("127.0.0.1", port)
-    return outcome
 
 
 class ProbeResponderTest(unittest.TestCase):
@@ -114,12 +73,12 @@ class ProbeResponderTest(unittest.TestCase):
 
     def test_waits_for_a_held_port(self) -> None:
         """While something else holds the port, it waits, and answers once it's free."""
-        with socket.create_server(("", self.port)) as holder:
-            self.responder.start()
-            time.sleep(0.3)
-            self.assertFalse(self.responder.listening)
-            # The holder accepts nothing, but its backlog makes the port look open
-            holder.close()
+        holder = socket.create_server(("", self.port))
+        self.responder.start()
+        time.sleep(0.3)
+        # The port is held, so the responder doesn't listen yet
+        self.assertFalse(self.responder.listening)
+        holder.close()
         self.assertEqual(wait_until_open(self.port), "open")
         self.assertTrue(self.responder.listening)
 
@@ -134,13 +93,27 @@ class ProbeResponderTest(unittest.TestCase):
             self.assertLess(time.monotonic() - started, 5)
             self.assertEqual(connect("127.0.0.1", self.port), "open")
 
+    def test_stop_that_times_out(self) -> None:
+        """A thread that doesn't end in time: `stop` says so, and no second thread starts beside it."""
+        release = threading.Event()
+        with mock.patch.object(ProbeResponder, "_serve", lambda *_: release.wait(5)):
+            self.responder.start()
+            self.assertFalse(self.responder.stop(timeout=0.1))
+            with mock.patch("threading.Thread.start") as start:
+                self.responder.start()
+            start.assert_not_called()
+            release.set()
+            self.assertTrue(self.responder.stop())
+
 
 class ResponderEnabledTest(unittest.TestCase):
     """The setting that switches the responder off (`FL_PROBE_RESPONDER`)."""
 
     def test_on_by_default(self) -> None:
-        """Unset means on."""
-        self.assertTrue(responder_enabled(None))
+        """Unset or empty means on, as Compose's `${FL_PROBE_RESPONDER:-1}` reads it."""
+        for value in (None, "", " "):
+            with self.subTest(value=value):
+                self.assertTrue(responder_enabled(value))
 
     def test_on(self) -> None:
         """Usual words for on, in any case and with spaces around them."""
@@ -149,8 +122,8 @@ class ResponderEnabledTest(unittest.TestCase):
                 self.assertTrue(responder_enabled(value))
 
     def test_off(self) -> None:
-        """Usual words for off, and an empty value, as `FL_PROBE_RESPONDER=` reads as off."""
-        for value in ("0", "false", "FALSE", "no", "off", "", " "):
+        """Usual words for off, in any case."""
+        for value in ("0", "false", "FALSE", "no", "off"):
             with self.subTest(value=value):
                 self.assertFalse(responder_enabled(value))
 

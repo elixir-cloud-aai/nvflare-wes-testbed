@@ -20,5 +20,6 @@ expect() {
 # The FL port of the idle hub, where its probe responder answers
 expect 0 '^\[ok\] the node can take part, on fl-hub:8002' --hub=fl-hub --fl-port=8002
 expect 1 "^\[FAIL\] the node can't take part: 1\.1\.1\.1:443 is (timeout|unreachable)" --hub=1.1.1.1 --fl-port=443
+# 8004: a port that nothing on the hub listens on
 expect 2 '^\[inconclusive\] fl-hub:8004 refused' --hub=fl-hub --fl-port=8004
 echo "[ok] the probe tells these cases apart"

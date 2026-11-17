@@ -136,7 +136,7 @@ def make_responder(setting: str | None, mode: str, port: int) -> ProbeResponder 
     """Make the probe responder for the FL port, if this service runs one.
 
     Args:
-        setting: The value of `FL_PROBE_RESPONDER`, or `None` if it isn't set (on).
+        setting: The value of `FL_PROBE_RESPONDER`, or `None` if it isn't set (on, as when empty).
         mode: `FL_SERVER_MODE`.
         port: The FL port.
 
@@ -169,6 +169,19 @@ if not OIDC_ISSUER:
     logger.warning("No WES_OIDC_ISSUER is configured: every run and most endpoints will be refused")
 
 
+def start_responder() -> None:
+    """Start the probe responder, if there is one, without ever failing the caller.
+
+    Probes are a convenience: a hub that can't start the thread still serves runs.
+    """
+    if RESPONDER is None:
+        return
+    try:
+        RESPONDER.start()
+    except Exception:  # e.g. no thread left in the pod's limits: runs must go on
+        logger.exception("Couldn't start the probe responder on port %d", RESPONDER.port)
+
+
 @contextlib.asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Answer node probes on the FL port while this service runs, until a run takes it.
@@ -179,8 +192,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     Yields:
         Nothing, while the service runs.
     """
-    if RESPONDER is not None:
-        RESPONDER.start()
+    start_responder()
     try:
         yield
     finally:
@@ -737,8 +749,8 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str], submitter: str
         run_dir.mkdir(parents=True)
         if FL_SERVER_MODE != "tes":
             # The probe responder hands the port over first; a listener of anyone else still fails the run
-            if RESPONDER is not None:
-                RESPONDER.stop()
+            if RESPONDER is not None and not RESPONDER.stop():
+                raise RuntimeError(f"The probe responder didn't release the FL port {FL_PORT}")
             ensure_port_free(FL_PORT)
         project = f"run{run_id[:8]}"
         fingerprint = init_ca(run_dir, project)
@@ -804,10 +816,13 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str], submitter: str
                 server.wait(timeout=30)
             except subprocess.TimeoutExpired:
                 server.kill()
+                try:
+                    server.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    logger.warning("The FL server of run %s didn't end after a kill", run_id)
         # Before the run ends, so that no next run can start in between. It retries while the port
         # is still held, such as by a server that is going away, and never delays or fails the run
-        if RESPONDER is not None:
-            RESPONDER.start()
+        start_responder()
         for token in slots:
             KITS.pop(token, None)
             CSR_TOKENS.pop(token, None)
