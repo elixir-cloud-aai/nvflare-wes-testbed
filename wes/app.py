@@ -896,10 +896,12 @@ def authenticated(credentials: Annotated[HTTPAuthorizationCredentials | None, De
             options={"require": ["exp"]},
         )
     except jwt.InvalidTokenError as error:
-        logger.warning("Auth: rejected a bearer token: %s", error)
+        # PyJWT's messages name the failed check (expiry, audience, ...), never the token itself
+        logger.warning("Auth: rejected a bearer token: %s", error)  # nosemgrep
         raise HTTPException(401, f"Invalid token: {error}") from None
     except Exception as error:  # noqa: BLE001 - a key with an unknown kid, or the issuer out of reach
-        logger.warning("Auth: couldn't verify a bearer token: %s", type(error).__name__)
+        # Only the class of the error, never the token
+        logger.warning("Auth: couldn't verify a bearer token: %s", type(error).__name__)  # nosemgrep
         raise HTTPException(503, "Can't reach the trusted issuer right now") from None
 
 
