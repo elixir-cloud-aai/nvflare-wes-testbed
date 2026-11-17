@@ -3,8 +3,8 @@
 Usage: python3 tests/probe_responder_test.py
 """
 
-import pathlib
 import errno
+import pathlib
 import socket
 import sys
 import threading
@@ -130,9 +130,9 @@ class ProbeResponderTest(unittest.TestCase):
 
     def test_thread_that_cant_start(self) -> None:
         """No thread left: `start` says so and keeps none, so that `stop` (before a run) doesn't fail on it."""
-        with mock.patch("threading.Thread.start", side_effect=RuntimeError("can't start new thread")):
-            with self.assertRaises(RuntimeError):
-                self.responder.start()
+        failing = mock.patch("threading.Thread.start", side_effect=RuntimeError("can't start new thread"))
+        with failing, self.assertRaises(RuntimeError):
+            self.responder.start()
         self.assertTrue(self.responder.stop())
         self.responder.start()
         self.assertEqual(wait_until_open(self.port), "open")
