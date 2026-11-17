@@ -1,7 +1,7 @@
 # Proposals
 
-!!! note "Draft, and empty until after the event"
-    Section 5 holds draft outcomes and proposals, for further consideration, and only what test results on real sites support. Nothing has been filled in yet. Whatever is added here stays a draft: it gets finalized elsewhere after the event.
+!!! note "Draft, not filled in yet ([#16](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/16))"
+    Section 5 holds draft outcomes and proposals, for further consideration, and only what test results support. Nothing has been filled in here yet: the [gaps](gap-analysis.md) name the proposals to come. Nothing is posted anywhere without the maintainer's OK. Whatever is added here stays a draft: it gets finalized elsewhere.
 
 Each proposal links the [gaps](gap-analysis.md) it closes.
 
