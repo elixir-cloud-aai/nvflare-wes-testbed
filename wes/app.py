@@ -1,7 +1,9 @@
 """A thin WES in front of NVFlare, with FL clients as TES tasks. Sandbox only.
 
-Implements the part of the GA4GH WES 1.1 API that the testbed needs, for one
-workflow type, `NVFLARE`. For each run it:
+Implements the part of the GA4GH WES 1.1 API that the testbed needs, for two
+workflow types. `FEDAVG` is federated averaging as a plain workflow, without
+NVFlare: rounds of one TES task per site, averaged here (`wes/fedavg.py`,
+option C4). For a run of `NVFLARE`, it:
 
 1. creates a root CA for that run alone, through `nvflare cert init`, and
    provisions the server and an admin itself, through `nvflare cert request`,
@@ -48,7 +50,7 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from wes import tokens
+from wes import fedavg, tokens
 from wes.probe_responder import ProbeResponder, responder_enabled
 
 logger = logging.getLogger("wes")
@@ -125,6 +127,8 @@ ORG = "testbed"
 ADMIN_PORT = 8003
 START_TIMEOUT = 180
 JOB_TIMEOUT = 600
+# Seconds for all tasks of a round of a `FEDAVG` run to end
+ROUND_TIMEOUT = float(os.environ.get("FEDAVG_ROUND_TIMEOUT", "300"))
 MAX_CSR_SIZE = 1 << 20  # a CSR package is a few KB; this just bounds memory
 # What gRPC logs, in the FL server's output, when it can't bind the FL port; the server starts anyway
 BIND_FAILURE = "Failed to add port"
@@ -605,6 +609,20 @@ def client_task(run_id: str, site: str, project: str, csr_url: str, fingerprint:
         "resources": {"cpu_cores": 1, "ram_gb": 1.0, "disk_gb": 1.0},
         "tags": {"wes_run_id": run_id, "site": site},
     }
+    return pin_to_site(task, site)
+
+
+def pin_to_site(task: dict[str, Any], site: str) -> dict[str, Any]:
+    """Pin a task to the TES of its site, if it goes through a gateway.
+
+    Args:
+        task: The task, changed in place.
+        site: Name of the site.
+
+    Returns:
+        The task, with the tag `gateway.backends` if there's a gateway. Without
+        one, the task goes straight to the TES of the site anyway.
+    """
     if TES_GATEWAY:
         task["tags"]["gateway.backends"] = json.dumps({"type": "allow", "backends": [SITES[site]["tes"]]})
     return task
@@ -840,6 +858,111 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str], submitter: str
         logger.info("Run %s: %s", run_id, final_state)
 
 
+class SiteError(RuntimeError):
+    """A site's task of a `FEDAVG` run failed, or printed no usable update: the run ends as `EXECUTOR_ERROR`."""
+
+
+def wait_for_round(tasks: list[dict[str, Any]], timeout: float) -> None:
+    """Wait until all tasks of a round of a `FEDAVG` run are `COMPLETE`.
+
+    Args:
+        tasks: The tasks of the round.
+        timeout: Seconds to wait.
+
+    Raises:
+        SiteError: A task ended otherwise; the others aren't waited for.
+        TimeoutError: Not all tasks ended in time.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        # Terminal states of TES are final: only the others are asked for
+        update_tasks({"tasks": [task for task in tasks if task["state"] not in TERMINAL_TES]})
+        failed = [(task["site"], task["state"]) for task in tasks if task["state"] in TERMINAL_TES - {"COMPLETE"}]
+        if failed:
+            raise SiteError(f"Tasks failed in round {tasks[0]['round']}: {failed}")
+        if all(task["state"] == "COMPLETE" for task in tasks):
+            return
+        if time.monotonic() >= deadline:
+            states = [(task["site"], task["state"]) for task in tasks]
+            raise TimeoutError(f"Round {tasks[0]['round']} didn't end in time: {states}")
+        time.sleep(2)
+
+
+def site_update(task: dict[str, Any], size: int) -> fedavg.Update:
+    """Get a site's update from the record of its task of a round, at its TES.
+
+    Args:
+        task: The task, `COMPLETE`.
+        size: Number of weights of the model.
+
+    Returns:
+        The update.
+
+    Raises:
+        SiteError: The task's output has no usable update. The message says
+            why, and doesn't echo the output.
+    """
+    reply = tes_request("GET", task["site"], f"{task['base']}/tasks/{task['id']}", params={"view": "FULL"}, timeout=30)
+    reply.raise_for_status()
+    try:
+        return fedavg.parse_update(fedavg.task_stdout(reply.json()), size)
+    except ValueError as error:
+        raise SiteError(f"Update of {task['site']} in round {task['round']}: {error}") from None
+
+
+def execute_fedavg(run_id: str, name: str, sites: list[str], rounds: int) -> None:
+    """Carry out a run of `FEDAVG`, in the background: rounds of one TES task per site, averaged here.
+
+    Nothing here listens for the tasks: each gets the model inline, and its
+    update comes back through its record at the TES of its site
+    (`wes/fedavg.py`). The FL port, and its probe responder, stay as they are.
+
+    Args:
+        run_id: Identifier of the run.
+        name: Name of the workload.
+        sites: Names of the sites.
+        rounds: Number of rounds.
+    """
+    import numpy as np  # in the image; only this workflow type needs it
+
+    run = RUNS[run_id]
+    final_state = "SYSTEM_ERROR"
+    try:
+        run["state"] = "INITIALIZING"
+        model = list(fedavg.workload(name).initial)
+        run["state"] = "RUNNING"
+        for round_ in range(1, rounds + 1):
+            tasks: list[dict[str, Any]] = []
+            for site in sites:
+                base = tes_base(site)
+                task = fedavg.site_task(run_id, site, round_, model, SITES[site]["data"], IMAGE, name)
+                reply = tes_request("POST", site, f"{base}/tasks", json=pin_to_site(task, site), timeout=60)
+                reply.raise_for_status()
+                tasks.append({"site": site, "round": round_, "id": reply.json()["id"], "base": base, "state": "QUEUED"})
+                run["tasks"].append(tasks[-1])
+            wait_for_round(tasks, ROUND_TIMEOUT)
+            model = fedavg.aggregate([site_update(task, len(model)) for task in tasks])
+            run["outputs"]["rounds_completed"] = round_
+        run_dir = BASE / run_id
+        run_dir.mkdir(parents=True)
+        np.save(run_dir / "global_model.npy", np.asarray(model))
+        run["outputs"]["global_model"] = f"/outputs/{run_id}/global_model.npy"
+        final_state = "COMPLETE"
+    except SiteError as error:
+        logger.warning("Run %s failed at a site: %s", run_id, error)
+        run["error"] = repr(error)
+        final_state = "EXECUTOR_ERROR"
+    except Exception as error:  # the run fails, the service stays
+        logger.exception("Run %s failed", run_id)
+        run["error"] = repr(error)
+    finally:
+        cancel_tasks(run)
+        update_tasks({"tasks": [task for task in run["tasks"] if task["state"] not in TERMINAL_TES]}, wait=30)
+        run["end_time"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        run["state"] = final_state
+        logger.info("Run %s: %s", run_id, final_state)
+
+
 _jwk_client: jwt.PyJWKClient | None = None
 
 
@@ -970,7 +1093,10 @@ def service_info() -> dict[str, Any]:
         "type": {"group": "org.ga4gh", "artifact": "wes", "version": "1.1.0"},
         "organization": {"name": "ELIXIR Cloud & AAI (sandbox)", "url": "https://elixir-cloud-aai.github.io"},
         "version": "0.0.0",
-        "workflow_type_versions": {"NVFLARE": {"workflow_type_version": ["2.9"]}},
+        "workflow_type_versions": {
+            "NVFLARE": {"workflow_type_version": ["2.9"]},
+            fedavg.WORKFLOW_TYPE: {"workflow_type_version": [fedavg.WORKFLOW_TYPE_VERSION]},
+        },
         "supported_wes_versions": ["1.1.0"],
         "supported_filesystem_protocols": ["file"],
         "workflow_engine_versions": {"nvflare": {"workflow_engine_version": ["2.9.0"]}},
@@ -997,10 +1123,12 @@ def run_workflow(
     """Start a run.
 
     Args:
-        workflow_type: Must be `NVFLARE`.
-        workflow_type_version: Must be `2.9`.
-        workflow_url: Name of a job in the image (no uploads, so no user code).
-        workflow_params: JSON object, with the sites to use (`sites`).
+        workflow_type: `NVFLARE`, or `FEDAVG` (`wes/fedavg.py`).
+        workflow_type_version: `2.9` for `NVFLARE`, `1.0` for `FEDAVG`.
+        workflow_url: Name of a job (`NVFLARE`) or of a workload (`FEDAVG`) in
+            the image (no uploads, so no user code).
+        workflow_params: JSON object, with the sites to use (`sites`), and for
+            `FEDAVG` the number of rounds (`rounds`, by default 5).
         tags: JSON object with tags of the run.
         caller: The caller's identity.
 
@@ -1010,15 +1138,37 @@ def run_workflow(
     Raises:
         HTTPException: The request is invalid, or another run is active.
     """
-    if workflow_type != "NVFLARE" or workflow_type_version != "2.9":
-        raise HTTPException(400, "Only workflow type NVFLARE, version 2.9")
-    job_dir = (JOBS / workflow_url).resolve()
-    if job_dir.parent != JOBS.resolve() or not job_dir.is_dir():
-        raise HTTPException(400, f"Unknown job {workflow_url}; available: {sorted(p.name for p in JOBS.iterdir())}")
-    params = json.loads(workflow_params)
+    try:
+        params = json.loads(workflow_params)
+    except ValueError:
+        raise HTTPException(400, "workflow_params isn't valid JSON") from None
+    if not isinstance(params, dict):
+        raise HTTPException(400, "workflow_params isn't a JSON object")
     sites = params.get("sites", list(SITES))
+    if not isinstance(sites, list) or not all(isinstance(site, str) for site in sites):
+        raise HTTPException(400, f"sites must be a list of names; available: {sorted(SITES)}")
     if not sites or not set(sites) <= set(SITES):
         raise HTTPException(400, f"Unknown sites; available: {sorted(SITES)}")
+    target: Any
+    if (workflow_type, workflow_type_version) == ("NVFLARE", "2.9"):
+        job_dir = (JOBS / workflow_url).resolve()
+        if job_dir.parent != JOBS.resolve() or not job_dir.is_dir():
+            raise HTTPException(400, f"Unknown job {workflow_url}; available: {sorted(p.name for p in JOBS.iterdir())}")
+        target, args = execute, (job_dir, sites, caller.email)
+    elif (workflow_type, workflow_type_version) == (fedavg.WORKFLOW_TYPE, fedavg.WORKFLOW_TYPE_VERSION):
+        try:
+            fedavg.workload(workflow_url)
+            rounds = fedavg.parse_rounds(params)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from None
+        # Each site once: a site named twice would count twice in the average
+        target, args = execute_fedavg, (workflow_url, list(dict.fromkeys(sites)), rounds)
+    else:
+        raise HTTPException(
+            400,
+            f"Only workflow types NVFLARE, version 2.9, and {fedavg.WORKFLOW_TYPE},"
+            f" version {fedavg.WORKFLOW_TYPE_VERSION}",
+        )
     with LOCK:
         if any(r["state"] in ("QUEUED", "INITIALIZING", "RUNNING") for r in RUNS.values()):
             raise HTTPException(409, "Only one run at a time")
@@ -1039,7 +1189,7 @@ def run_workflow(
             "outputs": {},
             "start_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
-    threading.Thread(target=execute, args=(run_id, job_dir, sites, caller.email), daemon=True).start()
+    threading.Thread(target=target, args=(run_id, *args), daemon=True).start()
     return {"run_id": run_id}
 
 
@@ -1098,7 +1248,7 @@ def run_status(run_id: str, caller: Identity = IDENTITY_DEPENDENCY) -> dict[str,
     return {"run_id": run_id, "state": get_run(run_id, caller.sub)["state"]}
 
 
-def task_name(task: dict[str, str]) -> str:
+def task_name(task: dict[str, Any]) -> str:
     """Name a TES task in the run log.
 
     Args:
@@ -1107,6 +1257,8 @@ def task_name(task: dict[str, str]) -> str:
     Returns:
         Its name.
     """
+    if "round" in task:
+        return f"fedavg {task['site']} round {task['round']}"
     return "fl-server" if task["site"] == "server" else f"fl-client {task['site']}"
 
 
@@ -1122,13 +1274,18 @@ def run_log(run_id: str, caller: Identity = IDENTITY_DEPENDENCY) -> dict[str, An
         The run log, with the TES tasks under `task_logs`.
     """
     run = get_run(run_id, caller.sub)
+    if run["request"]["workflow_type"] == fedavg.WORKFLOW_TYPE:
+        name, outputs = f"fedavg {run['request']['workflow_url']}", dict(run["outputs"])
+    else:
+        name = f"flare job {run.get('flare_job_id', '')}"
+        outputs = dict(run["outputs"], flare_job_status=run.get("flare_job_status"))
     return {
         "run_id": run_id,
         "state": run["state"],
         "submitter": run["submitter"],
         "request": run["request"],
         "run_log": {
-            "name": f"flare job {run.get('flare_job_id', '')}",
+            "name": name,
             "start_time": run["start_time"],
             "end_time": run.get("end_time"),
             "system_logs": [run["error"]] if "error" in run else [],
@@ -1136,7 +1293,7 @@ def run_log(run_id: str, caller: Identity = IDENTITY_DEPENDENCY) -> dict[str, An
         "task_logs": [
             {"id": task["id"], "name": task_name(task), "system_logs": [task["state"]]} for task in run["tasks"]
         ],
-        "outputs": dict(run["outputs"], flare_job_status=run.get("flare_job_status")),
+        "outputs": outputs,
     }
 
 
