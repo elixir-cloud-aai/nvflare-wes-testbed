@@ -20,7 +20,7 @@
 
 ## Order for a live session
 
-The [goals](../testbed/index.md#goals) set the order: first the direct run, with the WES calling each TES. proTES only follows if that's done. The session plan ([#8](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/8)) goes here.
+The [goals](../testbed/index.md#goals) set the order: first the direct run, with the WES calling each TES. proTES only follows if that's done. The plan for the run with two or more sites, which replaces the session plan of the event, is in [#10](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/10).
 
 Prepare, as early as possible:
 
@@ -51,7 +51,7 @@ One laptop with Docker 28.3, with NVFlare 2.9.0 from PyPI, Funnel v0.11.14 and p
 | Probe responder (`tests/probe_responder_test.py`, `tests/probe_responder_check.py` in `tests/hub.sh`) | Unit tests of `wes/probe_responder.py`: it answers, frees the port once stopped, starts again, waits for a held port, and reads `FL_PROBE_RESPONDER`. With NVFlare stubbed: the WES starts it with the service, stops it before a run's port check, which finds the port free, and starts it again after each run; a foreign listener still fails a run; a responder that doesn't let go fails the run by name; one that can't start leaves runs alone; switched off, nothing answers. `tests/hub.sh` checks that the hub answers on the FL port after a run, as an arbitrary user, and not when switched off. In CI |
 | Checks from outside (`tests/outside_check_test.py`) | Unit tests of `tests/outside_check.py`, with a local server and mocks, in CI |
 | Chart for Rahti (`tests/chart.sh`) | Lint, what it exposes and refuses, a CPU limit at most 5 times the request, and OpenShift's schemas, in CI, without a cluster. Installed on Rahti on 2026-11-12: see [What differed on Rahti](../setup/real-sites.md#what-differed-on-rahti) |
-| T8 | Not a local run: on Rahti, 2026-11-12, with both sites on one TESK in the hub's cluster. The first run: `SYSTEM_ERROR` after the start timeout, no site joined. The node probe's listener, left running in the hub's pod, held the FL port, and the FL server started without it. Runs now fail at once in that case. After a restart of the pod: `COMPLETE`, accuracies not checked. See [Results](../outcomes/results.md) |
+| T8 | Not a local run: on Rahti, 2026-11-12, with both sites on one TESK in the hub's cluster. The first run: `SYSTEM_ERROR` after the start timeout, no site joined. The node probe's listener, left running in the hub's pod, held the FL port, and the FL server started without it. Runs now fail at once in that case. After a restart of the pod: `COMPLETE`, accuracies not checked. Again `COMPLETE` on 2026-11-16, after a fresh restart of the pod. See [Results](../outcomes/results.md) |
 | T9 | Not run |
 
 ### 2026-11-11

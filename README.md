@@ -3,7 +3,7 @@
 A sandbox for running federated learning jobs with [NVIDIA FLARE](https://github.com/NVIDIA/NVFlare) through [GA4GH WES](https://github.com/ga4gh/workflow-execution-service-schemas) and [TES](https://github.com/ga4gh/task-execution-schemas), and an evaluation of the ways to do that.
 
 > [!WARNING]
-> **This has only run on one laptop, against two local Funnel instances. It has not touched a real site.** It has no authentication, sends private keys through task records, and takes every shortcut it can: [all of them are listed](docs/testbed/shortcuts.md). Never for production, and never for real data: its test set is synthetic and tiny.
+> **This has only run on laptops, against two local Funnel instances, and twice on one cluster, with both sites in the hub's own cluster. It has not touched a partner's node.** Its WES trusts one identity provider and gives every caller the same role, it sends one-time links for certificates through task records, and it takes every shortcut it can: [all of them are listed](docs/testbed/shortcuts.md). Never for production, and never for real data: its test set is synthetic and tiny.
 
 ## Quick start
 
@@ -32,7 +32,7 @@ Docs are written for Read the Docs (MkDocs Material), and readable here as Markd
 - [Shortcuts and hacks](docs/testbed/shortcuts.md): each with what the proper way would be
 - [Setup](docs/setup/installation.md)
 - [Tests](docs/tests/index.md)
-- [Outcomes](docs/outcomes/open-questions.md): empty until the tests have run on real sites
+- [Outcomes](docs/outcomes/open-questions.md): drafts from the local runs and the dress rehearsals; real-site rows follow
 - [Issues](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues): the work ahead
 - [About](docs/about/index.md)
 

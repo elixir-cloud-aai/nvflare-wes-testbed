@@ -1,7 +1,7 @@
 # T8 Real sites
 
 !!! warning "Not run on partner nodes yet"
-    Ran once to `COMPLETE` on 2026-11-12, as a dress rehearsal (accuracies not checked), with the hub on Rahti and both sites on one TESK in the same cluster: see [Results](../outcomes/results.md). Real nodes elsewhere are planned for the event. See [Real sites](../setup/real-sites.md) for what it takes.
+    Ran to `COMPLETE` on 2026-11-12 and 2026-11-16, as dress rehearsals (accuracies not checked), with the hub on Rahti and both sites on one TESK in the same cluster: see [Results](../outcomes/results.md). Real nodes elsewhere follow ([#10](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/10)). See [Real sites](../setup/real-sites.md) for what it takes.
 
 ## Description
 

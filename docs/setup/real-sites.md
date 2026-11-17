@@ -1,7 +1,7 @@
 # Real sites
 
-!!! warning "Tried once, without partner nodes"
-    The hub has run on Rahti, with the chart, and a [T8](../tests/t8-real-sites.md) run there ended `COMPLETE` on 2026-11-12 (accuracies not checked), with both sites on one TES in the same cluster as the hub: see [What differed on Rahti](#what-differed-on-rahti). No node outside that cluster has taken part yet, and the hub hasn't run with Compose on a VM. The rest is what we expect it to take: see the [issues](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues).
+!!! warning "Tried twice, without partner nodes"
+    The hub has run on Rahti, with the chart, and [T8](../tests/t8-real-sites.md) runs there ended `COMPLETE` on 2026-11-12 and 2026-11-16 (accuracies not checked), with both sites on one TES in the same cluster as the hub: see [What differed on Rahti](#what-differed-on-rahti). No node outside that cluster has taken part yet, and the hub hasn't run with Compose on a VM. The rest is what we expect it to take: see the [issues](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues).
 
 ## What the hub needs
 
@@ -283,7 +283,7 @@ The first install on Rahti, on 2026-11-12, with sites on a TESK in the same clus
 | What's public | The Routes expose `/kits` and `/sites` on the kits name, and nothing else of the WES. The WES API answered neither on the kits name nor on the hub's name, and the admin port was closed | Nothing: reach the WES with `oc port-forward` |
 | Tasks in the same cluster | A TES task on Rahti reached the FL port at the public address: the probe said `open`, and the sites joined. Traffic from inside goes out and back in (hairpin) | Nothing. Nodes elsewhere still need the [probe](#probing-a-node) |
 | Probe listener | A listener started in the hub's pod for the probe stayed behind and held the FL port. The FL server started without it, no site joined, and the first T8 ended in `SYSTEM_ERROR` after the start timeout | Runs fail at once now, with "The FL port … is in use" ([#41](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/pull/41)). The hub answers probes itself between runs now ([#46](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/46)), so it takes no listener. With `probeResponder=false`, start one only with `oc exec -it`, stop it with Ctrl-C, and restart the pod if one stayed behind |
-| T8 | After a restart of the pod, the run over both sites, on the same TESK, ended `COMPLETE`, with the NVFlare job `FINISHED:COMPLETED`. The accuracies weren't checked | See [Results](../outcomes/results.md) |
+| T8 | After a restart of the pod, the run over both sites, on the same TESK, ended `COMPLETE`, with the NVFlare job `FINISHED:COMPLETED`. Again on 2026-11-16, after a fresh restart of the pod, with the same outcome. The accuracies weren't checked | See [Results](../outcomes/results.md) |
 
 The NetworkPolicies that Rahti puts in every project didn't keep the FL port or the Routes out. T8 ran within the 2 GiB memory limit.
 
