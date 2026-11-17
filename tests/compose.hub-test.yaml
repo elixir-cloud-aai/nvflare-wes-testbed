@@ -114,6 +114,13 @@ services:
     command: ["python3", "/app/tests/fl_port_check.py"]
     network_mode: none
 
+  # The probe responder around runs (#46): no network needed, runs end early
+  probe-responder-check:
+    image: nvflare-testbed:local
+    profiles: [test]
+    command: ["python3", "/app/tests/probe_responder_check.py"]
+    network_mode: none
+
   # The WES's own OIDC gate (H5): no network needed, the JWKS client is faked
   auth-check:
     image: nvflare-testbed:local

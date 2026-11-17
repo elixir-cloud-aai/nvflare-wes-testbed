@@ -45,6 +45,8 @@ services:
     environment:
       FL_SCHEME: ${FL_SCHEME:-grpc}
       FL_PORT: ${FL_PORT:-8002}
+      # Answers node probes on the FL port between runs: `0` to switch it off
+      FL_PROBE_RESPONDER: ${FL_PROBE_RESPONDER:-1}
       # The image of the tasks. Funnel here only looks for it locally
       FL_IMAGE: ${FL_IMAGE:-nvflare-testbed:local}
       WES_SITES: >-
@@ -125,7 +127,8 @@ services:
     networks: [site-2]
 
   # The node probe, against the Funnel of site 1 (docs/setup/real-sites.md).
-  # Gets no data but the public test set, and needs no hub to be running a job
+  # Gets no data but the public test set, and needs no hub to be running a job:
+  # the hub's probe responder answers on the FL port between runs
   probe-node:
     image: nvflare-testbed:local
     profiles: [test]
@@ -134,7 +137,7 @@ services:
       - /app/tests/probe_submit.py
       - --tes=http://funnel-site-1:8000
       - --hub=fl-hub
-      - --fl-port=8080
+      - --fl-port=8002
       - --ports=443
       - --image=nvflare-testbed:local
     depends_on:

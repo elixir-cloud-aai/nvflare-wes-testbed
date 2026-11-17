@@ -230,7 +230,7 @@ def verdict(state: str, result: dict[str, Any], fl_target: str) -> tuple[int, st
     if state != "COMPLETE" or result["input"] != "ok" or not result["env_passed"] or not result["tmp_writable"]:
         return EXIT_CANNOT, "[FAIL] the node can't take part: see above"
     if fl_port == "refused":
-        return EXIT_INCONCLUSIVE, f"[inconclusive] {fl_target} refused: is the listener running on the hub?"
+        return EXIT_INCONCLUSIVE, f"[inconclusive] {fl_target} refused: is the hub up, and its probe responder on?"
     if fl_port != "open":
         return EXIT_CANNOT, f"[FAIL] the node can't take part: {fl_target} is {fl_port}"
     return 0, f"[ok] the node can take part, on {fl_target}"

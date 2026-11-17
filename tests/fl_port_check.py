@@ -52,6 +52,8 @@ def main() -> None:
     """Hold a port, and check the port checks and a run against it."""
     with tempfile.TemporaryDirectory() as directory:
         os.environ["WES_WORKDIR"] = directory
+        # The probe responder around runs is `tests/probe_responder_check.py`'s
+        os.environ["FL_PROBE_RESPONDER"] = "0"
         # A TES that refuses connections: a run that gets as far as its tasks fails otherwise
         os.environ["WES_SITES"] = '{"site-1": {"tes": "http://127.0.0.1:9", "data": "https://example.org/1.csv"}}'
         sys.path.insert(0, "/app")

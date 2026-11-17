@@ -11,8 +11,9 @@ The hub name is the name in the kits, without a port; the kits host serves
 - `/kits` and `/sites` answer with the WES' own 404s: no such kit or token, but
   the way is open.
 - The WES doesn't answer with 200 on either name.
-- The FL port is open. It only listens during a run, so a closed one is a warning,
-  unless `--during-run` says that a run is going on.
+- The FL port is open. Outside a run, only the hub's probe responder answers
+  there, which can be switched off, so a closed one is a warning, unless
+  `--during-run` says that a run is going on.
 - The FLARE admin port is closed.
 - Both names resolve, as an unknown name would pass the checks of closed ports.
 
@@ -270,7 +271,9 @@ def check_fl_port(hub: str, port: int, *, during_run: bool, timeout: float) -> R
         return Result("ok", f"FL port {hub}:{port}: open")
     if during_run:
         return Result("FAIL", f"FL port {hub}:{port}: closed ({error}), expected open during a run")
-    return Result("warn", f"FL port {hub}:{port}: closed ({error}); it only listens during a run")
+    return Result(
+        "warn", f"FL port {hub}:{port}: closed ({error}); outside a run, only the probe responder answers, if it's on"
+    )
 
 
 def check_admin_closed(hub: str, port: int, *, timeout: float) -> Result:

@@ -21,6 +21,8 @@ services:
       FL_IMAGE: ${FL_IMAGE:-elixircloud/nvflare-wes-testbed:dev}
       FL_SCHEME: ${FL_SCHEME:-grpc}
       FL_PORT: ${FL_PORT:-8002}
+      # Answers node probes on the FL port between runs: `0` to switch it off
+      FL_PROBE_RESPONDER: ${FL_PROBE_RESPONDER:-1}
       WES_SITES_FILE: /run/secrets/sites
       WES_OIDC_ISSUER: ${WES_OIDC_ISSUER:-}
       WES_OIDC_AUDIENCE: ${WES_OIDC_AUDIENCE:-fl-wes}
