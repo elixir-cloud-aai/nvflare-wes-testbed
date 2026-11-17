@@ -19,7 +19,7 @@
 
 ## Order for a live session
 
-The [goals](../testbed/index.md#goals) set the order: first the direct run, with the WES calling each TES. proTES only follows if that's done. The session plan ([#8](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/8)) goes here.
+The [goals](../testbed/index.md#goals) set the order: first the direct run, with the WES calling each TES. proTES only follows if that's done. The plan for the run with two or more sites, which replaces the session plan of the event, is in [#10](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/10).
 
 Prepare, as early as possible:
 

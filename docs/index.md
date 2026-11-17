@@ -6,10 +6,10 @@ It's work towards milestone M4.5 of ECP work package 4 ("ELIXIR Cloud is availab
 
 ## Status
 
-!!! warning "This has only run on one laptop, and once on one cluster"
-    What ran: a WES run, through a thin WES in this repository, with one NVFlare client per site as a TES task on two local [Funnel](https://github.com/calypr/funnel) instances, also through [proTES](https://github.com/elixir-cloud-aai/proTES), with mutual TLS and a federated model that beats local ones ([results of the local runs](tests/index.md#local-runs)). Once, on 2026-11-12, as a dress rehearsal: the hub on Rahti, with both sites as tasks on one TESK in the same cluster, ending `COMPLETE` ([results](outcomes/results.md)). What didn't: anything at a partner's node, or on Poiesis. There's no authentication, private keys pass through task records, and the "sites" share a kernel. A passing run shows that the pieces fit, and says nothing about whether a real node lets a task reach the FL server.
+!!! warning "This has only run on laptops, and twice on one cluster"
+    What ran: a WES run, through a thin WES in this repository, with one NVFlare client per site as a TES task on two local [Funnel](https://github.com/calypr/funnel) instances, also through [proTES](https://github.com/elixir-cloud-aai/proTES), with mutual TLS and a federated model that beats local ones ([results of the local runs](tests/index.md#local-runs)). Twice, on 2026-11-12 and 2026-11-16, as dress rehearsals: the hub on Rahti, with both sites as tasks on one TESK without authentication in the same cluster, ending `COMPLETE` ([results](outcomes/results.md)). What didn't: anything at a partner's node, a TES that checks tokens, or Poiesis. The WES only takes callers with a token of one trusted OIDC issuer ([H5](testbed/shortcuts.md#h5)), but every caller gets the same role in NVFlare. Sites make their own keys, and only a one-time link for a certificate passes through task records ([H3](testbed/shortcuts.md#h3)). Locally, the "sites" share a kernel. A passing run shows that the pieces fit, and says nothing about whether a real node lets a task reach the FL server.
 
-The [Outcomes](outcomes/open-questions.md) stay empty until the tests have run on real sites, apart from the dress rehearsal in [Results](outcomes/results.md).
+The [Outcomes](outcomes/open-questions.md) are drafts, from the local runs and the dress rehearsals; rows from real sites follow from the run with two or more sites ([#10](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/10)).
 
 ## Goals
 
