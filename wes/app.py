@@ -128,7 +128,7 @@ ADMIN_PORT = 8003
 START_TIMEOUT = 180
 JOB_TIMEOUT = 600
 # Seconds for all tasks of a round of a `FEDAVG` run to end
-ROUND_TIMEOUT = float(os.environ.get("FEDAVG_ROUND_TIMEOUT", "300"))
+ROUND_TIMEOUT = fedavg.parse_timeout(os.environ.get("FEDAVG_ROUND_TIMEOUT", "300"))
 MAX_CSR_SIZE = 1 << 20  # a CSR package is a few KB; this just bounds memory
 # What gRPC logs, in the FL server's output, when it can't bind the FL port; the server starts anyway
 BIND_FAILURE = "Failed to add port"
@@ -862,26 +862,35 @@ class SiteError(RuntimeError):
     """A site's task of a `FEDAVG` run failed, or printed no usable update: the run ends as `EXECUTOR_ERROR`."""
 
 
-def wait_for_round(tasks: list[dict[str, Any]], timeout: float) -> None:
-    """Wait until all tasks of a round of a `FEDAVG` run are `COMPLETE`.
+def wait_for_round(tasks: list[dict[str, Any]], timeout: float, size: int) -> list[fedavg.Update]:
+    """Wait until all tasks of a round of a `FEDAVG` run are `COMPLETE`, reading each update as its task ends.
 
     Args:
         tasks: The tasks of the round.
         timeout: Seconds to wait.
+        size: Number of weights of the model.
+
+    Returns:
+        The updates, in the order of the tasks.
 
     Raises:
-        SiteError: A task ended otherwise; the others aren't waited for.
+        SiteError: A task ended otherwise, or printed no usable update; the
+            others aren't waited for.
         TimeoutError: Not all tasks ended in time.
     """
     deadline = time.monotonic() + timeout
+    updates: dict[int, fedavg.Update] = {}
     while True:
         # Terminal states of TES are final: only the others are asked for
         update_tasks({"tasks": [task for task in tasks if task["state"] not in TERMINAL_TES]})
         failed = [(task["site"], task["state"]) for task in tasks if task["state"] in TERMINAL_TES - {"COMPLETE"}]
         if failed:
             raise SiteError(f"Tasks failed in round {tasks[0]['round']}: {failed}")
-        if all(task["state"] == "COMPLETE" for task in tasks):
-            return
+        for number, task in enumerate(tasks):
+            if task["state"] == "COMPLETE" and number not in updates:
+                updates[number] = site_update(task, size)
+        if len(updates) == len(tasks):
+            return [updates[number] for number in range(len(tasks))]
         if time.monotonic() >= deadline:
             states = [(task["site"], task["state"]) for task in tasks]
             raise TimeoutError(f"Round {tasks[0]['round']} didn't end in time: {states}")
@@ -923,11 +932,11 @@ def execute_fedavg(run_id: str, name: str, sites: list[str], rounds: int) -> Non
         sites: Names of the sites.
         rounds: Number of rounds.
     """
-    import numpy as np  # in the image; only this workflow type needs it
-
     run = RUNS[run_id]
     final_state = "SYSTEM_ERROR"
     try:
+        import numpy as np  # in the image; only this workflow type needs it
+
         run["state"] = "INITIALIZING"
         model = list(fedavg.workload(name).initial)
         run["state"] = "RUNNING"
@@ -940,8 +949,7 @@ def execute_fedavg(run_id: str, name: str, sites: list[str], rounds: int) -> Non
                 reply.raise_for_status()
                 tasks.append({"site": site, "round": round_, "id": reply.json()["id"], "base": base, "state": "QUEUED"})
                 run["tasks"].append(tasks[-1])
-            wait_for_round(tasks, ROUND_TIMEOUT)
-            model = fedavg.aggregate([site_update(task, len(model)) for task in tasks])
+            model = fedavg.aggregate(wait_for_round(tasks, ROUND_TIMEOUT, len(model)))
             run["outputs"]["rounds_completed"] = round_
         run_dir = BASE / run_id
         run_dir.mkdir(parents=True)

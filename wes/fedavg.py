@@ -29,6 +29,8 @@ MAX_ROUNDS = 20
 MARKER = "FEDAVG_UPDATE "
 # An update line is a few hundred bytes; this bounds what a site can make the WES parse
 MAX_LINE = 4096
+# Only the end of a task's output is read: the update is the last thing a round prints
+MAX_OUTPUT = 64 * 1024
 MAX_ROWS = 10**9
 # Far beyond any weight of the workloads here; keeps every weighted sum of updates finite
 MAX_WEIGHT = 1e6
@@ -73,6 +75,28 @@ def parse_rounds(params: Mapping[str, Any]) -> int:
     if isinstance(rounds, bool) or not isinstance(rounds, int) or not 1 <= rounds <= MAX_ROUNDS:
         raise ValueError(f"rounds must be a whole number from 1 to {MAX_ROUNDS}")
     return rounds
+
+
+def parse_timeout(value: str) -> float:
+    """Read the setting `FEDAVG_ROUND_TIMEOUT`.
+
+    Args:
+        value: Its value.
+
+    Returns:
+        Seconds for all tasks of a round to end.
+
+    Raises:
+        ValueError: It isn't a finite number of seconds, 0 or more: a round
+            would never time out, and hold the WES's one run forever.
+    """
+    try:
+        seconds = float(value)
+    except ValueError:
+        seconds = math.nan
+    if not math.isfinite(seconds) or seconds < 0:
+        raise ValueError("FEDAVG_ROUND_TIMEOUT must be a finite number of seconds, 0 or more")
+    return seconds
 
 
 def workload(name: str) -> Workload:
@@ -180,12 +204,13 @@ def parse_update(output: str, size: int) -> Update:
         size: Number of weights of the model.
 
     Returns:
-        The update on the last line that starts with `MARKER`.
+        The update on the last line that starts with `MARKER`, within the last
+        `MAX_OUTPUT` characters.
 
     Raises:
         ValueError: There's no such line, or it isn't an update for this model.
     """
-    lines = [line for line in output.splitlines() if line.startswith(MARKER)]
+    lines = [line for line in output[-MAX_OUTPUT:].splitlines() if line.startswith(MARKER)]
     if not lines:
         raise ValueError("The task printed no update")
     line = lines[-1][len(MARKER) :]
@@ -193,7 +218,7 @@ def parse_update(output: str, size: int) -> Update:
         raise ValueError("The update is too long")
     try:
         update = json.loads(line, parse_constant=_refuse_constant)
-    except ValueError:
+    except (ValueError, RecursionError):  # RecursionError: nested too deeply, for some parsers
         raise ValueError("The update isn't valid JSON, or has a number that isn't finite") from None
     if not isinstance(update, dict):
         raise ValueError("The update isn't an object")  # noqa: TRY004 - bad output of a site, as all refusals here

@@ -12,7 +12,7 @@
 4. The global model can be downloaded, and beats models trained at either site alone on the holdout set, as in T1: `federated 0.975, site-1 alone 0.825, site-2 alone 0.875`.
 5. The records of the tasks name no hub, link or token, a task fetches nothing but its data, and its output holds its update.
 
-`tests/fedavg_check.py` checks the rest against a fake TES, with no network: rounds chain (each gets the average of the last, weighted by the rows of each site), a failed task or a bad update ends the run as `EXECUTOR_ERROR` at once, without echoing what the task printed, and a round that doesn't end in time fails the run, and cancels its tasks. It also checks that malformed requests get `400` without starting a run, and that a site's round trains exactly as the NVFlare client of T2 does. `tests/fedavg_test.py` unit-tests `wes/fedavg.py`, the parsing of updates included, with no image.
+`tests/fedavg_check.py` checks the rest against a fake TES, with no network: rounds chain (each gets the average of the last, weighted by the rows of each site), a failed task or a bad update ends the run as `EXECUTOR_ERROR` at once, also while other tasks of the round still run, without echoing what the task printed, and a round that doesn't end in time fails the run, and cancels its tasks. It also checks that malformed requests get `400` without starting a run, and that a site's round trains exactly as the NVFlare client of T2 does. `tests/fedavg_test.py` unit-tests `wes/fedavg.py`, the parsing of updates included, with no image.
 
 ## Steps
 
@@ -24,7 +24,7 @@ docker compose --profile test run --rm -T fedavg-e2e
 docker compose --profile test down -v
 ```
 
-`fedavg-check` ends with `27/27 checks passed`, `fedavg-e2e` with `18/18 checks passed`. A run takes about 12 seconds, as each round costs a task start at each site.
+`fedavg-check` ends with `28/28 checks passed`, `fedavg-e2e` with `18/18 checks passed`. A run takes about 12 seconds, as each round costs a task start at each site.
 
 To submit a run by hand, as in [T8](t8-real-sites.md), with `workflow_type=FEDAVG`, `workflow_type_version=1.0`, `workflow_url=logreg`, and optionally `workflow_params={"sites": ["site-1", "site-2"], "rounds": 5}` (1 to 20 rounds).
 

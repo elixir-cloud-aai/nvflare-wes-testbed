@@ -226,6 +226,14 @@ def main() -> None:
             return trains(task, _number)
 
         _, huge, _ = run(wes, overflows)
+
+        # A bad update fails the run at once, even while the other task of the round still runs
+        def lies_early(task: dict[str, Any], _number: int) -> tuple[str, str]:
+            if task["tags"]["site"] == "site-1":
+                return "COMPLETE", "no update here"
+            return "RUNNING", ""
+
+        _, early, early_tes = run(wes, lies_early)
         _, stuck, stuck_tes = run(wes, lambda _task, _number: ("RUNNING", ""), timeout=0)
 
         refusals = {
@@ -278,6 +286,8 @@ def main() -> None:
         "a round that doesn't end in time fails the run": stuck["state"] == "SYSTEM_ERROR"
         and "in time" in stuck.get("error", ""),
         "its tasks are canceled": sorted(stuck_tes.canceled) == [0, 1],
+        "a bad update fails the run while another task still runs": early["state"] == "EXECUTOR_ERROR"
+        and early_tes.canceled == [1],
         "an integer too large for a float ends the run as EXECUTOR_ERROR": huge["state"] == "EXECUTOR_ERROR"
         and "site-2" in huge.get("error", ""),
         **{f"{name} is refused": status == 400 for name, status in refusals.items()},

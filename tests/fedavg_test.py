@@ -46,6 +46,21 @@ class RoundsTest(unittest.TestCase):
                 fedavg.parse_rounds({"rounds": value})
 
 
+class TimeoutTest(unittest.TestCase):
+    """The setting `FEDAVG_ROUND_TIMEOUT`."""
+
+    def test_given(self) -> None:
+        """Seconds, whole or not."""
+        self.assertEqual(fedavg.parse_timeout("300"), 300.0)
+        self.assertEqual(fedavg.parse_timeout("0.5"), 0.5)
+
+    def test_refused(self) -> None:
+        """A timeout that never ends a round, or isn't a number, stops the service from starting."""
+        for value in ("nan", "inf", "-inf", "-1", "", "five"):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "FEDAVG_ROUND_TIMEOUT"):
+                fedavg.parse_timeout(value)
+
+
 class WorkloadTest(unittest.TestCase):
     """The workloads in the image."""
 
@@ -126,6 +141,8 @@ class ParseUpdateTest(unittest.TestCase):
             "fractional rows": stdout({"weights": [1, 2, 3], "rows": 1.5}),
             "too many rows": stdout({"weights": [1, 2, 3], "rows": fedavg.MAX_ROWS + 1}),
             "too long": fedavg.MARKER + " " * fedavg.MAX_LINE + "\n",
+            "deeply nested": fedavg.MARKER + "[" * (fedavg.MAX_LINE // 2) + "]" * (fedavg.MAX_LINE // 2) + "\n",
+            "only before the tail": stdout({"weights": [1, 2, 3], "rows": 40}) + "x" * fedavg.MAX_OUTPUT,
         }
         for name, output in cases.items():
             with self.subTest(name), self.assertRaises(ValueError):
