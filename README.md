@@ -17,7 +17,9 @@ docker compose --profile test run --rm e2e
 docker compose --profile test down -v
 ```
 
-It ends with `8/8 checks passed`: one WES run, with one TES task per site, and a federated model that beats models trained at either site alone. The Funnel containers get the Docker socket, so read [`compose.yaml`](compose.yaml) first.
+It ends with `11/11 checks passed`: one WES run, with one TES task per site, and a federated model that beats models trained at either site alone. The Funnel containers get the Docker socket, so read [`compose.yaml`](compose.yaml) first.
+
+The same without NVFlare, as rounds of plain TES tasks that need no network ([T10](docs/tests/t10-fedavg.md)): `docker compose --profile test run --rm fedavg-e2e`, before `down`. It ends with `18/18 checks passed`.
 
 ## Links
 

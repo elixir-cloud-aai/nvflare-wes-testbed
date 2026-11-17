@@ -38,16 +38,28 @@ flowchart LR
 
 The run is `COMPLETE` if the job finished, and there's a model, and all tasks are `COMPLETE`. It's `SYSTEM_ERROR` if anything failed, and all remaining tasks are canceled.
 
+## A plain FedAvg run
+
+[C4](options.md#c4-fedavg-as-a-plain-workflow), without NVFlare, through the same WES and the same sites ([T10](../tests/t10-fedavg.md)):
+
+1. **Request:** as above, with `workflow_type=FEDAVG`, `workflow_type_version=1.0`, `workflow_url=logreg` (the one workload in the image), and optional `workflow_params` naming the sites and the number of rounds (`rounds`, 1 to 20, by default 5, as the NVFlare job). For both workflow types, `workflow_params` that isn't a JSON object, `sites` that isn't a list of known sites, or an unknown workflow type or version get `400`.
+2. **Round:** per site, the WES submits a TES task with two inputs: the data, by a URL that only resolves at the site, as above, and the current model, inline (`content`). Through proTES, the tag `gateway.backends` pins it to its site, as above. The task trains the same logistic regression as the NVFlare job, prints its update (`FEDAVG_UPDATE {"weights": [...], "rows": n}`), and ends. It needs no network but to read its data.
+3. **Average:** as each task of the round ends `COMPLETE`, the WES reads its update from the task's record at the TES of its site (view `FULL`, the last 64 KiB of the output), checks it (the right number of weights, each within ±10⁶, and a whole number of rows), and once all are in, averages them, weighted by rows. The next round starts from that model.
+4. **End:** after the last round, the WES keeps the model, for download as with `NVFLARE`.
+
+The run is `COMPLETE` if all rounds ended with a model. It's `EXECUTOR_ERROR` as soon as a task fails, or prints no usable update, and `SYSTEM_ERROR` if anything else failed, such as a round that didn't end within `FEDAVG_ROUND_TIMEOUT` seconds (by default 300); remaining tasks are canceled. The FL port, and the probe responder on it, aren't touched. What the records of the tasks give away is in [H24](shortcuts.md#h24).
+
 ## Files
 
 ```text
 wes/app.py                 thin WES
+wes/fedavg.py              plain FedAvg workflow type (C4)
 images/                    images, and the wrappers for the participants
-testset/                   data, job, comparison with local models
+testset/                   data, job, plain FedAvg round, comparison with local models
 compose.yaml               the testbed: hub, two sites, tests
 compose.protes.yaml        override: through proTES (T4)
 compose.server-task.yaml   override: server as a TES task (T5)
 compose.hub.yaml           the hub alone, for a machine with a public address
 compose/                   configs of Funnel, proTES and the hub's reverse proxy
-tests/                     e2e (T2, T4, T5, T7), probe (T3), site loss (T6), image contents, node probe
+tests/                     e2e (T2, T4, T5, T7, T10), probe (T3), site loss (T6), image contents, node probe
 ```

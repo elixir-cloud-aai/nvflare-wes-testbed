@@ -84,7 +84,7 @@ All of them, in one place, each with the proper way. Their numbers are referred 
 
 ### H8
 
-**`NVFLARE` is an invented workflow type, and `workflow_url` is the name of a job in the image.** No uploads, so users can't bring code. **Proper way:** a registered type, jobs from TRS, signed and versioned, which sites can review.
+**`NVFLARE` and `FEDAVG` are invented workflow types, and `workflow_url` is the name of a job or workload in the image.** No uploads, so users can't bring code. **Proper way:** a registered type, jobs from TRS, signed and versioned, which sites can review.
 
 ### H17
 
@@ -103,6 +103,10 @@ All of them, in one place, each with the proper way. Their numbers are referred 
 ### H16
 
 **No privacy filters, no job approval.** Model weights go to the server unprotected, apart from TLS, and sites run whatever job comes. **Proper way:** NVFlare's filters, such as differential privacy or homomorphic encryption, and its [site policies](../about/references.md#nvflare) for approving jobs.
+
+### H24
+
+**A plain FedAvg run (`FEDAVG`, [C4](options.md#c4-fedavg-as-a-plain-workflow)) passes the model and the updates through task records.** Each round's task gets the current model as the `content` of an input, and prints its update, the weights after training and the site's number of rows, to its output, which the WES reads from the TES of the site. No token, key or link is in a record, and no participant listens anywhere. But the records stay at each site's TES after the run, and TES has no way to delete a task: anyone who can read them (the site's operators, the WES's identity at that TES, and with no authentication, as on the local Funnels, anyone who can reach it) can read every round's model and that site's update. The WES sees each site's update, unmasked, and knows its number of rows. For a model as small as this logistic regression, an update tells a lot about the data it came from. A site, in turn, could send any update it likes: the WES only checks that it's well formed and within bounds, not that it's honest. That includes its number of rows, which sets its weight in the average: one site that claims many rows all but sets the model. **Proper way:** NVFlare's filters ([H16](#h16)), or secure aggregation, so that the aggregator only sees the sum; updates through storage that the site controls, with outputs the site can delete; and robust aggregation against bad updates, if sites can't trust each other.
 
 ## The testbed itself
 

@@ -18,6 +18,7 @@ COPY wes /app/wes
 COPY testset/job /app/testset/job
 COPY testset/job_src /app/testset/job_src
 COPY testset/evaluate.py /app/testset/evaluate.py
+COPY testset/fedavg /app/testset/fedavg
 COPY tests /app/tests
 # Readable by any user, as nodes and OpenShift may run tasks as an arbitrary one
 RUN chmod 0755 /usr/local/bin/fl-client /usr/local/bin/fl-server && chmod -R a+rX /app

@@ -6,6 +6,7 @@
 !testset/job
 !testset/job_src/*.py
 !testset/evaluate.py
+!testset/fedavg/*.py
 !tests/*.py
 !tests/*.sh
 

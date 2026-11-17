@@ -23,6 +23,8 @@ services:
       FL_PORT: ${FL_PORT:-8002}
       # Answers node probes on the FL port between runs: `0` to switch it off
       FL_PROBE_RESPONDER: ${FL_PROBE_RESPONDER:-1}
+      # Seconds for a round of a plain FedAvg run (C4)
+      FEDAVG_ROUND_TIMEOUT: ${FEDAVG_ROUND_TIMEOUT:-300}
       WES_SITES_FILE: /run/secrets/sites
       WES_OIDC_ISSUER: ${WES_OIDC_ISSUER:-}
       WES_OIDC_AUDIENCE: ${WES_OIDC_AUDIENCE:-fl-wes}

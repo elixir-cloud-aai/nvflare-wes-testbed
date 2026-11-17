@@ -13,7 +13,7 @@ Effort is in hours for one person, for a first demonstration, as local work on t
 | [C1 Simulator in one task](#c1-the-simulator-in-one-task) | Not federated | Simulator only | Nothing | 1 | Simulator ran; not as a TES task |
 | [C2 Fixed NVFlare network, WES only submits](#c2-a-fixed-nvflare-network) | Yes | Yes | Long-running client per site | 3 to 4 | Read only |
 | [C3 A TES job launcher for NVFlare](#c3-a-tes-job-launcher-in-nvflare) | Yes | Yes | Long-running client per site, inbound from tasks | 12 to 20 | Read only |
-| [C4 FedAvg as a plain workflow, without NVFlare](#c4-fedavg-as-a-plain-workflow) | Yes | **No** | Nothing new | 3 to 5 | Read only |
+| [C4 FedAvg as a plain workflow, without NVFlare](#c4-fedavg-as-a-plain-workflow) | Yes | **No** | Nothing new | About 4 | Ran locally, in the testbed's WES |
 
 ## Recommendation
 
@@ -22,7 +22,7 @@ Effort is in hours for one person, for a first demonstration, as local work on t
 - It's the only option that ran, across TES instances and through proTES, that needs nothing from a site beyond a task that can dial out to one port. FLARE clients only dial out ([T3](../tests/t3-isolation.md)), and that port can be 443 ([T7](../tests/t7-port-443.md)).
 - Everything it hacks is ours, and listed. It needs nothing from anyone else's roadmap, so it can be tried at the event.
 - Its logic is a port away from Conquest, should [option A](#a-nvflare-inside-conquest) be taken up: the steps of a run are the same, with a Go adapter and a runner image instead of a thin service.
-- Its risk is at the sites, not in the software: whether a task at a real node may reach the hub. So the first thing to do is to find that out, with a probe task ([#2](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/2)). If nodes don't allow it, C4 still gets a federated model through the same services, but without NVFlare.
+- Its risk is at the sites, not in the software: whether a task at a real node may reach the hub. So the first thing to do is to find that out, with a probe task ([#2](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/2)). If nodes don't allow it, C4 still gets a federated model through the same services, but without NVFlare: it ran locally ([T10](../tests/t10-fedavg.md)).
 
 **What this means for the M4.5 report:** it can point to a run through standard APIs across TES instances, with NVFlare, and to a clear list of what's missing. It can't claim that "ELIXIR Cloud is available" for this: the WES trusts one issuer and gives every caller the same role, there's one run at a time, and one-time links for certificates travel in task records. A run on partner nodes ([#10](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/10)) would make it a demonstration on real nodes; without one, it's a proof of concept on one cluster and an architecture analysis. A draft text for the report is in [Results](../outcomes/results.md#text-for-the-m45-report).
 
@@ -148,12 +148,14 @@ Applies to both variants:
 
 ### C4: FedAvg as a plain workflow
 
-**How it works:** no FL framework. A Nextflow or Snakemake workflow, in which each round is one task per site that reads the current model and writes an update, then one aggregating task. Models travel through object storage, as with any workflow. Since tasks just end, there's no networking between participants at all, and TES and proTES fit naturally. It needs pinning tasks to sites from the engine, and Conquest's external TES to run it there.
+**How it works:** no FL framework, and no workflow engine: a second workflow type of the testbed's own WES, `FEDAVG` (`wes/fedavg.py`). Each round is one TES task per site, from the same sites config as B1, which reads the current model and the site's data, trains, and prints an update; the WES then averages the updates, weighted by the rows of each site. Since tasks just end, there's no networking between participants at all, and TES and proTES fit naturally: tasks go to the TES of their site, or through proTES pinned there, as in B1. See [A plain FedAvg run](design.md#a-plain-fedavg-run) and [T10](../tests/t10-fedavg.md).
 
-**What's hacked:** NVFlare isn't there, so none of its privacy filters, or anything else from it. Updates sit in storage that all sites must reach. Rounds are slow (each costs a task start at each site).
+**How models travel:** with no port at the hub, and no secret in task records. The current model goes into a task inline, as the `content` of an input, and the update comes back in the task's output (`stdout` in view `FULL`), which the WES reads from the TES of the site. The alternatives were the hub's HTTPS route with a per-run token, which puts a token into every task record, as the CSR link of [H3](shortcuts.md#h3) does, and TES outputs to object storage, which needs storage that all sites can write to and credentials for it. Neither gives anything for a model of three numbers. The cost in privacy is that the model and each site's update stay in the records of the sites' TES, readable by whoever can read those, and that the WES sees each site's update: [H24](shortcuts.md#h24).
 
-**What it shows the report's reader:** federated learning with the services as they are, and nothing else. It's the batch-native answer, and the honest fallback if nodes don't let tasks out.
+**What's hacked:** NVFlare isn't there, so none of its privacy filters, or anything else from it ([H24](shortcuts.md#h24)). Updates go through task records, which only works for small models: TES makes no promise about how much of a task's output it keeps. Rounds are slow (each costs a task start at each site), and the WES holds the run in memory between rounds. The workflow type is invented, as `NVFLARE` is ([H8](shortcuts.md#h8)).
 
-**Effort:** 3 to 5 hours, and it could reuse this test set. Pinning from an engine wasn't tried: it may need a plugin in the engine, or a wrapper.
+**What it shows the report's reader:** federated learning with the services as they are, and nothing else: a model as good as NVFlare's on the same test set, with tasks that need no network but to read their data. It's the batch-native answer, and the honest fallback if nodes don't let tasks out.
 
-**Risks:** not what was asked for: it's not NVFlare, and it's easy to get privacy wrong by hand.
+**Effort:** about 4 hours, with this test set; it ran locally ([T10](../tests/t10-fedavg.md)). A Nextflow or Snakemake workflow would do the same with an engine, but needs pinning tasks to sites from the engine, which wasn't tried (it may need a plugin in the engine, or a wrapper).
+
+**Risks:** not what was asked for: it's not NVFlare, and it's easy to get privacy wrong by hand. On a real node, it depends on its TES keeping a task's output; if one doesn't, updates have to go through TES outputs to object storage instead.

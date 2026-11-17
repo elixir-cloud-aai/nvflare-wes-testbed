@@ -16,6 +16,7 @@
 | [T7 Only port 443](t7-port-443.md) | Works with a port that's more often open | Local | No |
 | [T8 Real sites](t8-real-sites.md) | The direct run, on real nodes. proTES is [tracked separately](../testbed/index.md#goals) | Event | No |
 | [T9 The WES's OIDC gate](t9-auth.md) | The WES refuses a caller with no token; every run needs one, mandatory ([H5](../testbed/shortcuts.md#h5)) | Local | Yes |
+| [T10 FedAvg as a plain workflow](t10-fedavg.md) | [C4](../testbed/options.md#c4-fedavg-as-a-plain-workflow): a federated model through WES and TES without NVFlare, and with no network between participants | Local | Yes |
 
 ## Order for a live session
 
@@ -27,7 +28,7 @@ Prepare, as early as possible:
 2. Run the probe task on each node ([#2](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/2), [#3](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/3)), so that the session isn't spent finding out what's blocked.
 3. Have one operator per node at hand.
 
-Then: T8, with T7's port if T3's question came out badly. If that's a dead end at all nodes, stop and record it: that's a result, too. Then [C4](../testbed/options.md#c4-fedavg-as-a-plain-workflow) is the way forward.
+Then: T8, with T7's port if T3's question came out badly. If that's a dead end at all nodes, stop and record it: that's a result, too. Then [C4](../testbed/options.md#c4-fedavg-as-a-plain-workflow) is the way forward: [T10](t10-fedavg.md) on the same nodes, which only needs tasks that can read their data.
 
 ## Local runs
 
@@ -71,3 +72,17 @@ Same versions as above, ARM64 laptop, tests ran after adding the WES's own OIDC 
 | T9 (`docker compose --profile test run --rm auth-e2e-check`) | All checks passed |
 | Chart for Rahti (`tests/chart.sh`) | All checks passed |
 | T8 | Not run, no real site yet |
+
+### 2026-11-17
+
+Same versions as above, x86-64 laptop with Docker 28, after adding the workflow type `FEDAVG` ([C4](../testbed/options.md#c4-fedavg-as-a-plain-workflow), [#14](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/14)).
+
+| Test | Result |
+|---|---|
+| T1 | Ran. Holdout accuracy: federated 0.975, site-1 alone 0.825, site-2 alone 0.875 |
+| T2 | 11/11 checks |
+| T9 | All checks passed |
+| T10 (`tests/fedavg_test.py`) | 22 unit tests passed, without the image |
+| T10 (`tests/fedavg_check.py`, fake TES) | 28/28 checks |
+| T10 (`fedavg-e2e`, two Funnels) | 18/18 checks; 12 seconds from request to `COMPLETE` for 5 rounds, 10 tasks; the same accuracies as T1 |
+| Hub of `compose.hub.yaml` (`tests/hub.sh`) | All checks passed |
