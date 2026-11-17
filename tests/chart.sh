@@ -72,6 +72,7 @@ refuse "an address as hub name" "${args[@]}" --set hubName=192.0.2.10
 refuse "an FL port below 30000" "${args[@]}" --set flPort=8002
 refuse "an FL port above 35000" "${args[@]}" --set flPort=35001
 refuse "an unknown FL scheme" "${args[@]}" --set flScheme=https
+refuse "a probe responder that isn't on or off" "${args[@]}" --set-string probeResponder=yes
 refuse "a kits host with a scheme" "${args[@]}" --set kitsHost=https://${kits}
 refuse "a kits host outside rahtiapp.fi, without a certificate" "${args[@]}" --set kitsHost=kits.example.invalid
 refuse "the hub's name as kits host" "${args[@]}" --set "kitsHost=${hub}"
@@ -104,7 +105,7 @@ route_kits="select(.kind == \"Route\" and .metadata.name == \"${fullname}-kits\"
 route_csr="select(.kind == \"Route\" and .metadata.name == \"${fullname}-csr\")"
 
 # Values other than the defaults, to see them arrive
-helm template hub "${chart}" "${args[@]}" --set flPort=30123 --set flScheme=http \
+helm template hub "${chart}" "${args[@]}" --set flPort=30123 --set flScheme=http --set probeResponder=false \
     --set loadBalancerIP=192.0.2.10 --set sitesSecret=other-sites >"${out}"
 
 expect "kinds" '[.kind] | sort | join(",")' "Deployment,Route,Route,Service,Service"
@@ -124,6 +125,7 @@ expect "kits by the Route's name, over https" "${env} | select(.name == \"WES_IN
     "https://${kits}"
 expect "the FL port" "${env} | select(.name == \"FL_PORT\") | .value" "30123"
 expect "the FL scheme" "${env} | select(.name == \"FL_SCHEME\") | .value" "http"
+expect "the probe responder switched off" "${env} | select(.name == \"FL_PROBE_RESPONDER\") | .value" "0"
 expect "sites from the Secret's file" "${env} | select(.name == \"WES_SITES_FILE\") | .value" \
     "/run/secrets/sites/sites.json"
 expect "no sites in the environment" "[${env} | select(.name == \"WES_SITES\")] | length" "0"
@@ -170,6 +172,7 @@ helm template hub "${chart}" "${args[@]}" >"${out}"
 expect "no address asked for by default" "[${lb} | .metadata.annotations // {} | keys[]] | length" "0"
 expect "FL port 30002 by default" "${lb} | .spec.ports[0].port" "30002"
 expect "grpc by default" "${env} | select(.name == \"FL_SCHEME\") | .value" "grpc"
+expect "the probe responder on by default" "${env} | select(.name == \"FL_PROBE_RESPONDER\") | .value" "1"
 expect "the Secret's default name" \
     "${dep} | .spec.template.spec.volumes[] | select(.name == \"sites\") | .secret.secretName" "nvflare-wes-sites"
 expect "not as root by default" "${dep} | .spec.template.spec.securityContext.runAsNonRoot" "true"

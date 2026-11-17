@@ -45,6 +45,9 @@ spec:
               value: {{ .Values.flScheme | quote }}
             - name: FL_PORT
               value: {{ .Values.flPort | quote }}
+            # Answers node probes on the FL port between runs
+            - name: FL_PROBE_RESPONDER
+              value: {{ ternary "1" "0" .Values.probeResponder | quote }}
             - name: WES_SITES_FILE
               value: /run/secrets/sites/sites.json
             - name: WES_OIDC_ISSUER
