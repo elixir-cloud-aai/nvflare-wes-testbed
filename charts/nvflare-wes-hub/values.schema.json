@@ -36,6 +36,10 @@
       "maximum": 35000
     },
     "flScheme": {"type": "string", "enum": ["grpc", "http"]},
+    "probeResponder": {
+      "description": "Answer node probes on the FL port while no run is active",
+      "type": "boolean"
+    },
     "loadBalancerIP": {
       "description": "Internal IPv4 address of the project's pool (not the public one), or empty",
       "type": "string",

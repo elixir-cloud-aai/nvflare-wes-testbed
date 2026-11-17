@@ -35,8 +35,16 @@ echo "[ok] no Docker socket, admin port or TES in the hub's Compose file"
 "${hub[@]}" --profile test run --rm -T site-config-check
 "${hub[@]}" --profile test run --rm -T csr-token-check
 "${hub[@]}" --profile test run --rm -T fl-port-check
+"${hub[@]}" --profile test run --rm -T probe-responder-check
 "${hub[@]}" --profile test run --rm -T auth-check
 "${hub[@]}" --profile test run --rm -T e2e
+# Between runs, the probe responder answers on the FL port, as the arbitrary user. It may
+# take a retry to bind, while the run's FL server goes away
+for try in $(seq 1 10); do
+    "${hub[@]}" exec -T hub python3 /app/tests/probe.py open=127.0.0.1:8002 && break
+    [[ "${try}" == 10 ]] && exit 1
+    sleep 1
+done
 "${hub[@]}" up -d --wait proxy
 "${hub[@]}" --profile test run --rm -T proxy-check
 "${hub[@]}" --profile test run --rm -T outside-check
@@ -55,4 +63,8 @@ if [[ "$(grep -c '^\[FAIL\]' <<<"${outside}")" != 1 ]] || ! grep -q '^\[FAIL\] G
     exit 1
 fi
 echo "[ok] the checks from outside fail on a WES that answers"
+
+# Switched off, nothing answers on the FL port between runs
+FL_PROBE_RESPONDER=0 "${hub[@]}" up -d --wait --force-recreate --no-deps hub
+"${hub[@]}" exec -T hub python3 /app/tests/probe.py closed=127.0.0.1:8002
 echo "[ok] the hub ran a job, and its proxy lets through what it should"

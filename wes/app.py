@@ -7,12 +7,15 @@ workflow type, `NVFLARE`. For each run it:
    provisions the server and an admin itself, through `nvflare cert request`,
    `cert approve` and `package` run locally, one after another;
 2. starts the FL server, by default as a child process of this service; with
-   `FL_SERVER_MODE=tes`, as a TES task of its own (see `compose.server-task.yaml`);
+   `FL_SERVER_MODE=tes`, as a TES task of its own (see `compose.server-task.yaml`).
+   A child process takes the FL port over from the probe responder, which answers
+   node probes on it while no run is active (`wes/probe_responder.py`);
 3. submits one TES task per site, each running an FL client that makes its own
    key, sends this service a signing request over `/sites/{token}/csr`, and
    dials out to the server with the certificate that comes back;
 4. submits the FLARE job through the FLARE admin API, and waits for it;
-5. downloads the global model, shuts the federation down, deletes the CA.
+5. downloads the global model, shuts the federation down, deletes the CA, and
+   hands the FL port back to the probe responder.
 
 Every shortcut in here is listed in `docs/testbed/shortcuts.md`. Authentication
 is mandatory, OIDC bearer tokens against one trusted issuer (H5); a caller
@@ -20,6 +23,7 @@ only sees and acts on its own runs, and may also be checked against a static
 allow-list (H22). One run at a time, state in memory.
 """
 
+import contextlib
 import errno
 import json
 import logging
@@ -34,7 +38,7 @@ import tarfile
 import threading
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from typing import Annotated, Any, NamedTuple
 
 import anyio
@@ -45,6 +49,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from wes import tokens
+from wes.probe_responder import ProbeResponder, responder_enabled
 
 logger = logging.getLogger("wes")
 
@@ -125,6 +130,31 @@ MAX_CSR_SIZE = 1 << 20  # a CSR package is a few KB; this just bounds memory
 BIND_FAILURE = "Failed to add port"
 # What NVFlare logs for a port it did bind
 BOUND_PORT = r"added (?:secure|insecure) port at \S*:{port}\b"
+
+
+def make_responder(setting: str | None, mode: str, port: int) -> ProbeResponder | None:
+    """Make the probe responder for the FL port, if this service runs one.
+
+    Args:
+        setting: The value of `FL_PROBE_RESPONDER`, or `None` if it isn't set (on, as when empty).
+        mode: `FL_SERVER_MODE`.
+        port: The FL port.
+
+    Returns:
+        The responder, not started yet, or `None` if it's switched off, or the FL
+        server runs in a TES task: then the FL port of this container isn't the
+        one that sites dial.
+
+    Raises:
+        ValueError: The setting is neither on nor off.
+    """
+    if not responder_enabled(setting) or mode == "tes":
+        return None
+    return ProbeResponder(port)
+
+
+# Answers node probes on the FL port between runs (`wes/probe_responder.py`)
+RESPONDER = make_responder(os.environ.get("FL_PROBE_RESPONDER"), FL_SERVER_MODE, FL_PORT)
 TERMINAL_TES = {"COMPLETE", "EXECUTOR_ERROR", "SYSTEM_ERROR", "CANCELED", "PREEMPTED"}
 # Mandatory (H5): empty means no issuer is trusted, so no caller can check out
 OIDC_ISSUER = os.environ.get("WES_OIDC_ISSUER", "")
@@ -138,7 +168,39 @@ ALLOWED_SUBS = {s.strip() for s in os.environ.get("WES_OIDC_ALLOWED_SUBS", "").s
 if not OIDC_ISSUER:
     logger.warning("No WES_OIDC_ISSUER is configured: every run and most endpoints will be refused")
 
-app = FastAPI(title="Thin WES for NVFlare (sandbox)")
+
+def start_responder() -> None:
+    """Start the probe responder, if there is one, without ever failing the caller.
+
+    Probes are a convenience: a hub that can't start the thread still serves runs.
+    """
+    if RESPONDER is None:
+        return
+    try:
+        RESPONDER.start()
+    except Exception:  # e.g. no thread left in the pod's limits: runs must go on
+        logger.exception("Couldn't start the probe responder on port %d", RESPONDER.port)
+
+
+@contextlib.asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Answer node probes on the FL port while this service runs, until a run takes it.
+
+    Args:
+        _app: The application.
+
+    Yields:
+        Nothing, while the service runs.
+    """
+    start_responder()
+    try:
+        yield
+    finally:
+        if RESPONDER is not None:
+            await anyio.to_thread.run_sync(RESPONDER.stop)
+
+
+app = FastAPI(title="Thin WES for NVFlare (sandbox)", lifespan=lifespan)
 RUNS: dict[str, dict[str, Any]] = {}
 KITS: dict[str, pathlib.Path] = {}
 # Token -> (run_id, site) of a site's one slot to send its certificate signing
@@ -686,7 +748,15 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str], submitter: str
         run["state"] = "INITIALIZING"
         run_dir.mkdir(parents=True)
         if FL_SERVER_MODE != "tes":
-            ensure_port_free(FL_PORT)
+            # The probe responder hands the port over first; a listener of anyone else still fails the run.
+            # A responder that is slow to end fails the run only if it still holds the port
+            released = RESPONDER is None or RESPONDER.stop()
+            try:
+                ensure_port_free(FL_PORT)
+            except RuntimeError as error:
+                if not released:
+                    raise RuntimeError(f"The probe responder didn't release the FL port {FL_PORT}") from error
+                raise
         project = f"run{run_id[:8]}"
         fingerprint = init_ca(run_dir, project)
         server_kit = provision_locally(run_dir, project, FL_HOST, "server")
@@ -751,6 +821,13 @@ def execute(run_id: str, job_dir: pathlib.Path, sites: list[str], submitter: str
                 server.wait(timeout=30)
             except subprocess.TimeoutExpired:
                 server.kill()
+                try:
+                    server.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    logger.warning("The FL server of run %s didn't end after a kill", run_id)
+        # Before the run ends, so that no next run can start in between. It retries while the port
+        # is still held, such as by a server that is going away, and never delays or fails the run
+        start_responder()
         for token in slots:
             KITS.pop(token, None)
             CSR_TOKENS.pop(token, None)
@@ -824,10 +901,12 @@ def authenticated(credentials: Annotated[HTTPAuthorizationCredentials | None, De
             options={"require": ["exp"]},
         )
     except jwt.InvalidTokenError as error:
-        logger.warning("Auth: rejected a bearer token: %s", error)
+        # PyJWT's messages name the failed check (expiry, audience, ...), never the token itself
+        logger.warning("Auth: rejected a bearer token: %s", error)  # nosemgrep
         raise HTTPException(401, f"Invalid token: {error}") from None
     except Exception as error:  # noqa: BLE001 - a key with an unknown kid, or the issuer out of reach
-        logger.warning("Auth: couldn't verify a bearer token: %s", type(error).__name__)
+        # Only the class of the error, never the token
+        logger.warning("Auth: couldn't verify a bearer token: %s", type(error).__name__)  # nosemgrep
         raise HTTPException(503, "Can't reach the trusted issuer right now") from None
 
 

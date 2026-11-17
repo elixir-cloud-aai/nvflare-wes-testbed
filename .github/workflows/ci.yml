@@ -94,6 +94,8 @@ jobs:
         run: python3 tests/outside_check_test.py
       - name: Unit-test the token sources of sites
         run: python3 tests/tokens_test.py
+      - name: Unit-test the probe responder
+        run: python3 tests/probe_responder_test.py
       - name: Check that the image holds no site data or secrets
         run: tests/image-contents.sh
       - name: Build images

@@ -28,6 +28,12 @@ flPort: 30002
 # `grpc`, or `http` (WebSocket): see T7 in the docs
 flScheme: grpc
 
+# Answer node probes on the FL port while no run is active, so that the probe
+# needs no listener started by hand. The WES stops it before the FL server of
+# a run starts, and starts it again after the run. `false` switches it off:
+# then start a listener for a probe, as in the docs
+probeResponder: true
+
 # The internal address (`192.168.…`) of the project's pool for the
 # `LoadBalancer`, which CSC translates to a public one: never the public
 # address. Empty: MetalLB picks one of the pool's

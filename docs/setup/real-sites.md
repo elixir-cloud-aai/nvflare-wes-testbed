@@ -36,13 +36,15 @@ Nodes pull the one image for all participants: [`elixircloud/nvflare-wes-testbed
 
 The biggest risk of the plan is whether a task at a node may reach the hub. The probe task finds that out before anyone relies on it, and it decides whether [B1](../testbed/options.md#b1-server-beside-the-wes) works at that node at all. It runs the [image](#the-image), and reports through its log whether it can reach the hub's ports, whether an `https` input arrives, whether `env` is passed, who it runs as, and whether `/tmp` is writable. It handles only the public [test set](#the-test-set), and no keys.
 
-The FL port of a [hub](#what-the-hub-needs) only listens during a run, so start a listener on the machine of the hub first, with the same ports:
+A running [hub](#what-the-hub-needs) answers probes on its FL port itself: while no run is active, its probe responder accepts connections there and closes them, and during a run the FL server listens. So probe an idle hub at any time, without agreeing on one with its operator. The WES stops the responder before the FL server of a run starts, and starts it again when the run has ended; a run never waits for it. It's on by default: `FL_PROBE_RESPONDER` in [Compose](#running-it-with-compose), `probeResponder` in the [chart](#running-it-on-rahti). It answers on the FL port only, the one port the hub publishes for nodes: other ports of `--ports` still take a listener. With the FL server in a TES task (`compose.server-task.yaml`), the hub runs no responder, so its FL port refuses outside a run: use a listener.
+
+Without a hub yet, or with the responder switched off, start a listener on the machine of the hub first, with the same ports:
 
 ```sh
 docker run --rm -p 8002:8002 elixircloud/nvflare-wes-testbed:dev python3 /app/tests/probe.py listen 8002
 ```
 
-Stop the listener before you start the hub: while it holds the FL port, the hub can't publish it, and `docker compose up` fails. A listener inside the hub's own container makes the WES refuse runs, with "The FL port … is in use" in the run's `system_logs`.
+Stop the listener before you start the hub: while it holds the FL port, the hub can't publish it, and `docker compose up` fails. A listener inside the hub's own container makes the WES refuse runs, with "The FL port … is in use" in the run's `system_logs`, and the responder waits until it's gone.
 
 Then, on any machine with Docker that can reach the TES:
 
@@ -58,7 +60,7 @@ docker run --rm -e TES_TOKEN elixircloud/nvflare-wes-testbed:dev \
 | Outcome for a port | Meaning |
 |---|---|
 | `open` | A task gets there |
-| `refused` | Inconclusive: nothing listens, or a firewall rejects the connection |
+| `refused` | Inconclusive: nothing listens (no hub, or its responder is off and no listener runs), or a firewall rejects the connection |
 | `timeout` | Likely blocked by a firewall |
 | `unreachable` | No route |
 | `no-name` | The name doesn't resolve from the task |
@@ -137,6 +139,7 @@ Caddy gets a certificate for that name, which needs ports 80 and 443 reachable. 
 | `FL_SERVER_NAME` | None, required | Public name of the hub, which goes into the kits |
 | `FL_IMAGE` | `elixircloud/nvflare-wes-testbed:dev` | Image of the hub and the tasks. Use `sha-<commit>` |
 | `FL_PORT`, `FL_SCHEME` | `8002`, `grpc` | FL port. For 443, use `http`: see [T7](../tests/t7-port-443.md) |
+| `FL_PROBE_RESPONDER` | `1` | Answer [node probes](#probing-a-node) on the FL port while no run is active. `0` switches it off: then start a listener for a probe. Other values than `1`, `0`, `true`, `false`, `yes`, `no`, `on` and `off` stop the hub from starting |
 | `WES_ALLOWED_IPS` | `127.0.0.1` | Addresses or ranges that reach the WES, separated by spaces |
 | `WES_OIDC_ISSUER` | None, required | Trusted OIDC issuer, e.g. LS Login's. `/runs*` and `/outputs` need a bearer token it issued; there's no way to start a run without one ([H5](../testbed/shortcuts.md#h5)) |
 | `WES_OIDC_AUDIENCE` | `fl-wes` | The `aud` a token must carry, matching this deployment's registration at the issuer |
@@ -169,7 +172,7 @@ The sites file comes from a Secret that you create, which isn't part of the char
 **Before you start:**
 
 1. **An address from CSC.** Ask the [CSC Service Desk](https://docs.csc.fi/support/contact/), `servicedesk@csc.fi`, for one `LoadBalancer` address for your Rahti project, with the Rahti project name, the `csc_project` number, the use case (a federated learning hub for a BioHackathon sandbox, one TCP port between 30000 and 35000 for connections from compute sites) and the number of addresses: one. It can take some days.
-2. **The probe.** Find out whether tasks at the nodes may reach a port that high: [probe them](#probing-a-node) with `--fl-port 30002 --ports 8002,443`, and a listener on any machine with those ports open:
+2. **The probe.** Find out whether tasks at the nodes may reach a port that high: [probe them](#probing-a-node) with `--fl-port 30002 --ports 8002,443`. Before the hub runs, use a listener on any machine with those ports open:
 
     ```fish
     docker run --rm -p 30002:30002 -p 8002:8002 -p 443:443 elixircloud/nvflare-wes-testbed:sha-<commit> \
@@ -178,7 +181,7 @@ The sites file comes from a Secret that you create, which isn't part of the char
 
     If the nodes only let out 443, Rahti won't do: use a VM, [as above](#where-it-goes).
 
-    A listener in the hub's own pod holds the FL port while it runs, and the WES refuses runs, with "The FL port … is in use" in the run's `system_logs`. Start it with a terminal (`oc exec -it deploy/hub-nvflare-wes-hub -- python3 /app/tests/probe.py listen 30002`), and stop it with Ctrl-C before the first run. Without `-t`, it can stay behind after `oc` ends: then restart the pod, `oc rollout restart deployment/hub-nvflare-wes-hub`, which also forgets the hub's runs ([H2](../testbed/shortcuts.md#h2)).
+    Once the hub runs, it answers probes on its FL port itself between runs (`probeResponder`, on by default): probe it with `--fl-port 30002`, and start no listener in its pod. With `--set probeResponder=false`, a listener in the hub's own pod holds the FL port while it runs, and the WES refuses runs, with "The FL port … is in use" in the run's `system_logs`. Start it with a terminal (`oc exec -it deploy/hub-nvflare-wes-hub -- python3 /app/tests/probe.py listen 30002`), and stop it with Ctrl-C before the first run. Without `-t`, it can stay behind after `oc` ends: then restart the pod, `oc rollout restart deployment/hub-nvflare-wes-hub`, which also forgets the hub's runs ([H2](../testbed/shortcuts.md#h2)).
 3. **Two names.** The hub's name, of your own, for an `A` record to the address (not under `rahtiapp.fi`, which leads to the routers; the chart refuses it). And a name for the Route of the kits, which leads to the routers, so it can't be the same: a free name ending in `.rahtiapp.fi`, such as `<kits name>.2.rahtiapp.fi`, which works out of the box by [Rahti's docs](https://docs.csc.fi/cloud/rahti/usage/networking/), with the router's certificate. The chart has no certificate of its own, so it refuses other names.
 4. **Tools:** `oc` and `helm` 3, logged in with the command that Rahti's web console copies for you (`oc login --token=…`, a secret: don't paste it anywhere else).
 
@@ -217,6 +220,7 @@ The Route must say `Admitted=True`. If another project already has its name, the
 | `kitsHost` | None, required | Name of the Route for `/kits`, without a scheme, ending in `.rahtiapp.fi`. Links to kits are `https://<kitsHost>/kits/…` |
 | `flPort` | `30002` | FL port, on the address and in the pod: 30000 to 35000 |
 | `flScheme` | `grpc` | `grpc`, or `http` (WebSocket, see [T7](../tests/t7-port-443.md)) |
+| `probeResponder` | `true` | Answer [node probes](#probing-a-node) on the FL port while no run is active. `false` switches it off: then start a listener for a probe |
 | `loadBalancerIP` | Empty | Internal address of the project's pool (`192.168.…`), not the public one. Empty: one of the pool's |
 | `oidcIssuer` | None, required | Trusted OIDC issuer, https (e.g. LS Login's). The WES refuses every run and most endpoints without one ([H5](../testbed/shortcuts.md#h5)) |
 | `oidcAudience` | `fl-wes` | The `aud` a token must carry, matching this deployment's registration at the issuer |
@@ -243,7 +247,7 @@ Then use `http://localhost:8080/ga4gh/wes/v1` in place of `https://<hub>/ga4gh/w
 python3 tests/outside_check.py --fl-port 30002 <hub name> <kits name>
 ```
 
-Every check should say `[ok]`, with a `[warn]` for the FL port outside a run: `/kits` and `/sites` give the WES' own 404, the WES doesn't answer with 200 on either name, as the router has no Route for it and the address has only the FL port, and 8003 is closed. If the FL port times out during a run although the Service has its address, look for NetworkPolicies of the project (`oc get networkpolicy`) that keep it out: by Rahti's docs, pods only talk to pods of the same project by default.
+Every check should say `[ok]`, also for the FL port outside a run, where the probe responder answers (a `[warn]` with `probeResponder=false`): `/kits` and `/sites` give the WES' own 404, the WES doesn't answer with 200 on either name, as the router has no Route for it and the address has only the FL port, and 8003 is closed. If the FL port times out during a run although the Service has its address, look for NetworkPolicies of the project (`oc get networkpolicy`) that keep it out: by Rahti's docs, pods only talk to pods of the same project by default.
 
 **Acceptance:** a run with one site ([T8](../tests/t8-real-sites.md)) passes, `/kits` is reachable from outside, and the WES isn't.
 
@@ -277,7 +281,7 @@ The first install on Rahti, on 2026-11-12, with sites on a TESK in the same clus
 | Address of the FL port | CSC gave one public address for the `LoadBalancer` Service, for ports between 30000 and 35000. The Service shows the internal address of the pair. From outside the cluster, the FL port answered at the public address | The `A` record of the hub's name leads to the public address, as above |
 | What's public | The Routes expose `/kits` and `/sites` on the kits name, and nothing else of the WES. The WES API answered neither on the kits name nor on the hub's name, and the admin port was closed | Nothing: reach the WES with `oc port-forward` |
 | Tasks in the same cluster | A TES task on Rahti reached the FL port at the public address: the probe said `open`, and the sites joined. Traffic from inside goes out and back in (hairpin) | Nothing. Nodes elsewhere still need the [probe](#probing-a-node) |
-| Probe listener | A listener started in the hub's pod for the probe stayed behind and held the FL port. The FL server started without it, no site joined, and the first T8 ended in `SYSTEM_ERROR` after the start timeout | Runs fail at once now, with "The FL port … is in use" ([#41](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/pull/41)). Start a listener only with `oc exec -it`, stop it with Ctrl-C, and restart the pod if one stayed behind |
+| Probe listener | A listener started in the hub's pod for the probe stayed behind and held the FL port. The FL server started without it, no site joined, and the first T8 ended in `SYSTEM_ERROR` after the start timeout | Runs fail at once now, with "The FL port … is in use" ([#41](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/pull/41)). The hub answers probes itself between runs now ([#46](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/46)), so it takes no listener. With `probeResponder=false`, start one only with `oc exec -it`, stop it with Ctrl-C, and restart the pod if one stayed behind |
 | T8 | After a restart of the pod, the run over both sites, on the same TESK, ended `COMPLETE`, with the NVFlare job `FINISHED:COMPLETED`. The accuracies weren't checked | See [Results](../outcomes/results.md) |
 
 The NetworkPolicies that Rahti puts in every project didn't keep the FL port or the Routes out. T8 ran within the 2 GiB memory limit.
@@ -370,7 +374,7 @@ python3 tests/outside_check.py [--fl-port <port>] [--admin-port <port>] [--durin
 | `GET /kits/no-such-token/site-1.tgz` at the kits host | 404 `No such kit`, from the WES: no such kit, but the way is open. A 404 or 503 of a router or proxy fails |
 | `POST /sites/no-such-token/csr` at the kits host | 404 `No such token`, from the WES |
 | `GET /ga4gh/wes/v1/service-info` at both names | Anything but 200, including no answer. Certificates aren't checked here, as any answer counts |
-| FL port at the hub's name (`--fl-port`, default 8002) | Open. It only listens during a run, so a closed one is a warning; with `--during-run`, a failure |
+| FL port at the hub's name (`--fl-port`, default 8002) | Open. Outside a run, only the hub's probe responder answers there, which can be switched off, so a closed one is a warning; with `--during-run`, a failure |
 | FLARE admin port at the hub's name (`--admin-port`, default 8003) | Closed |
 
 It prints a line for each check, `[ok]`, `[warn]` or `[FAIL]`, and ends with 1 if any failed. It ignores proxy settings such as `HTTPS_PROXY`, as the checks are about what the machine reaches itself, and follows no redirects, so a redirect counts as its own status. It refuses names with a path, ports out of range and timeouts that aren't positive. `--insecure` skips checking certificates, for a hub with a test certificate, as in `tests/hub.sh`; `--help` lists all options. Without a clone, it's in the [image](#the-image): `docker run --rm elixircloud/nvflare-wes-testbed:sha-<commit> python3 /app/tests/outside_check.py …`. CI runs it against the proxy of `tests/hub.sh`, which has the hub's name there, so the port checks meet the proxy, and its unit tests (`python3 tests/outside_check_test.py`).
