@@ -66,6 +66,8 @@ class ProbeResponder:
         self._stop = threading.Event()
         self._listening = threading.Event()
         self._thread: threading.Thread | None = None
+        # A start asked for while a thread that was told to stop still ends: that thread makes up for it
+        self._restart = False
 
     @property
     def listening(self) -> bool:
@@ -75,20 +77,26 @@ class ProbeResponder:
     def start(self) -> None:
         """Start answering, in the background.
 
-        Does nothing if it already runs, or if a thread that was told to stop
-        still hasn't ended: a second one would only wait for its port.
+        Does nothing if it already runs. If a thread that was told to stop still
+        hasn't ended, the new one starts once it has: two would only compete for
+        the port.
         """
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 if self._stop.is_set():
-                    logger.warning("The probe responder on port %d is still stopping: not started", self.port)
+                    logger.warning("The probe responder on port %d is still stopping: starts once it has", self.port)
+                    self._restart = True
                 return
-            self._stop = threading.Event()
-            self._listening = threading.Event()
-            self._thread = threading.Thread(
-                target=self._serve, args=(self._stop, self._listening), name="probe-responder", daemon=True
-            )
-            self._thread.start()
+            self._spawn()
+
+    def _spawn(self) -> None:
+        """Start a thread with events of its own. The caller holds the lock."""
+        self._stop = threading.Event()
+        self._listening = threading.Event()
+        self._thread = threading.Thread(
+            target=self._serve, args=(self._stop, self._listening), name="probe-responder", daemon=True
+        )
+        self._thread.start()
 
     def stop(self, timeout: float = 10) -> bool:
         """Stop answering, and wait until the port is closed.
@@ -102,6 +110,7 @@ class ProbeResponder:
         with self._lock:
             thread = self._thread
             self._stop.set()
+            self._restart = False
         if thread is None:
             return True
         thread.join(timeout)
@@ -138,6 +147,10 @@ class ProbeResponder:
                 listening.clear()
                 server.close()
             logger.info("The probe responder stopped answering on port %d", self.port)
+        with self._lock:
+            if self._restart and self._thread is threading.current_thread():
+                self._restart = False
+                self._spawn()
 
     def _answer(self, server: socket.socket, stop: threading.Event, listening: threading.Event) -> None:
         """Accept connections and close them, until told to stop.

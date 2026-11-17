@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 import unittest
+from typing import Any
 from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -94,16 +95,37 @@ class ProbeResponderTest(unittest.TestCase):
             self.assertEqual(connect("127.0.0.1", self.port), "open")
 
     def test_stop_that_times_out(self) -> None:
-        """A thread that doesn't end in time: `stop` says so, and no second thread starts beside it."""
+        """A thread that doesn't end in time: `stop` says so, no second thread starts beside it, and a start
+        asked for meanwhile follows once it has ended.
+        """
         release = threading.Event()
-        with mock.patch.object(ProbeResponder, "_serve", lambda *_: release.wait(5)):
+        bind = socket.create_server
+
+        def stuck(*args: Any, **kwargs: Any) -> socket.socket:
+            """Bind once released, as a thread stuck in a system call would.
+
+            Args:
+                *args: Those of `socket.create_server`.
+                **kwargs: Those of `socket.create_server`.
+
+            Returns:
+                The socket.
+            """
+            release.wait(5)
+            return bind(*args, **kwargs)
+
+        with mock.patch("wes.probe_responder.socket.create_server", side_effect=stuck):
             self.responder.start()
+            time.sleep(0.1)
             self.assertFalse(self.responder.stop(timeout=0.1))
             with mock.patch("threading.Thread.start") as start:
                 self.responder.start()
             start.assert_not_called()
+            # Once the old thread has ended, the start asked for meanwhile takes effect on its own
             release.set()
-            self.assertTrue(self.responder.stop())
+            self.assertEqual(wait_until_open(self.port), "open")
+        self.assertTrue(self.responder.stop())
+        self.assertTrue(can_bind(self.port))
 
 
 class ResponderEnabledTest(unittest.TestCase):

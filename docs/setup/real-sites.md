@@ -36,7 +36,7 @@ Nodes pull the one image for all participants: [`elixircloud/nvflare-wes-testbed
 
 The biggest risk of the plan is whether a task at a node may reach the hub. The probe task finds that out before anyone relies on it, and it decides whether [B1](../testbed/options.md#b1-server-beside-the-wes) works at that node at all. It runs the [image](#the-image), and reports through its log whether it can reach the hub's ports, whether an `https` input arrives, whether `env` is passed, who it runs as, and whether `/tmp` is writable. It handles only the public [test set](#the-test-set), and no keys.
 
-A running [hub](#what-the-hub-needs) answers probes on its FL port itself: while no run is active, its probe responder accepts connections there and closes them, and during a run the FL server listens. So probe an idle hub at any time, without agreeing on one with its operator. The WES stops the responder before the FL server of a run starts, and starts it again when the run has ended; a run never waits for it. It's on by default: `FL_PROBE_RESPONDER` in [Compose](#running-it-with-compose), `probeResponder` in the [chart](#running-it-on-rahti). It answers on the FL port only, the one port the hub publishes for nodes: other ports of `--ports` still take a listener. With the FL server in a TES task (`compose.server-task.yaml`), the hub has none.
+A running [hub](#what-the-hub-needs) answers probes on its FL port itself: while no run is active, its probe responder accepts connections there and closes them, and during a run the FL server listens. So probe an idle hub at any time, without agreeing on one with its operator. The WES stops the responder before the FL server of a run starts, and starts it again when the run has ended; a run never waits for it. It's on by default: `FL_PROBE_RESPONDER` in [Compose](#running-it-with-compose), `probeResponder` in the [chart](#running-it-on-rahti). It answers on the FL port only, the one port the hub publishes for nodes: other ports of `--ports` still take a listener. With the FL server in a TES task (`compose.server-task.yaml`), the hub runs no responder, so its FL port refuses outside a run: use a listener.
 
 Without a hub yet, or with the responder switched off, start a listener on the machine of the hub first, with the same ports:
 
@@ -139,7 +139,7 @@ Caddy gets a certificate for that name, which needs ports 80 and 443 reachable. 
 | `FL_SERVER_NAME` | None, required | Public name of the hub, which goes into the kits |
 | `FL_IMAGE` | `elixircloud/nvflare-wes-testbed:dev` | Image of the hub and the tasks. Use `sha-<commit>` |
 | `FL_PORT`, `FL_SCHEME` | `8002`, `grpc` | FL port. For 443, use `http`: see [T7](../tests/t7-port-443.md) |
-| `FL_PROBE_RESPONDER` | `1` | Answer [node probes](#probing-a-node) on the FL port while no run is active. `0` switches it off: then start a listener for a probe |
+| `FL_PROBE_RESPONDER` | `1` | Answer [node probes](#probing-a-node) on the FL port while no run is active. `0` switches it off: then start a listener for a probe. Other values than `1`, `0`, `true`, `false`, `yes`, `no`, `on` and `off` stop the hub from starting |
 | `WES_ALLOWED_IPS` | `127.0.0.1` | Addresses or ranges that reach the WES, separated by spaces |
 | `WES_OIDC_ISSUER` | None, required | Trusted OIDC issuer, e.g. LS Login's. `/runs*` and `/outputs` need a bearer token it issued; there's no way to start a run without one ([H5](../testbed/shortcuts.md#h5)) |
 | `WES_OIDC_AUDIENCE` | `fl-wes` | The `aud` a token must carry, matching this deployment's registration at the issuer |
