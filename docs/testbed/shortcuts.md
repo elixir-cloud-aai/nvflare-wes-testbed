@@ -28,7 +28,7 @@ All of them, in one place, each with the proper way. Their numbers are referred 
 
 ### H22
 
-**Authorization is a static allow-list, not real access control.** `WES_OIDC_ALLOWED_SUBS`, if set, limits who may use the WES to a fixed list of token subjects; unset, any caller the trusted issuer ([H5](#h5)) vouches for is allowed, with no way to tell a federation's own researchers from anyone else with an account at the same issuer. There's no group, role or study membership behind it, and no connection to NVFlare's own roles ([H5](#h5)'s `lead`, fixed for everyone). **Proper way:** a claim or group check (e.g. against the issuer's `/userinfo`, at the cost of a network call per request), or NVFlare's own Multi-Study Support, if the provisioning flow here ever supports it.
+**Authorization is a static allow-list, not real access control.** `WES_OIDC_ALLOWED_SUBS`, if set, limits who may use the WES to a fixed list of token subjects; unset, any caller the trusted issuer ([H5](#h5)) vouches for is allowed, with no way to tell a federation's own researchers from anyone else with an account at the same issuer. There's no group, role or study membership behind it, and no connection to NVFlare's own roles ([H5](#h5)'s `lead`, fixed for everyone). The list is of subjects, never of emails or FLARE admin names, which [H5](#h5) derives from the token's `email` or `sub` and which aren't unique. **Proper way:** a claim or group check (e.g. against the issuer's `/userinfo`, at the cost of a network call per request), or NVFlare's own Multi-Study Support, if the provisioning flow here ever supports it.
 
 ### H23
 

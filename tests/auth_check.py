@@ -173,7 +173,11 @@ def main() -> None:
         checks["two subjects with one email share the admin's name, not the owner"] = (
             shared[0].admin == shared[1].admin and shared[0].sub != shared[1].sub
         )
-        checks["different subs get different derived names"] = admin({"sub": "a b"}) != admin({"sub": "a c"})
+        checks["different subs get different derived names"] = (
+            admin({"sub": "a b"}) == derived("a b", "issuer.test")
+            and admin({"sub": "a c"}) == derived("a c", "issuer.test")
+            and derived("a b", "issuer.test") != derived("a c", "issuer.test")
+        )
         issuer = wes.OIDC_ISSUER
         for case, url in {
             "without top-level domain": "http://fake-idp:8080/oidc/",

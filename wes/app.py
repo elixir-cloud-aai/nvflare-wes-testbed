@@ -1130,7 +1130,8 @@ def identity(claims: dict[str, Any] = AUTH_DEPENDENCY) -> Identity:
     email = claims.get("email")
     if email is None or email == "":
         admin = admin_name_from_sub(sub)
-        # Debug only, here and below: `identity` runs on every request, polls included
+        # Debug only: the usual case for LS Login, and `identity` runs on every
+        # request, polls included
         logger.debug("Auth: subject %r has no email claim; its FLARE admin is %r", sub, admin)
         return Identity(sub, admin)
     if not isinstance(email, str):
@@ -1139,7 +1140,7 @@ def identity(claims: dict[str, Any] = AUTH_DEPENDENCY) -> Identity:
     if not is_admin_name(email):
         # Unsafe, or one NVFlare would refuse only once the run has started
         admin = admin_name_from_sub(sub)
-        logger.debug("Auth: subject %r has an email claim that can't name a FLARE admin; it is %r", sub, admin)
+        logger.info("Auth: subject %r has an email claim that can't name a FLARE admin; it is %r", sub, admin)
         return Identity(sub, admin)
     return Identity(sub, email)
 
