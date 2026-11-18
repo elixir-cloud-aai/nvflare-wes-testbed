@@ -1048,8 +1048,12 @@ AUTH_DEPENDENCY = Depends(authenticated)
 
 # A FLARE admin's name, safe to put in the hub's paths and commands
 SAFE_ADMIN_NAME = re.compile(r"[A-Za-z0-9._@-]{1,80}")
-# What NVFlare 2.9 itself accepts as an admin's name (`nvflare.apis.utils.format_check`)
+# What NVFlare 2.9 itself accepts as an admin's name: an address
+# (`nvflare.apis.utils.format_check`), and a name `nvflare cert request` takes
+# as a certificate's common name, of at most 64 characters
+# (`nvflare.tool.cert.cert_commands._validate_safe_cert_name`)
 NVFLARE_ADMIN_NAME = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}")
+NVFLARE_CERT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,63}")
 # The domain of a derived admin name, when the issuer's host can't be one
 DERIVED_ADMIN_DOMAIN = "subject.invalid"
 
@@ -1070,11 +1074,11 @@ def is_admin_name(name: str) -> bool:
     Returns:
         Whether it is.
     """
-    return bool(SAFE_ADMIN_NAME.fullmatch(name) and NVFLARE_ADMIN_NAME.fullmatch(name))
+    return all(pattern.fullmatch(name) for pattern in (SAFE_ADMIN_NAME, NVFLARE_ADMIN_NAME, NVFLARE_CERT_NAME))
 
 
 def admin_name_from_sub(sub: str) -> str:
-    """Name the FLARE admin of a caller whose token has no email, after its `sub`.
+    """Name the FLARE admin of a caller without a usable email, after its `sub`.
 
     LS Login access tokens, for one, carry no `email`, but their `sub` is an
     address already (`<40 hex>@lifescience-ri.eu`).
@@ -1103,15 +1107,15 @@ def identity(claims: dict[str, Any] = AUTH_DEPENDENCY) -> Identity:
 
     Returns:
         The identity: `sub`, to own runs by, and the FLARE admin's name for a
-        run it starts: the token's `email`, or, if it has none, a name from
-        `sub` (`admin_name_from_sub`). Two subjects must never share ownership
-        of a run through a shared or reassigned email, so `sub`, not the
-        admin's name, is what run lookups are keyed on.
+        run it starts: the token's `email`, or, if it has none or one that
+        can't name an admin, a name from `sub` (`admin_name_from_sub`). Admin
+        names aren't unique across subjects, and two subjects must never share
+        ownership of a run through a shared or reassigned email, so `sub`, not
+        the admin's name, is what run lookups are keyed on.
 
     Raises:
         HTTPException: The subject is missing or not a string, `WES_OIDC_ALLOWED_SUBS`
-            is set and doesn't list it, or the email is not a string, or unsafe
-            to use as a FLARE admin's name.
+            is set and doesn't list it, or the email is not a string.
     """
     sub = claims.get("sub")
     if not isinstance(sub, str) or not sub:
@@ -1128,9 +1132,11 @@ def identity(claims: dict[str, Any] = AUTH_DEPENDENCY) -> Identity:
     if not isinstance(email, str):
         logger.warning("Auth: subject %r has a non-string email claim", sub)
         raise HTTPException(400, "The submitter email must be a string")
-    if not SAFE_ADMIN_NAME.fullmatch(email):
-        logger.warning("Auth: subject %r has an unsafe email claim %r", sub, email)
-        raise HTTPException(400, "The submitter email has characters that can't name a FLARE admin")
+    if not is_admin_name(email):
+        # Unsafe, or one NVFlare would refuse only once the run has started
+        admin = admin_name_from_sub(sub)
+        logger.warning("Auth: subject %r has an email claim that can't name a FLARE admin; it is %r", sub, admin)
+        return Identity(sub, admin)
     return Identity(sub, email)
 
 
