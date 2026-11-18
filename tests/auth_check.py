@@ -1,6 +1,7 @@
 """Check the WES's OIDC gate, its allow-list, and that a caller only sees its own runs (H5, H22)."""
 
 import hashlib
+import json
 import os
 import sys
 import tempfile
@@ -162,6 +163,15 @@ def main() -> None:
         )
         checks["an email NVFlare would refuse falls back to a name from sub"] = (
             admin({"sub": ls_login_sub, "email": "researcher-1"}) == ls_login_sub
+        )
+        surrogate = json.loads('"\\ud800x"')
+        checks["a sub with a lone surrogate gets a derived name"] = admin({"sub": surrogate}) == (
+            f"{hashlib.sha256(surrogate.encode('utf-8', 'surrogatepass')).hexdigest()[:32]}@issuer.test"
+        )
+        checks["a false email is rejected as a non-string"] = id_status({"sub": ls_login_sub, "email": False}) == 400
+        shared = [wes.identity({"sub": s, "email": "shared@testbed.invalid"}) for s in ("researcher-1", "researcher-2")]
+        checks["two subjects with one email share the admin's name, not the owner"] = (
+            shared[0].admin == shared[1].admin and shared[0].sub != shared[1].sub
         )
         checks["different subs get different derived names"] = admin({"sub": "a b"}) != admin({"sub": "a c"})
         issuer = wes.OIDC_ISSUER

@@ -1048,10 +1048,12 @@ AUTH_DEPENDENCY = Depends(authenticated)
 
 # A FLARE admin's name, safe to put in the hub's paths and commands
 SAFE_ADMIN_NAME = re.compile(r"[A-Za-z0-9._@-]{1,80}")
-# What NVFlare 2.9 itself accepts as an admin's name: an address
-# (`nvflare.apis.utils.format_check`), and a name `nvflare cert request` takes
-# as a certificate's common name, of at most 64 characters
-# (`nvflare.tool.cert.cert_commands._validate_safe_cert_name`)
+# What NVFlare 2.9 itself accepts as an admin's name: an address, with the
+# pattern of `nvflare.apis.utils.format_check` verbatim (its `|` included), and
+# a name `nvflare cert request` takes as a certificate's common name, of at
+# most 64 characters (`nvflare.tool.cert.cert_commands._validate_safe_cert_name`).
+# The latter implies `SAFE_ADMIN_NAME`, which stays as the hub's own check,
+# should NVFlare's ever loosen
 NVFLARE_ADMIN_NAME = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}")
 NVFLARE_CERT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,63}")
 # The domain of a derived admin name, when the issuer's host can't be one
@@ -1094,7 +1096,8 @@ def admin_name_from_sub(sub: str) -> str:
     """
     if is_admin_name(sub):
         return sub
-    digest = hashlib.sha256(sub.encode()).hexdigest()[:32]
+    # `surrogatepass`: JSON can carry lone surrogates, which plain UTF-8 refuses
+    digest = hashlib.sha256(sub.encode("utf-8", "surrogatepass")).hexdigest()[:32]
     derived = f"{digest}@{urllib.parse.urlsplit(OIDC_ISSUER).hostname or ''}"
     return derived if is_admin_name(derived) else f"{digest}@{DERIVED_ADMIN_DOMAIN}"
 
@@ -1127,7 +1130,8 @@ def identity(claims: dict[str, Any] = AUTH_DEPENDENCY) -> Identity:
     email = claims.get("email")
     if email is None or email == "":
         admin = admin_name_from_sub(sub)
-        logger.info("Auth: subject %r has no email claim; its FLARE admin is %r", sub, admin)
+        # Debug only, here and below: `identity` runs on every request, polls included
+        logger.debug("Auth: subject %r has no email claim; its FLARE admin is %r", sub, admin)
         return Identity(sub, admin)
     if not isinstance(email, str):
         logger.warning("Auth: subject %r has a non-string email claim", sub)
@@ -1135,7 +1139,7 @@ def identity(claims: dict[str, Any] = AUTH_DEPENDENCY) -> Identity:
     if not is_admin_name(email):
         # Unsafe, or one NVFlare would refuse only once the run has started
         admin = admin_name_from_sub(sub)
-        logger.warning("Auth: subject %r has an email claim that can't name a FLARE admin; it is %r", sub, admin)
+        logger.debug("Auth: subject %r has an email claim that can't name a FLARE admin; it is %r", sub, admin)
         return Identity(sub, admin)
     return Identity(sub, email)
 
