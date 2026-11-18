@@ -5,7 +5,7 @@
 
 ## What the hub needs
 
-A public address, with these open: the FL port, straight through to the FL server, as its TLS is mutual, and HTTPS for the links to kits, which nodes fetch. It needs a stable name, set in `FL_SERVER_NAME`: the kits contain it. The WES itself checks every caller against a trusted OIDC issuer, such as LS Login, mandatory, with no local-only bypass ([H5](../testbed/shortcuts.md#h5)): set `WES_OIDC_ISSUER`, and `WES_OIDC_AUDIENCE` if it differs from the default `fl-wes`. Only some addresses may also reach `/ga4gh/wes/v1`, and `/kits` stays open for nodes.
+A public address, with these open: the FL port, straight through to the FL server, as its TLS is mutual, and HTTPS for the links to kits, which nodes fetch. It needs a stable name, set in `FL_SERVER_NAME`: the kits contain it. The WES itself checks every caller against a trusted OIDC issuer, such as LS Login, mandatory, with no local-only bypass ([H5](../testbed/shortcuts.md#h5)): set `WES_OIDC_ISSUER`, and `WES_OIDC_AUDIENCE` if it differs from the default `fl-wes`. Tokens need no `email` claim: without one, the FLARE admin of a run is named after the token's `sub` (see [H5](../testbed/shortcuts.md#h5)). Only some addresses may also reach `/ga4gh/wes/v1`, and `/kits` stays open for nodes.
 
 See [Deploying the hub](#deploying-the-hub) for where it goes, and how.
 
