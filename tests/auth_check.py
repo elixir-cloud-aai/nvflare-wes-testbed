@@ -1,5 +1,6 @@
 """Check the WES's OIDC gate, its allow-list, and that a caller only sees its own runs (H5, H22)."""
 
+import hashlib
 import os
 import sys
 import tempfile
@@ -124,6 +125,42 @@ def main() -> None:
         )
         checks["a disallowed subject is rejected"] = id_status({"sub": "someone-else"}) == 403
         wes.ALLOWED_SUBS = set()
+
+        # The FLARE admin's name: the email if there is one, else one from `sub`
+        # (LS Login access tokens carry no email, #51)
+        def admin(claims: dict[str, object]) -> str | None:
+            try:
+                return wes.identity(claims).admin
+            except HTTPException:
+                return None
+
+        def derived(sub: str, host: str) -> str:
+            return f"{hashlib.sha256(sub.encode()).hexdigest()[:32]}@{host}"
+
+        ls_login_sub = "0123456789abcdef0123456789abcdef01234567@lifescience-ri.eu"
+        checks["the email names the admin, even with an address as sub"] = (
+            admin({"sub": ls_login_sub, "email": "researcher-1@testbed.invalid"}) == "researcher-1@testbed.invalid"
+        )
+        checks["a token without email is accepted, naming the admin after its sub"] = (
+            admin({"sub": ls_login_sub}) == ls_login_sub
+        )
+        checks["an empty email counts as none"] = admin({"sub": ls_login_sub, "email": ""}) == ls_login_sub
+        checks["an unsafe sub gets a name derived from it"] = admin({"sub": "researcher 1/x"}) == derived(
+            "researcher 1/x", "issuer.test"
+        )
+        checks["a sub that isn't an address gets a name derived from it"] = admin({"sub": "researcher-1"}) == derived(
+            "researcher-1", "issuer.test"
+        )
+        checks["a sub too long for an admin gets a name derived from it"] = admin(
+            {"sub": f"{'a' * 70}@lifescience-ri.eu"}
+        ) == derived(f"{'a' * 70}@lifescience-ri.eu", "issuer.test")
+        checks["different subs get different derived names"] = admin({"sub": "a b"}) != admin({"sub": "a c"})
+        issuer = wes.OIDC_ISSUER
+        wes.OIDC_ISSUER = "http://fake-idp:8080/oidc/"
+        checks["an issuer host that can't name an admin gets a reserved domain"] = admin(
+            {"sub": "researcher-1"}
+        ) == derived("researcher-1", "subject.invalid")
+        wes.OIDC_ISSUER = issuer
 
         def run_status(run_id: str, caller: str) -> int:
             try:

@@ -10,7 +10,7 @@ As [T2](t2-wes-to-tes.md), with the WES checking every caller's bearer token aga
 2. The same, with a token the fake identity provider issued: `200`.
 3. `GET /ga4gh/wes/v1/service-info` without a token: `200` (a client has to be able to discover how to authenticate before it has a token).
 
-Claim mismatches (wrong audience, issuer, signature, an expired token) are checked separately, against a fake key with no network at all, by `tests/auth_check.py` (run through `tests/hub.sh`, and in CI). T2 itself also checks that a completed run's log names its submitter.
+Claim mismatches (wrong audience, issuer, signature, an expired token), and how the FLARE admin is named with and without an `email` claim, are checked separately, against a fake key with no network at all, by `tests/auth_check.py` (run through `tests/hub.sh`, and in CI). T2 itself also checks that a completed run's log names its submitter.
 
 ## Steps
 

@@ -27,6 +27,7 @@ allow-list (H22). One run at a time, state in memory.
 
 import contextlib
 import errno
+import hashlib
 import json
 import logging
 import os
@@ -39,6 +40,7 @@ import subprocess
 import tarfile
 import threading
 import time
+import urllib.parse
 import uuid
 from collections.abc import AsyncIterator, Mapping
 from typing import Annotated, Any, NamedTuple
@@ -1044,29 +1046,72 @@ def authenticated(credentials: Annotated[HTTPAuthorizationCredentials | None, De
 AUTH_DEPENDENCY = Depends(authenticated)
 
 
+# A FLARE admin's name, safe to put in the hub's paths and commands
+SAFE_ADMIN_NAME = re.compile(r"[A-Za-z0-9._@-]{1,80}")
+# What NVFlare 2.9 itself accepts as an admin's name (`nvflare.apis.utils.format_check`)
+NVFLARE_ADMIN_NAME = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}")
+# The domain of a derived admin name, when the issuer's host can't be one
+DERIVED_ADMIN_DOMAIN = "subject.invalid"
+
+
 class Identity(NamedTuple):
-    """A caller's validated identity: `sub` to own runs by, `email` to name the FLARE admin."""
+    """A caller's validated identity: `sub` to own runs by, `admin` to name the FLARE admin."""
 
     sub: str
-    email: str
+    admin: str
+
+
+def is_admin_name(name: str) -> bool:
+    """Whether a name is safe for the hub and accepted by NVFlare as an admin's name.
+
+    Args:
+        name: The name.
+
+    Returns:
+        Whether it is.
+    """
+    return bool(SAFE_ADMIN_NAME.fullmatch(name) and NVFLARE_ADMIN_NAME.fullmatch(name))
+
+
+def admin_name_from_sub(sub: str) -> str:
+    """Name the FLARE admin of a caller whose token has no email, after its `sub`.
+
+    LS Login access tokens, for one, carry no `email`, but their `sub` is an
+    address already (`<40 hex>@lifescience-ri.eu`).
+
+    Args:
+        sub: The caller's subject.
+
+    Returns:
+        `sub` itself if it can name an admin; otherwise a deterministic name
+        derived from it, `<first 32 hex of sha256(sub)>@<host of the trusted
+        issuer>`, with the domain `subject.invalid` instead if that host can't
+        name an admin either.
+    """
+    if is_admin_name(sub):
+        return sub
+    digest = hashlib.sha256(sub.encode()).hexdigest()[:32]
+    derived = f"{digest}@{urllib.parse.urlsplit(OIDC_ISSUER).hostname or ''}"
+    return derived if is_admin_name(derived) else f"{digest}@{DERIVED_ADMIN_DOMAIN}"
 
 
 def identity(claims: dict[str, Any] = AUTH_DEPENDENCY) -> Identity:
-    """The caller's identity: its `sub`, checked and allowed (H22), and its `email`.
+    """The caller's identity: its `sub`, checked and allowed (H22), and its FLARE admin's name.
 
     Args:
         claims: The caller's validated claims.
 
     Returns:
-        The identity: `sub`, to own runs by, and `email`, as the FLARE admin's
-        name for a run it starts. Two subjects must never share ownership of a
-        run through a shared or reassigned email, so `sub`, not `email`, is
-        what run lookups are keyed on.
+        The identity: `sub`, to own runs by, and the FLARE admin's name for a
+        run it starts: the token's `email`, or, if it has none, a name from
+        `sub` (`admin_name_from_sub`). Two subjects must never share ownership
+        of a run through a shared or reassigned email, so `sub`, not the
+        admin's name, is what run lookups are keyed on.
 
     Raises:
         HTTPException: The subject is missing or not a string, `WES_OIDC_ALLOWED_SUBS`
-            is set and doesn't list it, or the email is missing, not a string, or
-            unsafe to use as a FLARE admin's name.
+            is set and doesn't list it, or the email is not a string, or unsafe
+            to use as a FLARE admin's name.
     """
     sub = claims.get("sub")
     if not isinstance(sub, str) or not sub:
@@ -1076,10 +1121,14 @@ def identity(claims: dict[str, Any] = AUTH_DEPENDENCY) -> Identity:
         logger.warning("Auth: rejected disallowed subject %r", sub)
         raise HTTPException(403, "This identity isn't allowed to use this WES")
     email = claims.get("email")
-    if not isinstance(email, str) or not email:
-        logger.warning("Auth: subject %r has a token with no email claim", sub)
-        raise HTTPException(400, "The provided token is missing email claim")
-    if not re.fullmatch(r"[A-Za-z0-9._@-]{1,80}", email):
+    if email is None or email == "":
+        admin = admin_name_from_sub(sub)
+        logger.info("Auth: subject %r has no email claim; its FLARE admin is %r", sub, admin)
+        return Identity(sub, admin)
+    if not isinstance(email, str):
+        logger.warning("Auth: subject %r has a non-string email claim", sub)
+        raise HTTPException(400, "The submitter email must be a string")
+    if not SAFE_ADMIN_NAME.fullmatch(email):
         logger.warning("Auth: subject %r has an unsafe email claim %r", sub, email)
         raise HTTPException(400, "The submitter email has characters that can't name a FLARE admin")
     return Identity(sub, email)
@@ -1162,7 +1211,7 @@ def run_workflow(
         job_dir = (JOBS / workflow_url).resolve()
         if job_dir.parent != JOBS.resolve() or not job_dir.is_dir():
             raise HTTPException(400, f"Unknown job {workflow_url}; available: {sorted(p.name for p in JOBS.iterdir())}")
-        target, args = execute, (job_dir, sites, caller.email)
+        target, args = execute, (job_dir, sites, caller.admin)
     elif (workflow_type, workflow_type_version) == (fedavg.WORKFLOW_TYPE, fedavg.WORKFLOW_TYPE_VERSION):
         try:
             fedavg.workload(workflow_url)
@@ -1185,7 +1234,7 @@ def run_workflow(
             "state": "QUEUED",
             # Runs are owned by `sub`: two subjects could share or swap an email
             "sub": caller.sub,
-            "submitter": caller.email,
+            "submitter": caller.admin,
             "request": {
                 "workflow_type": workflow_type,
                 "workflow_type_version": workflow_type_version,
