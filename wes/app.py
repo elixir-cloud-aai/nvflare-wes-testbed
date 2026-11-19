@@ -1258,13 +1258,15 @@ def run_workflow(
         job_dir = (JOBS / workflow_url).resolve()
         if job_dir.parent != JOBS.resolve() or not job_dir.is_dir():
             raise HTTPException(400, f"Unknown job {workflow_url}; available: {available_jobs()}")
-        # Each site once: a site is an FL client by its name, and FLARE has one client of a name
-        sites = list(dict.fromkeys(sites))
+        # Each site once: a site is an FL client by its name, and FLARE has one client of a name.
+        # Refused rather than dropped, so that the run's recorded request names the sites that ran
+        if len(set(sites)) != len(sites):
+            raise HTTPException(400, "Each site may be named only once")
         wanted = job_sites(job_dir)
         if len(sites) != wanted:
             raise HTTPException(
                 400,
-                f"Job {workflow_url} takes {wanted} sites, not {len(sites)} distinct ones; name {wanted} sites"
+                f"Job {workflow_url} takes {wanted} sites, not {len(sites)}; name {wanted} sites"
                 f" in workflow_params, or use a job for {len(sites)} if there is one (available: {available_jobs()})",
             )
         target, args = execute, (job_dir, sites, caller.admin)

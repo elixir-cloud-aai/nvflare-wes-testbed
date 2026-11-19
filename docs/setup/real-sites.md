@@ -38,7 +38,7 @@ With n sites, give them the first n shares, in the order of the table, one each,
 | 3 | `logreg-fedavg-3` | 0.975 |
 | 4 | `logreg-fedavg-4` | 1.000 |
 
-Name the sites in `workflow_params`, for example `{"sites": ["site-1", "site-2", "site-3"]}`; without it, a run takes all sites of the sites file. The WES refuses an `NVFLARE` run whose number of sites differs from what the job takes (its `min_clients`), with `400`: with more sites, FedAvg of NVFlare 2.9 would ask a random subset of them each round, and with fewer, the job wouldn't start. A plain FedAvg run (`FEDAVG`, [T10](../tests/t10-fedavg.md)) takes any number of sites.
+Name the sites in `workflow_params`, for example `{"sites": ["site-1", "site-2", "site-3"]}`; without it, a run takes all sites of the sites file. The WES refuses an `NVFLARE` run that names a site twice, or whose number of sites differs from what the job takes (its `min_clients`), with `400`: with more sites, FedAvg of NVFlare 2.9 would ask a random subset of them each round, and with fewer, the job wouldn't start. A plain FedAvg run (`FEDAVG`, [T10](../tests/t10-fedavg.md)) takes any number of sites.
 
 The shares cover different parts of the feature space: give each site a different one, or the [expected accuracies](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/blob/dev/testset/README.md) won't hold. `compose.public-data.yaml` runs [T2](../tests/t2-wes-to-tes.md) with the URLs of the first two, locally, in CI, and `compose.three-sites.yaml` runs T2 and T10 with three local sites, in CI.
 

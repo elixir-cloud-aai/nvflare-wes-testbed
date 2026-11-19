@@ -279,6 +279,10 @@ def main() -> None:
             "NVFLARE with all sites, by default, for the job of two": nvflare_refusal(wes, "logreg-fedavg", None),
             "NVFLARE with two sites for the job of three": nvflare_refusal(wes, "logreg-fedavg-3", three_sites[:2]),
             "NVFLARE with a site twice for the job of two": nvflare_refusal(wes, "logreg-fedavg", ("site-1",) * 2),
+            # Two distinct sites, as the job takes, but one named twice
+            "NVFLARE with a site twice among two": nvflare_refusal(
+                wes, "logreg-fedavg", ("site-1", "site-1", "site-2")
+            ),
             "NVFLARE with three sites for the job of four": nvflare_refusal(wes, "logreg-fedavg-4", three_sites),
         }
         started = [run_id for run_id in wes.RUNS if not run_id.startswith("run-")]

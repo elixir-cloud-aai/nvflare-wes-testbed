@@ -24,7 +24,7 @@ docker compose --profile test run --rm -T fedavg-e2e
 docker compose --profile test down -v
 ```
 
-`fedavg-check` ends with `45/45 checks passed`, `fedavg-e2e` with `18/18 checks passed`. A run takes about 12 seconds, as each round costs a task start at each site.
+`fedavg-check` ends with `46/46 checks passed`, `fedavg-e2e` with `18/18 checks passed`. A run takes about 12 seconds, as each round costs a task start at each site.
 
 With three sites, the run takes all three, with no job to pick, gets the same accuracy, 0.975, and ends with `22/22 checks passed`:
 

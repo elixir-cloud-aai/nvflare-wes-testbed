@@ -97,5 +97,5 @@ Same versions as above, x86-64 laptop with Docker 28, after adding shares and jo
 | `tests/evaluate_check.py` | 10/10 checks |
 | T3 at site 3 (`probe-site-3`) | Hub reachable; the other two sites and the internet not |
 | T2 | 11/11 checks; with public data URLs 13/13; with three sites (`compose.three-sites.yaml`) 13/13, `FINISHED:COMPLETED`, federated 0.975 |
-| T10 (`tests/fedavg_check.py`, fake TES) | 45/45 checks, among them a run of three sites, `NVFLARE` runs with another number of sites than the job takes refused, and jobs without a usable `min_clients` |
+| T10 (`tests/fedavg_check.py`, fake TES) | 46/46 checks, among them a run of three sites, `NVFLARE` runs with another number of sites than the job takes refused, and jobs without a usable `min_clients` |
 | T10 (`fedavg-e2e`) | 18/18 checks with two sites, 22/22 with three; federated 0.975 in both |
