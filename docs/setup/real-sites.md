@@ -23,8 +23,8 @@ Sites fetch their share from raw files of this repository, at a fixed commit, so
 |---|---|---|
 | First site | [`site-1.csv`](https://raw.githubusercontent.com/elixir-cloud-aai/nvflare-wes-testbed/b473b4b2d3246d6b5f74c31e209268e0c093e062/testset/data/site-1.csv) | `c578295a4bd973bb98fa2def75cffd50313dd9c7ab6b34f6548124a70103c001` |
 | Second site | [`site-2.csv`](https://raw.githubusercontent.com/elixir-cloud-aai/nvflare-wes-testbed/b473b4b2d3246d6b5f74c31e209268e0c093e062/testset/data/site-2.csv) | `e1ce32c53696909df438ce665fabe78f384b56ff4ce786d9ecb0101dc754ebca` |
-| Third site | [`site-3.csv`](https://raw.githubusercontent.com/elixir-cloud-aai/nvflare-wes-testbed/ca8383db846e2e4026ed81cfff88a2cd27698dd1/testset/data/site-3.csv) | `4994bf229b20893fe7bde50a80543f41fbf4070f6d232cd7e3728f326c052df1` |
-| Fourth site | [`site-4.csv`](https://raw.githubusercontent.com/elixir-cloud-aai/nvflare-wes-testbed/ca8383db846e2e4026ed81cfff88a2cd27698dd1/testset/data/site-4.csv) | `665cb549024bee591d1d1873f585801f37c0d9aa78b8560bb08035234076652f` |
+| Third site | [`site-3.csv`](https://raw.githubusercontent.com/elixir-cloud-aai/nvflare-wes-testbed/a5196a93586c2a3757284c40534a6ef71a5f5fcf/testset/data/site-3.csv) | `4994bf229b20893fe7bde50a80543f41fbf4070f6d232cd7e3728f326c052df1` |
+| Fourth site | [`site-4.csv`](https://raw.githubusercontent.com/elixir-cloud-aai/nvflare-wes-testbed/a5196a93586c2a3757284c40534a6ef71a5f5fcf/testset/data/site-4.csv) | `665cb549024bee591d1d1873f585801f37c0d9aa78b8560bb08035234076652f` |
 
 The first two shares are at an older commit than the others, as they haven't changed since. The holdout set isn't for sites: it stays with whoever compares the models.
 
