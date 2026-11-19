@@ -27,7 +27,7 @@ With four sites, and the job `logreg-fedavg-4`, it prints `federated 1.000`; it 
 docker compose --profile test run --rm simulator 'python job.py --workspace /tmp/sim --rounds 5 --sites 4 && python /app/testset/evaluate.py /tmp/sim/logreg-fedavg-4/server/simulate_job/models/server.npy --data /data --expect 1.000'
 ```
 
-`docker compose --profile test run --rm evaluate-check` checks the comparison itself: shares found by number, at least two, and `--expect`. CI runs all of these.
+`docker compose --profile test run --rm evaluate-check` checks the comparison itself (shares found by number, at least two, and `--expect`), the names of the jobs, and that each job's FedAvg asks all its sites each round (`num_clients` equals `min_clients`). CI runs all of these.
 
 ## Questions it answers
 

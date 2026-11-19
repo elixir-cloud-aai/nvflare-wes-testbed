@@ -69,21 +69,20 @@ def evaluate(model: pathlib.Path, data: pathlib.Path, *extra: str) -> subprocess
     )
 
 
-def num_clients(job_dir: pathlib.Path) -> int:
+def num_clients(job_dir: pathlib.Path) -> tuple[int, int]:
     """Read how many sites a job takes, and how many its FedAvg asks each round.
 
     Args:
         job_dir: Directory of the job.
 
     Returns:
-        `min_clients` of the job, if it equals `num_clients` of its FedAvg,
-        else -1.
+        `min_clients` of the job, and `num_clients` of its FedAvg.
     """
     meta = json.loads((job_dir / "meta.json").read_text())
     server = json.loads((job_dir / "app" / "config" / "config_fed_server.json").read_text())
     (workflow,) = [w for w in server["workflows"] if w["path"].endswith(".FedAvg")]
     asked = workflow["args"].get("num_clients", FEDAVG_DEFAULT_NUM_CLIENTS)
-    return meta["min_clients"] if asked == meta["min_clients"] else -1
+    return meta["min_clients"], asked
 
 
 def main() -> None:
@@ -123,7 +122,7 @@ def main() -> None:
         ),
         # The WES checks `min_clients`; FedAvg asks `num_clients` each round: they must agree
         "each job's FedAvg asks all its sites each round": all(
-            num_clients(pathlib.Path("/app/testset/job") / job.job_name(n)) == n for n in (2, 3, 4)
+            num_clients(pathlib.Path("/app/testset/job") / job.job_name(n)) == (n, n) for n in (2, 3, 4)
         ),
     }
     for name, passed in checks.items():
