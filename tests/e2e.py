@@ -1,4 +1,10 @@
-"""One WES run end to end, with checks of the outcome: test T2 of the docs."""
+"""One WES run end to end, with checks of the outcome: test T2 of the docs.
+
+The sites and the job come from `E2E_SITES` (comma-separated, by default
+`site-1,site-2`) and `E2E_JOB` (by default `logreg-fedavg`); each site `site-<k>`
+has its TES at `funnel-site-<k>` (`compose.three-sites.yaml`). With
+`EXPECTED_ACCURACY`, the federated model must have that holdout accuracy.
+"""
 
 import json
 import os
@@ -15,6 +21,9 @@ WES = os.environ["WES_URL"]
 AUTH = header()
 TIMEOUT = 600
 TERMINAL = {"COMPLETE", "EXECUTOR_ERROR", "SYSTEM_ERROR", "CANCELED"}
+SITES = os.environ.get("E2E_SITES", "site-1,site-2").split(",")
+JOB = os.environ.get("E2E_JOB", "logreg-fedavg")
+EXPECTED_ACCURACY = os.environ.get("EXPECTED_ACCURACY", "")
 RESULTS: list[tuple[str, bool, str]] = []
 
 
@@ -39,8 +48,8 @@ def main() -> None:
         data={
             "workflow_type": "NVFLARE",
             "workflow_type_version": "2.9",
-            "workflow_url": "logreg-fedavg",
-            "workflow_params": json.dumps({"sites": ["site-1", "site-2"]}),
+            "workflow_url": JOB,
+            "workflow_params": json.dumps({"sites": SITES}),
         },
         headers=AUTH,
         timeout=30,
@@ -65,7 +74,9 @@ def main() -> None:
     check("FLARE job finished", log["outputs"].get("flare_job_status") == "FINISHED:COMPLETED", log["outputs"])
     check(
         "one TES task per site, all COMPLETE",
-        len(log["task_logs"]) >= 2 and all(t["system_logs"] == ["COMPLETE"] for t in log["task_logs"]),
+        sorted(t["name"] for t in log["task_logs"] if t["name"].startswith("fl-client "))
+        == sorted(f"fl-client {site}" for site in SITES)
+        and all(t["system_logs"] == ["COMPLETE"] for t in log["task_logs"]),
         [(t["name"], t["system_logs"]) for t in log["task_logs"]],
     )
     check("run log names its submitter", log["submitter"] == "researcher-1@testbed.invalid", log["submitter"])
@@ -77,16 +88,21 @@ def main() -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = pathlib.Path(tmp) / "model.npy"
             path.write_bytes(model.content)
+            expect = ["--expect", EXPECTED_ACCURACY] if EXPECTED_ACCURACY else []
             done = subprocess.run(
-                [sys.executable, "/app/testset/evaluate.py", str(path), "--data", "/testset-data"],
+                [sys.executable, "/app/testset/evaluate.py", str(path), "--data", "/testset-data", *expect],
                 capture_output=True,
                 text=True,
                 check=False,
             )
-            check("federated model beats both local ones", done.returncode == 0, (done.stdout + done.stderr).strip())
+            check(
+                "federated model beats every local one" + (f", at {EXPECTED_ACCURACY}" if EXPECTED_ACCURACY else ""),
+                done.returncode == 0,
+                (done.stdout + done.stderr).strip(),
+            )
 
     # A client's CSR slot is in the record of its TES task (hack H3): it must be dead by now
-    site_tes = {"fl-client site-1": "http://funnel-site-1:8000", "fl-client site-2": "http://funnel-site-2:8000"}
+    site_tes = {f"fl-client {site}": f"http://funnel-{site}:8000" for site in SITES}
     gateway = os.environ.get("TES_GATEWAY_URL", "")
     headers = {}
     if gateway:

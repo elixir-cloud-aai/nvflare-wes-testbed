@@ -1,0 +1,62 @@
+# Override: a third site, with a Funnel and a network of its own like the
+# other two, and the runs of the tests with all three (issue #53). The NVFlare
+# job takes exactly as many sites as it is built for, so runs use
+# `logreg-fedavg-3`. Synthetic data only. Use with:
+#   docker compose -f compose.yaml -f compose.three-sites.yaml --profile test ...
+services:
+  fl-hub:
+    depends_on:
+      funnel-site-3:
+        condition: service_healthy
+    environment:
+      WES_SITES: >-
+        {"site-1": {"tes": "http://funnel-site-1:8000", "data": "file:///data/site-1.csv"},
+        "site-2": {"tes": "http://funnel-site-2:8000", "data": "file:///data/site-2.csv"},
+        "site-3": {"tes": "http://funnel-site-3:8000", "data": "file:///data/site-3.csv"}}
+    networks: [control, site-1, site-2, site-3]
+
+  # As `funnel-site-1` and `funnel-site-2` in `compose.yaml`
+  funnel-site-3:
+    image: nvflare-testbed-funnel:local
+    build:
+      context: .
+      dockerfile: images/Dockerfile.funnel
+    command: ["server", "run", "--config", "/etc/funnel.yaml"]
+    # Hack H9: root and the Docker socket, to start sibling containers
+    user: "0:0"
+    healthcheck:
+      test: ["CMD", "/app/funnel", "task", "list", "--server", "http://localhost:8000"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 3s
+    volumes:
+      - ./compose/funnel-site-3.yaml:/etc/funnel.yaml:ro
+      - ./testset/data/site-3.csv:/data/site-3.csv:ro
+      - /tmp/nvflare-wes-testbed/site-3:/tmp/nvflare-wes-testbed/site-3
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [control, site-3]
+
+  e2e:
+    environment:
+      E2E_SITES: site-1,site-2,site-3
+      E2E_JOB: logreg-fedavg-3
+      EXPECTED_ACCURACY: "0.975"
+
+  fedavg-e2e:
+    environment:
+      E2E_SITES: site-1,site-2,site-3
+      EXPECTED_ACCURACY: "0.975"
+
+  # The job of three sites in the simulator (T1 with three sites)
+  simulator:
+    command:
+      - >-
+        python job.py --workspace /tmp/sim --rounds 5 --sites 3
+        && python /app/testset/evaluate.py /tmp/sim/logreg-fedavg-3/server/simulate_job/models/server.npy
+        --data /data --expect 0.975
+
+networks:
+  site-3:
+    name: nvflare-wes-testbed-site-3
+    internal: true

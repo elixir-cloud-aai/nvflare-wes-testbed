@@ -92,6 +92,8 @@ services:
     environment:
       WES_URL: http://fl-hub:8080/ga4gh/wes/v1
       WES_OIDC_TOKEN_URL: http://fake-idp:8080/oidc/token
+      # Of the federated model on the holdout set, as in `testset/README.md`
+      EXPECTED_ACCURACY: "0.975"
     volumes:
       # Only to compare with models trained at one site alone: the user has no
       # business reading site data in real life (hack H12)
@@ -109,6 +111,8 @@ services:
     environment:
       WES_URL: http://fl-hub:8080/ga4gh/wes/v1
       WES_OIDC_TOKEN_URL: http://fake-idp:8080/oidc/token
+      # As for `e2e`
+      EXPECTED_ACCURACY: "0.975"
     volumes:
       # As for `e2e` (hack H12)
       - ./testset/data:/testset-data:ro
@@ -131,7 +135,7 @@ services:
       - >-
         python job.py --workspace /tmp/sim --rounds 5
         && python /app/testset/evaluate.py /tmp/sim/logreg-fedavg/server/simulate_job/models/server.npy
-        --data /data
+        --data /data --expect 0.975
     volumes:
       - ./testset/data:/data:ro
     network_mode: none

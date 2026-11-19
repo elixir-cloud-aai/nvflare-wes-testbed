@@ -2,6 +2,10 @@
 
 As T2 (`tests/e2e.py`), but with workflow type `FEDAVG`: no NVFlare, no FL
 port, rounds of one TES task per site, averaged by the WES (`wes/fedavg.py`).
+
+The sites come from `E2E_SITES` (comma-separated, by default `site-1,site-2`);
+each site `site-<k>` has its TES at `funnel-site-<k>` (`compose.three-sites.yaml`). With
+`EXPECTED_ACCURACY`, the federated model must have that holdout accuracy.
 """
 
 import json
@@ -20,8 +24,10 @@ AUTH = header()
 ROUNDS = 5
 TIMEOUT = 600
 TERMINAL = {"COMPLETE", "EXECUTOR_ERROR", "SYSTEM_ERROR", "CANCELED"}
+SITES = os.environ.get("E2E_SITES", "site-1,site-2").split(",")
+EXPECTED_ACCURACY = os.environ.get("EXPECTED_ACCURACY", "")
 # Plain HTTP on the private network of the testbed (hack H7)
-SITE_TES = {"site-1": "http://funnel-site-1:8000", "site-2": "http://funnel-site-2:8000"}
+SITE_TES = {site: f"http://funnel-{site}:8000" for site in SITES}
 RESULTS: list[tuple[str, bool, str]] = []
 
 
@@ -38,7 +44,7 @@ def check(name: str, passed: bool, detail: object = "") -> None:
 
 
 def submit(workflow_url: str = "logreg", **params: object) -> requests.Response:
-    """Ask the WES for a `FEDAVG` run of both sites.
+    """Ask the WES for a `FEDAVG` run of the sites.
 
     Args:
         workflow_url: Name of the workload.
@@ -53,7 +59,7 @@ def submit(workflow_url: str = "logreg", **params: object) -> requests.Response:
             "workflow_type": "FEDAVG",
             "workflow_type_version": "1.0",
             "workflow_url": workflow_url,
-            "workflow_params": json.dumps({"sites": ["site-1", "site-2"], **params}),
+            "workflow_params": json.dumps({"sites": SITES, **params}),
         },
         headers=AUTH,
         timeout=30,
@@ -90,7 +96,7 @@ def main() -> None:
     print(json.dumps(log, indent=2), flush=True)
     check("run is COMPLETE", state == "COMPLETE", f"{state} after {time.monotonic() - started:.0f} s")
     check("all rounds done", log["outputs"].get("rounds_completed") == ROUNDS, log["outputs"])
-    expected = [f"fedavg {site} round {r}" for r in range(1, ROUNDS + 1) for site in ("site-1", "site-2")]
+    expected = [f"fedavg {site} round {r}" for r in range(1, ROUNDS + 1) for site in SITES]
     check(
         "one TES task per site and round, all COMPLETE",
         [t["name"] for t in log["task_logs"]] == expected
@@ -105,17 +111,22 @@ def main() -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = pathlib.Path(tmp) / "model.npy"
             path.write_bytes(model.content)
+            expect = ["--expect", EXPECTED_ACCURACY] if EXPECTED_ACCURACY else []
             done = subprocess.run(
-                [sys.executable, "/app/testset/evaluate.py", str(path), "--data", "/testset-data"],
+                [sys.executable, "/app/testset/evaluate.py", str(path), "--data", "/testset-data", *expect],
                 capture_output=True,
                 text=True,
                 check=False,
             )
-            check("federated model beats both local ones", done.returncode == 0, (done.stdout + done.stderr).strip())
+            check(
+                "federated model beats every local one" + (f", at {EXPECTED_ACCURACY}" if EXPECTED_ACCURACY else ""),
+                done.returncode == 0,
+                (done.stdout + done.stderr).strip(),
+            )
 
     # What a site's TES keeps of a round: the model in, the update out, and nothing that opens anything
     hub = base.split("://", 1)[1].split(":")[0]
-    for task in log["task_logs"][:2]:
+    for task in log["task_logs"][: len(SITES)]:
         site = task["name"].split()[1]
         full = requests.get(
             # nosemgrep: python.lang.security.audit.insecure-transport.requests.request-with-http.request-with-http

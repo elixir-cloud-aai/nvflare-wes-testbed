@@ -1179,6 +1179,31 @@ def service_info() -> dict[str, Any]:
     }
 
 
+def job_sites(job_dir: pathlib.Path) -> int:
+    """Read how many sites a FLARE job takes.
+
+    The jobs here are built for an exact number of sites (`testset/job_src/job.py`):
+    `min_clients` of the job, which is also `num_clients` of its FedAvg. With
+    more sites, FedAvg would ask a random subset of them each round.
+
+    Args:
+        job_dir: Directory of the job.
+
+    Returns:
+        `min_clients` of the job's `meta.json`.
+
+    Raises:
+        HTTPException: The job doesn't say, as a positive whole number.
+    """
+    try:
+        wanted = json.loads((job_dir / "meta.json").read_text()).get("min_clients")
+    except (OSError, ValueError, AttributeError):
+        wanted = None
+    if isinstance(wanted, bool) or not isinstance(wanted, int) or wanted < 1:
+        raise HTTPException(400, f"Job {job_dir.name} doesn't say how many sites it takes")
+    return wanted
+
+
 @app.post("/ga4gh/wes/v1/runs")
 def run_workflow(
     workflow_type: Annotated[str, Form(max_length=20)],
@@ -1195,8 +1220,10 @@ def run_workflow(
         workflow_type_version: `2.9` for `NVFLARE`, `1.0` for `FEDAVG`.
         workflow_url: Name of a job (`NVFLARE`) or of a workload (`FEDAVG`) in
             the image (no uploads, so no user code).
-        workflow_params: JSON object, with the sites to use (`sites`), and for
-            `FEDAVG` the number of rounds (`rounds`, by default 5).
+        workflow_params: JSON object, with the sites to use (`sites`, by
+            default all), and for `FEDAVG` the number of rounds (`rounds`, by
+            default 5). A job of `NVFLARE` takes exactly as many sites as its
+            `min_clients` (`logreg-fedavg` two, `logreg-fedavg-<n>` n).
         tags: JSON object with tags of the run.
         caller: The caller's identity.
 
@@ -1222,6 +1249,15 @@ def run_workflow(
         job_dir = (JOBS / workflow_url).resolve()
         if job_dir.parent != JOBS.resolve() or not job_dir.is_dir():
             raise HTTPException(400, f"Unknown job {workflow_url}; available: {sorted(p.name for p in JOBS.iterdir())}")
+        # Each site once: a site is an FL client by its name, and FLARE has one client of a name
+        sites = list(dict.fromkeys(sites))
+        wanted = job_sites(job_dir)
+        if len(sites) != wanted:
+            raise HTTPException(
+                400,
+                f"Job {workflow_url} takes {wanted} sites, not {len(sites)}; for {len(sites)},"
+                f" use the job for that many (available: {sorted(p.name for p in JOBS.iterdir())})",
+            )
         target, args = execute, (job_dir, sites, caller.admin)
     elif (workflow_type, workflow_type_version) == (fedavg.WORKFLOW_TYPE, fedavg.WORKFLOW_TYPE_VERSION):
         try:

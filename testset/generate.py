@@ -75,5 +75,6 @@ def main() -> None:
     for k in range(3, args.shares + 1):
         write(args.out / f"site-{k}.csv", sample(rng, ROWS, *SHARES[k - 1]))
 
+
 if __name__ == "__main__":
     main()

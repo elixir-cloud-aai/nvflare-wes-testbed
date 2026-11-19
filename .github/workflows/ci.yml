@@ -124,6 +124,18 @@ jobs:
         run: |
           docker compose --profile test down -v
           docker compose -f compose.yaml -f compose.public-data.yaml --profile test run --rm -T e2e
+      # The job for three sites, and both workflow types, with a third Funnel
+      - name: Run with three sites (T1, T2, T10)
+        run: |
+          docker compose --profile test down -v
+          docker compose -f compose.yaml -f compose.three-sites.yaml --profile test run --rm -T simulator
+          docker compose -f compose.yaml -f compose.three-sites.yaml --profile test run --rm -T e2e
+          docker compose -f compose.yaml -f compose.three-sites.yaml --profile test run --rm -T fedavg-e2e
+      - name: Show logs of the run with three sites
+        if: failure()
+        run: docker compose -f compose.yaml -f compose.three-sites.yaml logs fl-hub funnel-site-3
+      - name: Remove the containers of the run with three sites
+        run: docker compose -f compose.yaml -f compose.three-sites.yaml --profile test down -v
       - name: Run the hub for real sites, with its reverse proxy
         run: |
           docker compose --profile test down -v
