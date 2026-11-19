@@ -7,6 +7,7 @@ the others by their number of sites.
 """
 
 import importlib.util
+import inspect
 import json
 import pathlib
 import subprocess
@@ -15,10 +16,16 @@ import tempfile
 from typing import Any
 
 import numpy as np
+from nvflare.app_common.workflows.fedavg import FedAvg
 
 EVALUATE = "/app/testset/evaluate.py"
-# What FedAvg of NVFlare 2.9 takes when a job's config leaves `num_clients` out
-FEDAVG_DEFAULT_NUM_CLIENTS = 3
+# What FedAvg takes when a job's config leaves `num_clients` out, read from NVFlare itself
+# (FedAvg passes it on to a base class, so the first class of its MRO that names it)
+FEDAVG_DEFAULT_NUM_CLIENTS = next(
+    inspect.signature(cls.__init__).parameters["num_clients"].default
+    for cls in FedAvg.__mro__
+    if "num_clients" in inspect.signature(cls.__init__).parameters
+)
 
 
 def load_module(name: str, path: str) -> Any:
@@ -113,7 +120,8 @@ def main() -> None:
         "every share is compared": "site-10 alone" in good.stdout,
         "the expected accuracy passes": good.returncode == 0,
         "another expected accuracy fails": other.returncode != 0 and "expected 0.975" in other.stderr,
-        "a model that doesn't beat the local ones fails": bad.returncode != 0,
+        "a model that doesn't beat the local ones fails": bad.returncode != 0
+        and "doesn't beat the local ones" in bad.stderr,
         "the job of two sites keeps its name": job.job_name(2) == "logreg-fedavg",
         "the jobs of more sites are named by their number": [job.job_name(n) for n in (3, 4)]
         == ["logreg-fedavg-3", "logreg-fedavg-4"],

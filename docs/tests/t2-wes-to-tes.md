@@ -30,10 +30,11 @@ With three sites, a third Funnel with a network of its own, and the job `logreg-
 
 ```sh
 docker compose -f compose.yaml -f compose.three-sites.yaml --profile test run --rm e2e
+docker compose -f compose.yaml -f compose.three-sites.yaml --profile test run --rm probe-site-3
 docker compose -f compose.yaml -f compose.three-sites.yaml --profile test down -v
 ```
 
-It ends with `13/13 checks passed`, with the same accuracy, 0.975. `run --rm probe-site-3` checks that a task at site 3 reaches the hub only, as [T3](t3-isolation.md) does for the other two.
+It ends with `13/13 checks passed`, with the same accuracy, 0.975. `probe-site-3`, while the hub still runs, checks that a task at site 3 reaches the hub only, as [T3](t3-isolation.md) does for the other two.
 
 To see the connections on the server's side during a run:
 
