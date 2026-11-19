@@ -113,6 +113,8 @@ def main() -> None:
             path.write_bytes(model.content)
             expect = ["--expect", EXPECTED_ACCURACY] if EXPECTED_ACCURACY else []
             done = subprocess.run(
+                # An argument list, no shell: EXPECTED_ACCURACY from the test's compose file is one argument
+                # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args
                 [sys.executable, "/app/testset/evaluate.py", str(path), "--data", "/testset-data", *expect],
                 capture_output=True,
                 text=True,
