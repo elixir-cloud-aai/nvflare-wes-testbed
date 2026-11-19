@@ -1204,6 +1204,15 @@ def job_sites(job_dir: pathlib.Path) -> int:
     return wanted
 
 
+def available_jobs() -> list[str]:
+    """List the FLARE jobs of the image.
+
+    Returns:
+        The names of the jobs, sorted.
+    """
+    return sorted(path.name for path in JOBS.iterdir())
+
+
 @app.post("/ga4gh/wes/v1/runs")
 def run_workflow(
     workflow_type: Annotated[str, Form(max_length=20)],
@@ -1248,15 +1257,15 @@ def run_workflow(
     if (workflow_type, workflow_type_version) == ("NVFLARE", "2.9"):
         job_dir = (JOBS / workflow_url).resolve()
         if job_dir.parent != JOBS.resolve() or not job_dir.is_dir():
-            raise HTTPException(400, f"Unknown job {workflow_url}; available: {sorted(p.name for p in JOBS.iterdir())}")
+            raise HTTPException(400, f"Unknown job {workflow_url}; available: {available_jobs()}")
         # Each site once: a site is an FL client by its name, and FLARE has one client of a name
         sites = list(dict.fromkeys(sites))
         wanted = job_sites(job_dir)
         if len(sites) != wanted:
             raise HTTPException(
                 400,
-                f"Job {workflow_url} takes {wanted} sites, not {len(sites)}; for {len(sites)},"
-                f" use the job for that many (available: {sorted(p.name for p in JOBS.iterdir())})",
+                f"Job {workflow_url} takes {wanted} sites, not {len(sites)} distinct ones; name {wanted} sites"
+                f" in workflow_params, or use a job for {len(sites)} if there is one (available: {available_jobs()})",
             )
         target, args = execute, (job_dir, sites, caller.admin)
     elif (workflow_type, workflow_type_version) == (fedavg.WORKFLOW_TYPE, fedavg.WORKFLOW_TYPE_VERSION):

@@ -12,7 +12,7 @@
 4. The global model can be downloaded, and beats models trained on any one share of the test set alone on the holdout set, with the accuracy of T1: `federated 0.975`.
 5. The records of the tasks name no hub, link or token, a task fetches nothing but its data, and its output holds its update.
 
-`tests/fedavg_check.py` checks the rest against a fake TES, with no network: rounds chain (each gets the average of the last, weighted by the rows of each site), a run of three sites averages over all three, a failed task or a bad update ends the run as `EXECUTOR_ERROR` at once, also while other tasks of the round still run, without echoing what the task printed, and a round that doesn't end in time fails the run, and cancels its tasks. It also checks that malformed requests get `400` without starting a run, as do `NVFLARE` runs with another number of sites than the job takes, and that a site's round trains exactly as the NVFlare client of T2 does. `tests/fedavg_test.py` unit-tests `wes/fedavg.py`, the parsing of updates included, with no image.
+`tests/fedavg_check.py` checks the rest against a fake TES, with no network: rounds chain (each gets the average of the last, weighted by the rows of each site), a run of three sites averages over all three, a failed task or a bad update ends the run as `EXECUTOR_ERROR` at once, also while other tasks of the round still run, without echoing what the task printed, and a round that doesn't end in time fails the run, and cancels its tasks. It also checks that malformed requests get `400` without starting a run, as do `NVFLARE` runs with another number of sites than the job takes, and jobs that don't say how many they take, and that a site's round trains exactly as the NVFlare client of T2 does. `tests/fedavg_test.py` unit-tests `wes/fedavg.py`, the parsing of updates included, with no image.
 
 ## Steps
 
@@ -24,7 +24,7 @@ docker compose --profile test run --rm -T fedavg-e2e
 docker compose --profile test down -v
 ```
 
-`fedavg-check` ends with `36/36 checks passed`, `fedavg-e2e` with `18/18 checks passed`. A run takes about 12 seconds, as each round costs a task start at each site.
+`fedavg-check` ends with `45/45 checks passed`, `fedavg-e2e` with `18/18 checks passed`. A run takes about 12 seconds, as each round costs a task start at each site.
 
 With three sites, the run takes all three, with no job to pick, gets the same accuracy, 0.975, and ends with `22/22 checks passed`:
 

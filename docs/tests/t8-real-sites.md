@@ -27,12 +27,12 @@ These are what we hope for. Anything else is a result.
     ```sh
     curl -H "Authorization: Bearer <token>" \
         -F workflow_type=NVFLARE -F workflow_type_version=2.9 \
-        -F workflow_url=logreg-fedavg \
-        -F 'workflow_params={"sites": ["<site>", "<site>"]}' \
+        -F workflow_url=<job> \
+        -F 'workflow_params={"sites": [<sites>]}' \
         https://<hub>/ga4gh/wes/v1/runs
     ```
 
-    Each job takes an exact number of sites, and the WES refuses a run with another number (`400`): `logreg-fedavg` takes two, `logreg-fedavg-3` three, `logreg-fedavg-4` four. Give the sites the shares of the test set in order, one each: see [Running with n sites](../setup/real-sites.md#running-with-n-sites). With one site, export a job for it first (`python job.py --sites 1 --export-to <dir>` in `testset/job_src`), and build an image with it in `testset/job`, as the WES only takes jobs of its image.
+    `<sites>` names the sites of the sites file, for example `"site-1", "site-2", "site-3"`. Each job takes an exact number of sites, and the WES refuses a run with another number (`400`): `<job>` is `logreg-fedavg` for two sites, `logreg-fedavg-3` for three, `logreg-fedavg-4` for four. Give the sites the shares of the test set in order, one each: see [Running with n sites](../setup/real-sites.md#running-with-n-sites). With one site, export a job for it first (`python job.py --sites 1 --export-to <dir>` in `testset/job_src`), and build an image with it in `testset/job`, as the WES only takes jobs of its image.
 
 5. Follow it with `curl -H "Authorization: Bearer <token>" https://<hub>/ga4gh/wes/v1/runs/<id>`, and at the node with its operator.
 

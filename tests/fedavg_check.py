@@ -283,6 +283,41 @@ def main() -> None:
         }
         started = [run_id for run_id in wes.RUNS if not run_id.startswith("run-")]
 
+        # The refusal says what the job takes, and which jobs there are
+        try:
+            wes.run_workflow(
+                caller=wes.Identity("checker", "checker@testbed.invalid"),
+                workflow_type="NVFLARE",
+                workflow_type_version="2.9",
+                workflow_url="logreg-fedavg",
+                workflow_params=json.dumps({"sites": list(three_sites)}),
+            )
+            mismatch = ""
+        except wes.HTTPException as error:
+            mismatch = str(error.detail)
+
+        # A job that doesn't say how many sites it takes is refused, whatever its meta.json holds
+        bad_meta: dict[str, int] = {}
+        for name, meta in {
+            "no meta.json": None,
+            "meta.json that isn't JSON": "{",
+            "meta.json that isn't an object": "[]",
+            "no min_clients": "{}",
+            "min_clients as a string": '{"min_clients": "2"}',
+            "min_clients as a bool": '{"min_clients": true}',
+            "min_clients of 0": '{"min_clients": 0}',
+        }.items():
+            job = pathlib.Path(directory) / "jobs" / name.replace(" ", "-")
+            job.mkdir(parents=True)
+            if meta is not None:
+                (job / "meta.json").write_text(meta)
+            try:
+                wes.job_sites(job)
+                bad_meta[name] = 0
+            except wes.HTTPException as error:
+                bad_meta[name] = error.status_code
+        good_meta = wes.job_sites(pathlib.Path("/app/testset/job/logreg-fedavg-3"))
+
         # The round of a site trains as the NVFlare client does, so that T10 and T2 compare
         site_round = load_module("site_round", "/app/testset/fedavg/site_round.py")
         client = load_module("client", "/app/testset/job_src/client.py")
@@ -333,6 +368,10 @@ def main() -> None:
         and "site-2" in huge.get("error", ""),
         **{f"{name} is refused": status == 400 for name, status in refusals.items()},
         "no refused request starts a run": started == [],
+        "the refusal names what the job takes and the jobs there are": "takes 2 sites, not 3" in mismatch
+        and "logreg-fedavg-3" in mismatch,
+        **{f"a job with {name} is refused": status == 400 for name, status in bad_meta.items()},
+        "the job of three sites takes three": good_meta == 3,
         "a site's round trains as the NVFlare client": same_training,
     }
     for name, passed in checks.items():

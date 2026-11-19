@@ -125,6 +125,13 @@ services:
     command: ["python3", "/app/tests/fedavg_check.py"]
     network_mode: none
 
+  # The comparison with local models and the names of the jobs: no network needed
+  evaluate-check:
+    image: nvflare-testbed:local
+    profiles: [test]
+    command: ["python3", "/app/tests/evaluate_check.py"]
+    network_mode: none
+
   # The job in the simulator: no network, no TES, no WES (test T1)
   simulator:
     image: nvflare-testbed:local

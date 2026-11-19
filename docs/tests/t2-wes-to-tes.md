@@ -33,7 +33,7 @@ docker compose -f compose.yaml -f compose.three-sites.yaml --profile test run --
 docker compose -f compose.yaml -f compose.three-sites.yaml --profile test down -v
 ```
 
-It ends with `13/13 checks passed`, with the same accuracy, 0.975.
+It ends with `13/13 checks passed`, with the same accuracy, 0.975. `run --rm probe-site-3` checks that a task at site 3 reaches the hub only, as [T3](t3-isolation.md) does for the other two.
 
 To see the connections on the server's side during a run:
 

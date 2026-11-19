@@ -37,6 +37,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     networks: [control, site-3]
 
+  # The accuracies are those of three sites in `testset/README.md`
   e2e:
     environment:
       E2E_SITES: site-1,site-2,site-3
@@ -47,6 +48,19 @@ services:
     environment:
       E2E_SITES: site-1,site-2,site-3
       EXPECTED_ACCURACY: "0.975"
+
+  # What a task can reach at site 3: the hub only (T3), as for the other two
+  probe-site-3:
+    image: nvflare-testbed:local
+    profiles: [test]
+    command:
+      - python3
+      - /app/tests/probe.py
+      - open=fl-hub:8080
+      - closed=funnel-site-1:8000
+      - closed=funnel-site-2:8000
+      - closed=1.1.1.1:443
+    networks: [site-3]
 
   # The job of three sites in the simulator (T1 with three sites)
   simulator:

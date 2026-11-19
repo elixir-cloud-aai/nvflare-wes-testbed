@@ -21,6 +21,14 @@ With three sites, and the job `logreg-fedavg-3`, it prints `federated 0.975` as 
 docker compose -f compose.yaml -f compose.three-sites.yaml --profile test run --rm simulator
 ```
 
+With four sites, and the job `logreg-fedavg-4`, it prints `federated 1.000`; it needs no Funnel, so only the command changes:
+
+```sh
+docker compose --profile test run --rm simulator 'python job.py --workspace /tmp/sim --rounds 5 --sites 4 && python /app/testset/evaluate.py /tmp/sim/logreg-fedavg-4/server/simulate_job/models/server.npy --data /data --expect 1.000'
+```
+
+`docker compose --profile test run --rm evaluate-check` checks the comparison itself: shares found by number, at least two, and `--expect`. CI runs all of these.
+
 ## Questions it answers
 
 Do the job and data work with this version of NVFlare?
