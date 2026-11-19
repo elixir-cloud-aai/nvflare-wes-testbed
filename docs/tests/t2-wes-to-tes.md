@@ -9,7 +9,7 @@ The core of [B1](../testbed/options.md#b1-server-beside-the-wes): a WES run, wit
 1. The WES advertises `NVFLARE`.
 2. The run goes through `RUNNING` to `COMPLETE`, and the FLARE job to `FINISHED:COMPLETED`.
 3. There's one TES task per site, each `COMPLETE`: the clients ended without errors, after the shutdown through the admin API.
-4. The global model can be downloaded, and beats models trained at either site alone on the holdout set.
+4. The global model can be downloaded, beats models trained on any one share of the test set alone on the holdout set, and has the accuracy of [T1](t1-simulator.md), 0.975.
 5. The links to get certificates from CSR are dead after the run.
 
 ## Steps
@@ -24,7 +24,17 @@ To follow a client, in another terminal:
 docker compose logs -f funnel-site-1
 ```
 
-It ends with `10/10 checks passed`. With the data at [public URLs](../setup/real-sites.md#the-test-set), as on real sites, add `-f compose.yaml -f compose.public-data.yaml` after `docker compose`, and it ends with `10/10 checks passed`, as it also checks where the data came from.
+It ends with `11/11 checks passed`. With the data at [public URLs](../setup/real-sites.md#the-test-set), as on real sites, add `-f compose.yaml -f compose.public-data.yaml` after `docker compose`, and it ends with `13/13 checks passed`, as it also checks where the data came from.
+
+With three sites, a third Funnel with a network of its own, and the job `logreg-fedavg-3` ([Running with n sites](../setup/real-sites.md#running-with-n-sites)):
+
+```sh
+docker compose -f compose.yaml -f compose.three-sites.yaml --profile test run --rm e2e
+docker compose -f compose.yaml -f compose.three-sites.yaml --profile test run --rm probe-site-3
+docker compose -f compose.yaml -f compose.three-sites.yaml --profile test down -v
+```
+
+It ends with `13/13 checks passed`, with the same accuracy, 0.975. `probe-site-3`, while the hub still runs, checks that a task at site 3 reaches the hub only, as [T3](t3-isolation.md) does for the other two.
 
 To see the connections on the server's side during a run:
 

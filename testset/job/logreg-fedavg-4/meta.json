@@ -1,0 +1,10 @@
+{
+    "name": "logreg-fedavg-4",
+    "resource_spec": {},
+    "min_clients": 4,
+    "deploy_map": {
+        "app": [
+            "@ALL"
+        ]
+    }
+}

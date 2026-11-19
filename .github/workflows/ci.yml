@@ -102,8 +102,17 @@ jobs:
         run: tests/image-contents.sh
       - name: Build images
         run: docker compose --profile test build
+      - name: Check the comparison with local models
+        run: docker compose --profile test run --rm -T evaluate-check
       - name: Run the job in the simulator (T1)
         run: docker compose --profile test run --rm -T simulator
+      # The job for four sites needs no Funnel: in the simulator only
+      - name: Run the job for four sites in the simulator (T1)
+        run: >-
+          docker compose --profile test run --rm -T simulator
+          'python job.py --workspace /tmp/sim --rounds 5 --sites 4
+          && python /app/testset/evaluate.py /tmp/sim/logreg-fedavg-4/server/simulate_job/models/server.npy
+          --data /data --expect 1.000'
       - name: Run one WES run (T2)
         run: docker compose --profile test run --rm -T e2e
       - name: Check plain FedAvg runs against a fake TES (T10)
@@ -124,6 +133,19 @@ jobs:
         run: |
           docker compose --profile test down -v
           docker compose -f compose.yaml -f compose.public-data.yaml --profile test run --rm -T e2e
+      # The job for three sites, and both workflow types, with a third Funnel
+      - name: Run with three sites (T1, T2, T10)
+        run: |
+          docker compose --profile test down -v
+          docker compose -f compose.yaml -f compose.three-sites.yaml --profile test run --rm -T simulator
+          docker compose -f compose.yaml -f compose.three-sites.yaml --profile test run --rm -T e2e
+          docker compose -f compose.yaml -f compose.three-sites.yaml --profile test run --rm -T fedavg-e2e
+          docker compose -f compose.yaml -f compose.three-sites.yaml --profile test run --rm -T probe-site-3
+      - name: Show logs of the run with three sites
+        if: failure()
+        run: docker compose -f compose.yaml -f compose.three-sites.yaml logs fl-hub funnel-site-3
+      - name: Remove the containers of the run with three sites
+        run: docker compose -f compose.yaml -f compose.three-sites.yaml --profile test down -v
       - name: Run the hub for real sites, with its reverse proxy
         run: |
           docker compose --profile test down -v

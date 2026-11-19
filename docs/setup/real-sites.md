@@ -23,10 +23,24 @@ Sites fetch their share from raw files of this repository, at a fixed commit, so
 |---|---|---|
 | First site | [`site-1.csv`](https://raw.githubusercontent.com/elixir-cloud-aai/nvflare-wes-testbed/b473b4b2d3246d6b5f74c31e209268e0c093e062/testset/data/site-1.csv) | `c578295a4bd973bb98fa2def75cffd50313dd9c7ab6b34f6548124a70103c001` |
 | Second site | [`site-2.csv`](https://raw.githubusercontent.com/elixir-cloud-aai/nvflare-wes-testbed/b473b4b2d3246d6b5f74c31e209268e0c093e062/testset/data/site-2.csv) | `e1ce32c53696909df438ce665fabe78f384b56ff4ce786d9ecb0101dc754ebca` |
+| Third site | [`site-3.csv`](https://raw.githubusercontent.com/elixir-cloud-aai/nvflare-wes-testbed/ca8383db846e2e4026ed81cfff88a2cd27698dd1/testset/data/site-3.csv) | `4994bf229b20893fe7bde50a80543f41fbf4070f6d232cd7e3728f326c052df1` |
+| Fourth site | [`site-4.csv`](https://raw.githubusercontent.com/elixir-cloud-aai/nvflare-wes-testbed/ca8383db846e2e4026ed81cfff88a2cd27698dd1/testset/data/site-4.csv) | `665cb549024bee591d1d1873f585801f37c0d9aa78b8560bb08035234076652f` |
 
-With one site, use the first share. The holdout set isn't for sites: it stays with whoever compares the models.
+The first two shares are at an older commit than the others, as they haven't changed since. The holdout set isn't for sites: it stays with whoever compares the models.
 
-The shares cover different parts of the feature space: give two sites different ones, or the [expected accuracies](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/blob/dev/testset/README.md) won't hold. `compose.public-data.yaml` runs [T2](../tests/t2-wes-to-tes.md) with these URLs, locally, in CI.
+### Running with n sites
+
+With n sites, give them the first n shares, in the order of the table, one each, and run the job for n sites (for one site, see [T8](../tests/t8-real-sites.md#steps)):
+
+| Sites | `workflow_url` (`NVFLARE`) | Expected federated accuracy |
+|---|---|---|
+| 2 | `logreg-fedavg` | 0.975 |
+| 3 | `logreg-fedavg-3` | 0.975 |
+| 4 | `logreg-fedavg-4` | 1.000 |
+
+Name the sites in `workflow_params`, for example `{"sites": ["site-1", "site-2", "site-3"]}`; without it, a run takes all sites of the sites file. The WES refuses an `NVFLARE` run that names a site twice, or whose number of sites differs from what the job takes (its `min_clients`), with `400`: with more sites, FedAvg of NVFlare 2.9 would ask a random subset of them each round, and with fewer, the job wouldn't start. A plain FedAvg run (`FEDAVG`, [T10](../tests/t10-fedavg.md)) takes any number of sites.
+
+The shares cover different parts of the feature space: give each site a different one, or the [expected accuracies](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/blob/dev/testset/README.md) won't hold. `compose.public-data.yaml` runs [T2](../tests/t2-wes-to-tes.md) with the URLs of the first two, locally, in CI, and `compose.three-sites.yaml` runs T2 and T10 with three local sites, in CI.
 
 ## The image
 

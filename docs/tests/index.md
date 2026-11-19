@@ -86,3 +86,16 @@ Same versions as above, x86-64 laptop with Docker 28, after adding the workflow 
 | T10 (`tests/fedavg_check.py`, fake TES) | 28/28 checks |
 | T10 (`fedavg-e2e`, two Funnels) | 18/18 checks; 12 seconds from request to `COMPLETE` for 5 rounds, 10 tasks; the same accuracies as T1 |
 | Hub of `compose.hub.yaml` (`tests/hub.sh`) | All checks passed |
+
+### 2026-11-19
+
+Same versions as above, x86-64 laptop with Docker 28, after adding shares and jobs for three and four sites ([#53](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/53)). All steps of the CI job "End-to-end tests" passed when run by hand, the new three- and four-site steps included; the two-site runs now also check the federated accuracy.
+
+| Test | Result |
+|---|---|
+| T1 | Ran. Holdout accuracy: federated 0.975, site-1 alone 0.825, site-2 alone 0.875, site-3 alone 0.925, site-4 alone 0.900. With three sites (`logreg-fedavg-3`): federated 0.975; with four (`logreg-fedavg-4`): 1.000 |
+| `tests/evaluate_check.py` | 10/10 checks |
+| T3 at site 3 (`probe-site-3`) | Hub reachable; the other two sites and the internet not |
+| T2 | 11/11 checks; with public data URLs 13/13; with three sites (`compose.three-sites.yaml`) 13/13, `FINISHED:COMPLETED`, federated 0.975 |
+| T10 (`tests/fedavg_check.py`, fake TES) | 46/46 checks, among them a run of three sites, `NVFLARE` runs with another number of sites than the job takes refused, and jobs without a usable `min_clients` |
+| T10 (`fedavg-e2e`) | 18/18 checks with two sites, 22/22 with three; federated 0.975 in both |

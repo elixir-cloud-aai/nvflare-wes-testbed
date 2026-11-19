@@ -3,9 +3,11 @@
 The fake TES answers in process, as `tes_request` would: it records the tasks
 it gets, and ends each one as its scenario says, with what the task prints.
 Checks that rounds chain (each round's tasks get the average of the last one),
-that a failed task or a bad update ends the run as `EXECUTOR_ERROR` at once,
-without echoing the output, and that a round that doesn't end in time fails
-the run, and cancels its tasks.
+that a run of three sites averages over all three, that a failed task or a
+bad update ends the run as `EXECUTOR_ERROR` at once, without echoing the
+output, and that a round that doesn't end in time fails the run, and cancels
+its tasks. Also checks which requests the WES refuses, among them `NVFLARE`
+runs with another number of sites than the job takes.
 
 A standalone script, run once per process: it changes globals of the WES.
 """
@@ -119,14 +121,17 @@ def update(weights: list[float], rows: int) -> str:
     return "local training done\nFEDAVG_UPDATE " + json.dumps({"weights": weights, "rows": rows}) + "\n"
 
 
-def run(wes: Any, outcome: Outcome, rounds: int = 2, timeout: float = 300) -> tuple[str, dict[str, Any], FakeTes]:
-    """Carry out one FedAvg run of two sites against a fake TES.
+def run(
+    wes: Any, outcome: Outcome, rounds: int = 2, timeout: float = 300, sites: tuple[str, ...] = ("site-1", "site-2")
+) -> tuple[str, dict[str, Any], FakeTes]:
+    """Carry out one FedAvg run against a fake TES.
 
     Args:
         wes: The WES module.
         outcome: How each task ends.
         rounds: Number of rounds.
         timeout: Seconds for a round.
+        sites: The sites of the run.
 
     Returns:
         The identifier of the run, the run, and the fake TES.
@@ -139,7 +144,7 @@ def run(wes: Any, outcome: Outcome, rounds: int = 2, timeout: float = 300) -> tu
         mock.patch.object(wes.time, "sleep", lambda _: None),
         mock.patch.object(wes, "ROUND_TIMEOUT", timeout),
     ):
-        wes.execute_fedavg(run_id, "logreg", ["site-1", "site-2"], rounds)
+        wes.execute_fedavg(run_id, "logreg", list(sites), rounds)
     return run_id, wes.RUNS[run_id], tes
 
 
@@ -160,6 +165,21 @@ def refusal(wes: Any, **form: str) -> int:
     except wes.HTTPException as error:
         return error.status_code
     return 0
+
+
+def nvflare_refusal(wes: Any, job: str, sites: tuple[str, ...] | None) -> int:
+    """Ask the WES for an `NVFLARE` run, and get the status it refuses it with.
+
+    Args:
+        wes: The WES module.
+        job: Name of the job.
+        sites: The sites, or None for none named (so all of the WES).
+
+    Returns:
+        The status, or 0 if the run was accepted (which no case here should be).
+    """
+    params = "{}" if sites is None else json.dumps({"sites": list(sites)})
+    return refusal(wes, workflow_type="NVFLARE", workflow_type_version="2.9", workflow_url=job, workflow_params=params)
 
 
 def load_module(name: str, path: str) -> Any:
@@ -188,6 +208,7 @@ def main() -> None:
             {
                 "site-1": {"tes": "http://tes-1.invalid", "data": "file:///data/site-1.csv"},
                 "site-2": {"tes": "http://tes-2.invalid", "data": "file:///data/site-2.csv"},
+                "site-3": {"tes": "http://tes-3.invalid", "data": "file:///data/site-3.csv"},
             }
         )
         sys.path.insert(0, "/app")
@@ -195,15 +216,23 @@ def main() -> None:
 
         from wes import app as wes
 
-        # Site 1 adds 1 to each weight, site 2 adds 3 and has three times the rows: the average adds 2.5
+        # Site 1 adds 1 to each weight, site 2 adds 3 and has three times the rows: the average adds 2.5.
+        # Site 3 adds 4 and has 40 rows: with it, the average adds (10 + 90 + 160) / 80 = 3.25
+        steps = {"site-1": (1.0, 10), "site-2": (3.0, 30), "site-3": (4.0, 40)}
+
         def trains(task: dict[str, Any], _number: int) -> tuple[str, str]:
             model = model_of(task)
-            step, rows = (1.0, 10) if task["tags"]["site"] == "site-1" else (3.0, 30)
+            step, rows = steps[task["tags"]["site"]]
             return "COMPLETE", update([w + step for w in model], rows)
 
         good_id, good, good_tes = run(wes, trains, rounds=3)
         model_path = pathlib.Path(directory) / good_id / "global_model.npy"
         model = np.load(model_path).tolist() if model_path.is_file() else None
+
+        three_sites = ("site-1", "site-2", "site-3")
+        three_id, three, three_tes = run(wes, trains, rounds=2, sites=three_sites)
+        three_path = pathlib.Path(directory) / three_id / "global_model.npy"
+        three_model = np.load(three_path).tolist() if three_path.is_file() else None
 
         def fails(task: dict[str, Any], _number: int) -> tuple[str, str]:
             if task["tags"]["site"] == "site-1":
@@ -241,12 +270,57 @@ def main() -> None:
             "workflow_params that isn't an object": refusal(wes, workflow_params="[]"),
             "sites that aren't a list": refusal(wes, workflow_params='{"sites": "site-1"}'),
             "sites that aren't names": refusal(wes, workflow_params='{"sites": [1]}'),
-            "an unknown site": refusal(wes, workflow_params='{"sites": ["site-3"]}'),
+            "an unknown site": refusal(wes, workflow_params='{"sites": ["site-9"]}'),
             "an unknown workflow type": refusal(wes, workflow_type="CWL"),
             "FEDAVG of version 2.9": refusal(wes, workflow_type_version="2.9"),
             "NVFLARE of version 1.0": refusal(wes, workflow_type="NVFLARE", workflow_url="logreg-fedavg"),
+            # The job of two sites would leave a third out of some rounds; the job of three never starts with two
+            "NVFLARE with three sites for the job of two": nvflare_refusal(wes, "logreg-fedavg", three_sites),
+            "NVFLARE with all sites, by default, for the job of two": nvflare_refusal(wes, "logreg-fedavg", None),
+            "NVFLARE with two sites for the job of three": nvflare_refusal(wes, "logreg-fedavg-3", three_sites[:2]),
+            "NVFLARE with a site twice for the job of two": nvflare_refusal(wes, "logreg-fedavg", ("site-1",) * 2),
+            # Two distinct sites, as the job takes, but one named twice
+            "NVFLARE with a site twice among two": nvflare_refusal(
+                wes, "logreg-fedavg", ("site-1", "site-1", "site-2")
+            ),
+            "NVFLARE with three sites for the job of four": nvflare_refusal(wes, "logreg-fedavg-4", three_sites),
         }
         started = [run_id for run_id in wes.RUNS if not run_id.startswith("run-")]
+
+        # The refusal says what the job takes, and which jobs there are
+        try:
+            wes.run_workflow(
+                caller=wes.Identity("checker", "checker@testbed.invalid"),
+                workflow_type="NVFLARE",
+                workflow_type_version="2.9",
+                workflow_url="logreg-fedavg",
+                workflow_params=json.dumps({"sites": list(three_sites)}),
+            )
+            mismatch = ""
+        except wes.HTTPException as error:
+            mismatch = str(error.detail)
+
+        # A job that doesn't say how many sites it takes is refused, whatever its meta.json holds
+        bad_meta: dict[str, int] = {}
+        for name, meta in {
+            "no meta.json": None,
+            "meta.json that isn't JSON": "{",
+            "meta.json that isn't an object": "[]",
+            "no min_clients": "{}",
+            "min_clients as a string": '{"min_clients": "2"}',
+            "min_clients as a bool": '{"min_clients": true}',
+            "min_clients of 0": '{"min_clients": 0}',
+        }.items():
+            job = pathlib.Path(directory) / "jobs" / name.replace(" ", "-")
+            job.mkdir(parents=True)
+            if meta is not None:
+                (job / "meta.json").write_text(meta)
+            try:
+                wes.job_sites(job)
+                bad_meta[name] = 0
+            except wes.HTTPException as error:
+                bad_meta[name] = error.status_code
+        good_meta = wes.job_sites(pathlib.Path("/app/testset/job/logreg-fedavg-3"))
 
         # The round of a site trains as the NVFlare client does, so that T10 and T2 compare
         site_round = load_module("site_round", "/app/testset/fedavg/site_round.py")
@@ -270,6 +344,12 @@ def main() -> None:
         "each round gets the average of the last, weighted by rows": rounds[1] == [[2.5] * 3] * 2
         and rounds[2] == [[5.0] * 3] * 2,
         "the global model is the last average": model == [7.5] * 3,
+        "a run of three sites is COMPLETE": three["state"] == "COMPLETE",
+        "one task per site and round, of three sites": [(t["site"], t["round"]) for t in three["tasks"]]
+        == [(site, r) for r in (1, 2) for site in three_sites],
+        "the average is over all three sites, weighted by rows": [model_of(task) for task in three_tes.tasks[3:]]
+        == [[3.25] * 3] * 3
+        and three_model == [6.5] * 3,
         "the run names its rounds and model": good["outputs"].get("rounds_completed") == 3
         and good["outputs"].get("global_model", "").endswith("/global_model.npy"),
         "no task record holds a link or a token": all(
@@ -292,6 +372,10 @@ def main() -> None:
         and "site-2" in huge.get("error", ""),
         **{f"{name} is refused": status == 400 for name, status in refusals.items()},
         "no refused request starts a run": started == [],
+        "the refusal names what the job takes and the jobs there are": "takes 2 sites, not 3" in mismatch
+        and "logreg-fedavg-3" in mismatch,
+        **{f"a job with {name} is refused": status == 400 for name, status in bad_meta.items()},
+        "the job of three sites takes three": good_meta == 3,
         "a site's round trains as the NVFlare client": same_training,
     }
     for name, passed in checks.items():
