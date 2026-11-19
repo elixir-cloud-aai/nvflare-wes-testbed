@@ -14,7 +14,7 @@ These are what we hope for. Anything else is a result.
 1. A probe task at each node reaches the hub's port.
 2. The node runs the image, with kit and data as inputs.
 3. The client registers with the server, and the job finishes.
-4. The accuracies are those of T1, as the job and data are the same.
+4. The accuracies are those of T1, as the job and data are the same; with three or four sites, those in the [test set's README](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/blob/dev/testset/README.md) (0.975 with three, 1.000 with four).
 5. The task's record at the node says `COMPLETE`.
 
 ## Steps
@@ -22,17 +22,17 @@ These are what we hope for. Anything else is a result.
 1. Deploy the hub, following [Real sites](../setup/real-sites.md#deploying-the-hub).
 2. Run the probe task at each node.
 3. Get a bearer token from the trusted OIDC issuer (`WES_OIDC_ISSUER`), for a subject the hub allows ([H22](../testbed/shortcuts.md#h22) if `WES_OIDC_ALLOWED_SUBS` is set): every request below needs one, mandatory, with no local-only bypass ([H5](../testbed/shortcuts.md#h5)).
-4. Start a run with one site, then with two:
+4. Start a run with one site, then with two, then with all sites that passed the probe:
 
     ```sh
     curl -H "Authorization: Bearer <token>" \
         -F workflow_type=NVFLARE -F workflow_type_version=2.9 \
         -F workflow_url=logreg-fedavg \
-        -F 'workflow_params={"sites": ["<site>"]}' \
+        -F 'workflow_params={"sites": ["<site>", "<site>"]}' \
         https://<hub>/ga4gh/wes/v1/runs
     ```
 
-    The job has `min_clients: 2`: with one site, export it with `min_clients` of 1 first.
+    Each job takes an exact number of sites, and the WES refuses a run with another number (`400`): `logreg-fedavg` takes two, `logreg-fedavg-3` three, `logreg-fedavg-4` four. Give the sites the shares of the test set in order, one each: see [Running with n sites](../setup/real-sites.md#running-with-n-sites). With one site, export a job for it first (`python job.py --sites 1 --export-to <dir>` in `testset/job_src`), and build an image with it in `testset/job`, as the WES only takes jobs of its image.
 
 5. Follow it with `curl -H "Authorization: Bearer <token>" https://<hub>/ga4gh/wes/v1/runs/<id>`, and at the node with its operator.
 
