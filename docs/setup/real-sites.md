@@ -382,7 +382,7 @@ Delete the local files once the Secrets hold them.
 
 ### Through proTES
 
-The [stretch goal](../testbed/index.md#goals) ([#18](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/18)): all tasks go to a [proTES](https://github.com/elixir-cloud-aai/proTES), which forwards each one to the TES of its site, and only there. The hub pins each task with proTES's tag `gateway.backends` (`{"type": "allow", "backends": [...]}`, see proTES's [pinning tasks to a TES instance](https://github.com/elixir-cloud-aai/proTES/blob/dev/docs/plugins.md#pinning-tasks-to-a-tes-instance)): by the site's `backend` in the sites file, if it has one, else by the URL of its `tes`. Tasks never go to another TES; if the pinned one is unknown to proTES or doesn't take the task, the run fails.
+The [stretch goal](../testbed/index.md#goals) ([#18](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/18)): all tasks go to a [proTES](https://github.com/elixir-cloud-aai/proTES), which forwards each one to the TES of its site, and only there. The hub pins each task with proTES's tag `gateway.backends` (`{"type": "allow", "backends": [...]}`, see proTES's [pinning tasks to a TES instance](https://github.com/elixir-cloud-aai/proTES/blob/dev/docs/plugins.md#pinning-tasks-to-a-tes-instance)): by the site's `backend` in the sites file, if it has one, else by the URL of its `tes`. Tasks never go to another TES; if the pinned one is unknown to proTES or doesn't take the task, proTES refuses the task (`503` "No TES instance accepted the task", or `400` for a TES that can't run it), and the run fails. Each `backend` pins one site only: the hub doesn't start with the same `backend` for two sites.
 
 What proTES needs:
 
@@ -392,8 +392,8 @@ What proTES needs:
 
 What the hub needs:
 
-- `TES_GATEWAY_URL`, the URL of proTES, without `/ga4gh/tes/v1`, at `https`.
-- `TES_GATEWAY_TOKEN_SOURCE`: a JSON object with one token source, as for a site: `{"token_file": "/run/secrets/tes-tokens/gateway"}`, or `{"oauth": {...}}`. With a `token_file` or `oauth`, a `401` of proTES is retried once with a new token, as for sites. On Rahti, set `tesGateway.url` and `tesGateway.tokenFile` (a key of `tokenSecret`) or `tesGateway.oauth` instead.
+- `TES_GATEWAY_URL`, the URL of proTES, at `https`; a trailing `/` or `/ga4gh/tes/v1` is dropped.
+- `TES_GATEWAY_TOKEN_SOURCE`: a JSON object with one token source, as for a site: `{"token_file": "/run/secrets/tes-tokens/gateway"}`, or `{"oauth": {...}}`. With a `token_file` or `oauth`, a `401` of proTES is retried once with a new token, as for sites. As for sites, a refresh token that the provider rotates is kept in memory only: after a restart, which forgets runs anyway ([H2](../testbed/shortcuts.md#h2)), the hub needs a fresh one, or a `token_file` that something outside the hub renews. The hub doesn't start with a gateway but no token source (the token URL of the local tests aside). On Rahti, set `tesGateway.url` and `tesGateway.tokenFile` (a key of `tokenSecret`) or `tesGateway.oauth` instead.
 - `tes` in the sites file stays required, for runs without proTES; a site's own token source isn't used through proTES.
 
 For example, a sites file for a proTES that names the TES of site 2 `site-2` (site 1 is pinned by URL):

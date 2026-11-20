@@ -94,9 +94,16 @@ def load_sites(
     sources: dict[str, tokens.TokenSource] = {}
     # Refresh token -> site, to find one in two sites, by the same variable or another
     refresh_tokens: dict[str, str] = {}
+    # Backend -> site: a backend pins the tasks of one site only
+    backends: dict[str, str] = {}
     for name, site in sites.items():
-        if "backend" in site and not (isinstance(site["backend"], str) and site["backend"]):
-            raise ValueError(f"The backend of site {name} must be a non-empty string")
+        if "backend" in site:
+            backend = site["backend"]
+            if not (isinstance(backend, str) and backend):
+                raise ValueError(f"The backend of site {name} must be a non-empty string")
+            if backend in backends:
+                raise ValueError(f"Sites {backends[backend]} and {name} have the same backend")
+            backends[backend] = name
         source = tokens.from_site(name, site, environ)
         if source is None:
             continue
@@ -156,13 +163,15 @@ def load_gateway(
             default the process's.
 
     Returns:
-        The source, or `None` if there is none.
+        The source, or `None` without a gateway, or with the token URL.
 
     Raises:
         ValueError: A source without a gateway, or over plain HTTP, or with the token URL,
-            or one that can't work. The message doesn't hold a token or secret.
+            or one that can't work, or a gateway without a source or the token URL. The message doesn't hold a token or secret.
     """
     if not source_json:
+        if url and not token_url:
+            raise ValueError("A gateway (TES_GATEWAY_URL) needs a token source (TES_GATEWAY_TOKEN_SOURCE)")
         return None
     if not url:
         raise ValueError("A gateway token source needs a gateway (TES_GATEWAY_URL)")
@@ -204,7 +213,8 @@ def drop_secrets(environ: MutableMapping[str, str], sources: Iterable[tokens.Tok
 
 SITES, TOKENS = load_sites(pathlib.Path(SITES_FILE).read_text() if SITES_FILE else os.environ.get("WES_SITES", "{}"))
 # If set, tasks go to this gateway (proTES), pinned to the TES of the site (or its `backend`) by tag
-TES_GATEWAY = os.environ.get("TES_GATEWAY_URL", "")
+# Without a trailing slash or the API's path, which `tes_base` appends
+TES_GATEWAY = os.environ.get("TES_GATEWAY_URL", "").rstrip("/").removesuffix("/ga4gh/tes/v1").rstrip("/")
 # The fake identity provider of the local tests; real gateways take TES_GATEWAY_TOKEN_SOURCE
 TES_GATEWAY_TOKEN_URL = os.environ.get("TES_GATEWAY_TOKEN_URL", "")
 # One token for all tasks through the gateway, whoever starts the run (H25)

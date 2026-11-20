@@ -197,7 +197,20 @@ def main() -> None:
                 gateway_refusals[name] = "accepted"
             except ValueError as error:
                 gateway_refusals[name] = str(error)
-        no_gateway_source = wes.load_gateway("https://gateway", "", "", sites)
+        no_gateway_source = wes.load_gateway("", "", "", sites)
+        fake_idp_source = wes.load_gateway("http://gateway", "http://idp/token", "", sites)
+        gateway_without_token = "accepted"
+        try:
+            wes.load_gateway("https://gateway", "", "", sites)
+        except ValueError as error:
+            gateway_without_token = str(error)
+        same_backend = "accepted"
+        try:
+            wes.load_sites(
+                json.dumps({site: {"tes": f"https://{site}", "backend": "one"} for site in ("site-1", "site-2")})
+            )
+        except ValueError as error:
+            same_backend = str(error)
         bad_backend = "accepted"
         try:
             wes.load_sites(json.dumps({"site-1": {"tes": "https://tes", "backend": ""}}))
@@ -242,7 +255,10 @@ def main() -> None:
         "the gateway refusals don't hold the tokens": "decoy" not in json.dumps(gateway_refusals),
         "a gateway refresh token shared with a site is refused as such": "share a refresh token"
         in gateway_refusals["a gateway refresh token shared with a site"],
-        "no gateway token source, none": no_gateway_source is None,
+        "no gateway, no gateway token source": no_gateway_source is None,
+        "the fake identity provider needs no gateway token source": fake_idp_source is None,
+        "a gateway without a token source is refused": "needs a token source" in gateway_without_token,
+        "two sites with the same backend are refused": "the same backend" in same_backend,
         "an empty backend of a site is refused": bad_backend != "accepted",
         "a site is pinned by the URL of its TES, or its backend": pins
         == [
