@@ -71,6 +71,23 @@
       "type": "string",
       "pattern": "^$|^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$"
     },
+    "tesGateway": {
+      "description": "TES gateway (proTES) that all tasks go through, with its token from a file of tokenSecret or oauth",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url": {"type": "string", "pattern": "^$|^https://\\S+$"},
+        "tokenFile": {
+          "description": "Key of tokenSecret with the gateway's token, or empty",
+          "type": "string",
+          "pattern": "^$|^[-._a-zA-Z0-9]+$"
+        },
+        "oauth": {
+          "description": "As oauth in the sites file, with secrets from envSecret, or empty",
+          "type": "object"
+        }
+      }
+    },
     "podSecurityContext": {"type": "object"},
     "securityContext": {"type": "object"},
     "resources": {"type": "object"}

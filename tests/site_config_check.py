@@ -117,7 +117,67 @@ def main() -> None:
                 refusals[name] = str(error)
         wes.TES_GATEWAY = "https://gateway.example.org"
         gateway_headers = [wes.tes_headers("site-1"), wes.tes_headers("site-3")]
+        # Sites pinned by the URL of their TES, or by their `backend`
+        wes.SITES["site-2"]["backend"] = "site-2-at-gateway"
+        pins = [
+            json.loads(wes.pin_to_site({"tags": {}}, site)["tags"]["gateway.backends"]) for site in ("site-1", "site-2")
+        ]
+        del wes.SITES["site-2"]["backend"]
+        # The gateway's own token goes to it, for every site, never a site's; a token file
+        # that the gateway refused is read again, and the request sent once more
+        gateway_file = pathlib.Path(directory) / "gateway.token"
+        gateway_file.write_text("decoy-gateway-1")
+        wes.GATEWAY_TOKEN = wes.load_gateway(wes.TES_GATEWAY, "", json.dumps({"token_file": str(gateway_file)}), sites)
+        gateway_own = [wes.tes_headers("site-1"), wes.tes_headers("site-3"), wes.tes_headers("server")]
+        gateway_seen: list[str] = []
+
+        def gateway(method: str, url: str, headers: dict[str, str], **kwargs: Any) -> FakeResponse:
+            gateway_seen.append(headers.get("Authorization", ""))
+            if len(gateway_seen) == 1:
+                gateway_file.write_text("decoy-gateway-2")
+                return FakeResponse(401)
+            return FakeResponse(200)
+
+        with mock.patch.object(wes.requests, "request", side_effect=gateway):
+            gateway_renewed = wes.tes_request("POST", "site-1", f"{wes.TES_GATEWAY}/x", timeout=1).status_code
+        wes.GATEWAY_TOKEN = None
         wes.TES_GATEWAY = ""
+        gateway_refusals = {}
+        for name, (url, token_url, source) in {
+            "a gateway token without a gateway": ("", "", '{"token": "decoy-g1"}'),
+            "a gateway token over plain HTTP": ("http://gateway", "", '{"token": "decoy-g2"}'),
+            "a gateway token with the token URL": ("https://gateway", "http://idp/token", '{"token": "decoy-g3"}'),
+            "a gateway token source that isn't JSON": ("https://gateway", "", "decoy-g4"),
+            "a gateway token source that isn't an object": ("https://gateway", "", '["decoy-g5"]'),
+            "a gateway token source without a token": ("https://gateway", "", "{}"),
+            "two gateway token sources": (
+                "https://gateway",
+                "",
+                json.dumps({"token": "decoy-g6", "token_file": str(gateway_file)}),
+            ),
+            "a gateway refresh token shared with a site": (
+                "https://gateway",
+                "",
+                json.dumps({"oauth": tokens_test.oauth(provider.issuer, refresh_token_env="GATEWAY_REFRESH")}),
+            ),
+        }.items():
+            try:
+                wes.load_gateway(
+                    url,
+                    token_url,
+                    source,
+                    sites,
+                    {"SITE_REFRESH_TOKEN": tokens_test.REFRESH_TOKEN, "GATEWAY_REFRESH": tokens_test.REFRESH_TOKEN},
+                )
+                gateway_refusals[name] = "accepted"
+            except ValueError as error:
+                gateway_refusals[name] = str(error)
+        no_gateway_source = wes.load_gateway("https://gateway", "", "", sites)
+        bad_backend = "accepted"
+        try:
+            wes.load_sites(json.dumps({"site-1": {"tes": "https://tes", "backend": ""}}))
+        except ValueError as error:
+            bad_backend = str(error)
 
         file_headers = [wes.tes_headers("site-3")]
         token_file.write_text("decoy-file-token-2")
@@ -153,6 +213,21 @@ def main() -> None:
         "a TES out of reach leaves the state of a task alone": run["tasks"][0]["state"] == "RUNNING",
         **{f"{name} is refused": refusal != "accepted" for name, refusal in refusals.items()},
         "the refusals don't hold the tokens": "decoy" not in json.dumps(refusals),
+        **{f"{name} is refused": refusal != "accepted" for name, refusal in gateway_refusals.items()},
+        "the gateway refusals don't hold the tokens": "decoy" not in json.dumps(gateway_refusals),
+        "a gateway refresh token shared with a site is refused as such": "share a refresh token"
+        in gateway_refusals["a gateway refresh token shared with a site"],
+        "no gateway token source, none": no_gateway_source is None,
+        "an empty backend of a site is refused": bad_backend != "accepted",
+        "a site is pinned by the URL of its TES, or its backend": pins
+        == [
+            {"type": "allow", "backends": ["https://tes.site-1.example.org"]},
+            {"type": "allow", "backends": ["site-2-at-gateway"]},
+        ],
+        "the gateway gets its own token, for every site": gateway_own
+        == [{"Authorization": "Bearer decoy-gateway-1"}] * 3,
+        "a gateway token that the gateway refused is renewed, and the request sent once more": gateway_renewed == 200
+        and gateway_seen == ["Bearer decoy-gateway-1", "Bearer decoy-gateway-2"],
         "a shared refresh token is refused as such": all(
             "share a refresh token" in refusals[name]
             for name in ("a refresh token shared by two sites", "a refresh token in two variables")

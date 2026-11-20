@@ -162,7 +162,9 @@ Caddy gets a certificate for that name, which needs ports 80 and 443 reachable. 
 | `WES_OIDC_ALLOWED_SUBS` | None, any caller | Subjects allowed to use the WES, comma-separated; a static allow-list, not real access control ([H22](../testbed/shortcuts.md#h22)) |
 | `WES_OIDC_ALLOW_HTTP` | None, https required | Local tests only: allows the issuer and its JWKS over plain HTTP. Never set it on a real deployment; an on-path attacker with it set could forge tokens |
 | `WES_INTERNAL_URL` | `https://<FL_SERVER_NAME>` | Base of the links to kits. Keep it `https`, as kits hold private keys |
-| `WES_SITES_FILE` | `./sites.json` | The sites file: name, `tes` and `data`. Add a [token source](#tokens-for-the-tes-of-the-sites) for a TES that needs one, which must then be at an `https` URL |
+| `WES_SITES_FILE` | `./sites.json` | The sites file: name, `tes` and `data`. Add a [token source](#tokens-for-the-tes-of-the-sites) for a TES that needs one, which must then be at an `https` URL, and a `backend` for a site [through proTES](#through-protes) |
+| `TES_GATEWAY_URL` | None, straight to each TES | A TES gateway (proTES) that all tasks go through, pinned to their site: see [Through proTES](#through-protes) |
+| `TES_GATEWAY_TOKEN_SOURCE` | None | The gateway's token, as a JSON object with one [token source](#tokens-for-the-tes-of-the-sites) (`token`, `token_file` or `oauth`); needs `TES_GATEWAY_URL` at `https`. `TES_GATEWAY_TOKEN_URL` is for the local tests only ([T4](../tests/t4-protes.md)) |
 | `HUB_HTTPS_PORT` | `443` | Another port for HTTPS, if the FL port is 443. Then set `WES_INTERNAL_URL` to match, and Let's Encrypt still needs port 80. The redirect from HTTP still points to 443, so use the `https` URL with its port |
 
 Tokens in the sites file stay out of task records and logs, and the file stays out of Git and of the image. Tokens that expire during a run need a `token_file` or `oauth` source: see [Tokens for the TES of the sites](#tokens-for-the-tes-of-the-sites). To check the setup, run the [checks from outside](#checking-the-hub-from-outside) from a machine that isn't in `WES_ALLOWED_IPS`, with the name of the hub for both names, as `python3 tests/outside_check.py <hub> <hub>` (`<hub>:<HUB_HTTPS_PORT>` as the second with another port for HTTPS, and `--fl-port` with another FL port); then the [probe](#probing-a-node), then a run with one site ([T8](../tests/t8-real-sites.md)).
@@ -244,6 +246,9 @@ The Route must say `Admitted=True`. If another project already has its name, the
 | `sitesSecret` | `nvflare-wes-sites` | Secret with the sites file under the key `sites.json` |
 | `tokenSecret` | Empty | Secret with [token files](#tokens-for-the-tes-of-the-sites), one key per site, mounted whole at `/run/secrets/tes-tokens`, so that renewed tokens arrive without a restart. Empty: none |
 | `envSecret` | Empty | Secret whose keys become environment variables of the hub: the secrets that [`oauth`](#tokens-for-the-tes-of-the-sites) sources name. Empty: none |
+| `tesGateway.url` | Empty, straight to each TES | A TES gateway (proTES), `https`, that all tasks go through: see [Through proTES](#through-protes) |
+| `tesGateway.tokenFile` | Empty | The gateway's token: a key of `tokenSecret` with a token file. Or: |
+| `tesGateway.oauth` | Empty | The gateway's token from an OAuth provider, with the keys of [`oauth`](#tokens-for-the-tes-of-the-sites) in the sites file, and its secrets from `envSecret`. One of `tokenFile` and `oauth` is required with a gateway; the chart takes no token as a value |
 | `podSecurityContext` | `runAsNonRoot: true`, `seccompProfile: {type: RuntimeDefault}` | Security context of the pod. On Rahti, `--set podSecurityContext.seccompProfile=null` |
 | `securityContext` | `allowPrivilegeEscalation: false`, all capabilities dropped | Security context of the container |
 | `resources` | 400m CPU and 1 GiB, up to 2 CPUs and 2 GiB | Requests and limits of the pod. The CPU limit stays at most 5 times the request (see LimitRanges above) |
@@ -374,6 +379,33 @@ oc create secret generic nvflare-wes-tes-tokens --from-file=site-2=site-2.token 
 ```
 
 Delete the local files once the Secrets hold them.
+
+### Through proTES
+
+The [stretch goal](../testbed/index.md#goals) ([#18](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/18)): all tasks go to a [proTES](https://github.com/elixir-cloud-aai/proTES), which forwards each one to the TES of its site, and only there. The hub pins each task with proTES's tag `gateway.backends` (`{"type": "allow", "backends": [...]}`, see proTES's [pinning tasks to a TES instance](https://github.com/elixir-cloud-aai/proTES/blob/dev/docs/plugins.md#pinning-tasks-to-a-tes-instance)): by the site's `backend` in the sites file, if it has one, else by the URL of its `tes`. Tasks never go to another TES; if the pinned one is unknown to proTES or doesn't take the task, the run fails.
+
+What proTES needs:
+
+- The TES of each site among its TES instances (`custom.tes.backends`), ideally with an identifier (`id`) each, which goes into the site's `backend`; a TES that proTES finds in a registry is pinned by its URL, so leave `backend` out for it. proTES must reach each TES, and each TES must accept proTES's own token (or none).
+- Clients may choose TES instances (`plugins.client_backends.enabled`, on by default).
+- A token of the hub that proTES accepts, with the role `user`: the hub sends it with every request to proTES, for all sites, and never a site's own token.
+
+What the hub needs:
+
+- `TES_GATEWAY_URL`, the URL of proTES, without `/ga4gh/tes/v1`, at `https`.
+- `TES_GATEWAY_TOKEN_SOURCE`: a JSON object with one token source, as for a site: `{"token_file": "/run/secrets/tes-tokens/gateway"}`, or `{"oauth": {...}}`. With a `token_file` or `oauth`, a `401` of proTES is retried once with a new token, as for sites. On Rahti, set `tesGateway.url` and `tesGateway.tokenFile` (a key of `tokenSecret`) or `tesGateway.oauth` instead.
+- `tes` in the sites file stays required, for runs without proTES; a site's own token source isn't used through proTES.
+
+For example, a sites file for a proTES that names the TES of site 2 `site-2` (site 1 is pinned by URL):
+
+```json
+{
+  "site-1": {"tes": "https://tes.site-1.example.org", "data": "https://data.site-1.example.org/site-1.csv"},
+  "site-2": {"tes": "https://tes.site-2.example.org", "backend": "site-2", "data": "https://data.site-2.example.org/site-2.csv"}
+}
+```
+
+All tasks are then owned in proTES by the one user whose token the hub holds, whoever starts the run ([H25](../testbed/shortcuts.md#h25)).
 
 ### Checking the hub from outside
 

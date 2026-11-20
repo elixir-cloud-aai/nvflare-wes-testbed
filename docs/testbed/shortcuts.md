@@ -48,6 +48,10 @@ All of them, in one place, each with the proper way. Their numbers are referred 
 
 **Update:** it's no longer proTES-only. The WES's own OIDC gate ([H5](#h5)) needs a trusted issuer too, so `compose.yaml` now always runs it, and every local run (not only T4) gets a token from it.
 
+### H25
+
+**Through a real proTES, the hub calls it with one token of its own** (`TES_GATEWAY_TOKEN_SOURCE`), whoever started the run ([Through proTES](../setup/real-sites.md#through-protes)). proTES then owns every task as that one user, and its access control, accounting and logs can't tell the users of the WES apart; whoever holds that token can read and cancel all of them. **Proper way:** the hub exchanges the caller's token for one for proTES (OAuth 2.0 token exchange, RFC 8693), so that each task belongs to the user who started the run, as the [token exchange testbed](https://github.com/elixir-cloud-aai/token-exchange-flow-testbed) sets out.
+
 ## Scheduling
 
 ### H1
@@ -66,7 +70,7 @@ All of them, in one place, each with the proper way. Their numbers are referred 
 
 ### H11
 
-**Sites are a static map in the WES's environment, and tasks are pinned by a TES's URL.** The tag `gateway.backends` does what's needed, but ties a client to an address. **Proper way:** [Cloud Registry](https://github.com/elixir-cloud-aai/cloud-registry) for what exists, and a routing plugin of proTES by site or by where the data is.
+**Sites are a static map in the WES's environment, and tasks are pinned by a TES's URL.** The tag `gateway.backends` does what's needed, but ties a client to an address. A site's `backend` in the sites file pins it by proTES's identifier of its TES instead, which only moves the static map into proTES's configuration. **Proper way:** [Cloud Registry](https://github.com/elixir-cloud-aai/cloud-registry) for what exists, and a routing plugin of proTES by site or by where the data is.
 
 ### H14
 

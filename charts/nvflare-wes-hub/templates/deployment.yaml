@@ -60,6 +60,13 @@ spec:
             - name: WES_OIDC_ALLOWED_SUBS
               value: {{ . | quote }}
             {{- end }}
+            {{- with .Values.tesGateway.url }}
+            # Tasks go through the gateway, with its own token (no secret here)
+            - name: TES_GATEWAY_URL
+              value: {{ . | quote }}
+            - name: TES_GATEWAY_TOKEN_SOURCE
+              value: {{ include "hub.gatewayTokenSource" $ | quote }}
+            {{- end }}
             # The arbitrary user has no home directory
             - name: HOME
               value: /tmp
