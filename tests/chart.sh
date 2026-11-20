@@ -87,6 +87,8 @@ refuse "a gateway token file that isn't a key" "${args[@]}" --set tesGateway.url
     --set tokenSecret=tes-tokens --set tesGateway.tokenFile=../gateway
 refuse "a gateway token as a value" "${args[@]}" --set tesGateway.url=https://protes.example.invalid \
     --set tesGateway.token=decoy
+refuse "a gateway client secret as a value" "${args[@]}" --set tesGateway.url=https://protes.example.invalid \
+    --set envSecret=tes-oauth --set tesGateway.oauth.client_secret=decoy
 
 # Each of these must fail to render, by the chart's own checks
 refuse_render() {
@@ -105,6 +107,10 @@ refuse_render "a gateway without a token" "needs tesGateway.tokenFile or tesGate
     "${args[@]}" "${gateway_arg[@]}"
 refuse_render "a gateway token file without tokenSecret" "which is empty" \
     "${args[@]}" "${gateway_arg[@]}" --set tesGateway.tokenFile=gateway
+refuse_render "a gateway token without a gateway" "need tesGateway.url" "${args[@]}" \
+    --set tokenSecret=tes-tokens --set tesGateway.tokenFile=gateway
+refuse_render "a gateway oauth without envSecret" "from envSecret, which is empty" "${args[@]}" "${gateway_arg[@]}" \
+    --set tesGateway.oauth.grant_type=refresh_token
 refuse_render "a gateway token file and oauth" "not both" "${args[@]}" "${gateway_arg[@]}" \
     --set tokenSecret=tes-tokens --set tesGateway.tokenFile=gateway --set tesGateway.oauth.grant_type=refresh_token
 

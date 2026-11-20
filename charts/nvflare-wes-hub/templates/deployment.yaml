@@ -60,6 +60,9 @@ spec:
             - name: WES_OIDC_ALLOWED_SUBS
               value: {{ . | quote }}
             {{- end }}
+            {{- if and (not .Values.tesGateway.url) (or .Values.tesGateway.tokenFile .Values.tesGateway.oauth) }}
+            {{- fail "tesGateway.tokenFile and tesGateway.oauth need tesGateway.url" }}
+            {{- end }}
             {{- with .Values.tesGateway.url }}
             # Tasks go through the gateway, with its own token (no secret here)
             - name: TES_GATEWAY_URL

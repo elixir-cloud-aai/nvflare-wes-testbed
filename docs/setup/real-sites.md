@@ -248,7 +248,7 @@ The Route must say `Admitted=True`. If another project already has its name, the
 | `envSecret` | Empty | Secret whose keys become environment variables of the hub: the secrets that [`oauth`](#tokens-for-the-tes-of-the-sites) sources name. Empty: none |
 | `tesGateway.url` | Empty, straight to each TES | A TES gateway (proTES), `https`, that all tasks go through: see [Through proTES](#through-protes) |
 | `tesGateway.tokenFile` | Empty | The gateway's token: a key of `tokenSecret` with a token file. Or: |
-| `tesGateway.oauth` | Empty | The gateway's token from an OAuth provider, with the keys of [`oauth`](#tokens-for-the-tes-of-the-sites) in the sites file, and its secrets from `envSecret`. One of `tokenFile` and `oauth` is required with a gateway; the chart takes no token as a value |
+| `tesGateway.oauth` | Empty | The gateway's token from an OAuth provider, with the keys of [`oauth`](#tokens-for-the-tes-of-the-sites) in the sites file (secrets by variable name only), and its secrets from `envSecret`, which it then needs. One of `tokenFile` and `oauth` is required with a gateway, and neither works without one; the chart takes no token or secret as a value |
 | `podSecurityContext` | `runAsNonRoot: true`, `seccompProfile: {type: RuntimeDefault}` | Security context of the pod. On Rahti, `--set podSecurityContext.seccompProfile=null` |
 | `securityContext` | `allowPrivilegeEscalation: false`, all capabilities dropped | Security context of the container |
 | `resources` | 400m CPU and 1 GiB, up to 2 CPUs and 2 GiB | Requests and limits of the pod. The CPU limit stays at most 5 times the request (see LimitRanges above) |
@@ -388,7 +388,7 @@ What proTES needs:
 
 - The TES of each site among its TES instances (`custom.tes.backends`), ideally with an identifier (`id`) each, which goes into the site's `backend`; a TES that proTES finds in a registry is pinned by its URL, so leave `backend` out for it. proTES must reach each TES, and each TES must accept proTES's own token (or none).
 - Clients may choose TES instances (`plugins.client_backends.enabled`, on by default).
-- A token of the hub that proTES accepts, with the role `user`: the hub sends it with every request to proTES, for all sites, and never a site's own token.
+- A token of the hub that proTES accepts, with the role `user`: the hub sends it with every request to proTES, for all sites, and never a site's own token. It doesn't go to the TES of the FL server's task (`FL_SERVER_TES`), which isn't sent through proTES.
 
 What the hub needs:
 

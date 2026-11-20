@@ -83,8 +83,18 @@
           "pattern": "^$|^[-._a-zA-Z0-9]+$"
         },
         "oauth": {
-          "description": "As oauth in the sites file, with secrets from envSecret, or empty",
-          "type": "object"
+          "description": "As oauth in the sites file, with secrets from envSecret (by name, never as values), or empty",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "issuer": {"type": "string"},
+            "token_endpoint": {"type": "string"},
+            "grant_type": {"type": "string"},
+            "client_id": {"type": "string"},
+            "client_secret_env": {"type": "string"},
+            "refresh_token_env": {"type": "string"},
+            "scope": {"type": "string"}
+          }
         }
       }
     },

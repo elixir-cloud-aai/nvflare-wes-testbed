@@ -36,6 +36,9 @@ of `tokenSecret`, or `oauth`, never a token */}}
 {{- end -}}
 {{- dict "token_file" (printf "/run/secrets/tes-tokens/%s" $gateway.tokenFile) | toJson -}}
 {{- else if $gateway.oauth -}}
+{{- if not .Values.envSecret -}}
+{{- fail "tesGateway.oauth takes its secrets from envSecret, which is empty" -}}
+{{- end -}}
 {{- dict "oauth" $gateway.oauth | toJson -}}
 {{- else -}}
 {{- fail "tesGateway.url needs tesGateway.tokenFile or tesGateway.oauth" -}}

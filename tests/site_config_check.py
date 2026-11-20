@@ -115,20 +115,8 @@ def main() -> None:
                 refusals[name] = "accepted"
             except ValueError as error:
                 refusals[name] = str(error)
-        wes.TES_GATEWAY = "https://gateway.example.org"
-        gateway_headers = [wes.tes_headers("site-1"), wes.tes_headers("site-3")]
-        # Sites pinned by the URL of their TES, or by their `backend`
-        wes.SITES["site-2"]["backend"] = "site-2-at-gateway"
-        pins = [
-            json.loads(wes.pin_to_site({"tags": {}}, site)["tags"]["gateway.backends"]) for site in ("site-1", "site-2")
-        ]
-        del wes.SITES["site-2"]["backend"]
-        # The gateway's own token goes to it, for every site, never a site's; a token file
-        # that the gateway refused is read again, and the request sent once more
         gateway_file = pathlib.Path(directory) / "gateway.token"
         gateway_file.write_text("decoy-gateway-1")
-        wes.GATEWAY_TOKEN = wes.load_gateway(wes.TES_GATEWAY, "", json.dumps({"token_file": str(gateway_file)}), sites)
-        gateway_own = [wes.tes_headers("site-1"), wes.tes_headers("site-3"), wes.tes_headers("server")]
         gateway_seen: list[str] = []
 
         def gateway(method: str, url: str, headers: dict[str, str], **kwargs: Any) -> FakeResponse:
@@ -138,10 +126,47 @@ def main() -> None:
                 return FakeResponse(401)
             return FakeResponse(200)
 
-        with mock.patch.object(wes.requests, "request", side_effect=gateway):
-            gateway_renewed = wes.tes_request("POST", "site-1", f"{wes.TES_GATEWAY}/x", timeout=1).status_code
-        wes.GATEWAY_TOKEN = None
-        wes.TES_GATEWAY = ""
+        with mock.patch.object(wes, "TES_GATEWAY", "https://gateway.example.org"):
+            gateway_headers = [wes.tes_headers("site-1"), wes.tes_headers("site-3")]
+            # Sites pinned by the URL of their TES, or by their `backend`
+            with mock.patch.dict(wes.SITES["site-2"], {"backend": "site-2-at-gateway"}):
+                pins = [
+                    json.loads(wes.pin_to_site({"tags": {}}, site)["tags"]["gateway.backends"])
+                    for site in ("site-1", "site-2")
+                ]
+            # The gateway's own token goes to it, for every site, never a site's, and not to the
+            # TES of the FL server; a token file that the gateway refused is read again, and the
+            # request sent once more
+            file_source = wes.load_gateway(wes.TES_GATEWAY, "", json.dumps({"token_file": str(gateway_file)}), sites)
+            with mock.patch.object(wes, "GATEWAY_TOKEN", file_source):
+                gateway_own = [wes.tes_headers("site-1"), wes.tes_headers("site-3")]
+                gateway_server = wes.tes_headers("server")
+                with mock.patch.object(wes.requests, "request", side_effect=gateway):
+                    gateway_renewed = wes.tes_request("POST", "site-1", f"{wes.TES_GATEWAY}/x", timeout=1).status_code
+            # Or from an OAuth provider
+            gateway_environ = {"GATEWAY_REFRESH": tokens_test.REFRESH_TOKEN, "TES_GATEWAY_TOKEN_SOURCE": "{}"}
+            oauth_source = wes.load_gateway(
+                wes.TES_GATEWAY,
+                "",
+                json.dumps({"oauth": tokens_test.oauth(provider.issuer, refresh_token_env="GATEWAY_REFRESH")}),
+                sites,
+                gateway_environ,
+            )
+            with (
+                mock.patch.object(wes, "GATEWAY_TOKEN", oauth_source),
+                mock.patch.object(provider, "status", 200),
+            ):
+                gateway_oauth = wes.tes_headers("site-2")
+            # The fake identity provider of the local tests: its token isn't for the FL server's TES
+            with (
+                mock.patch.object(wes, "TES_GATEWAY_TOKEN_URL", "http://idp.example.org/token"),
+                mock.patch.object(wes.requests, "get") as fake_idp,
+            ):
+                fake_idp.return_value.json.return_value = {"access_token": "fake-idp-token"}
+                fake_idp_headers = [wes.tes_headers("site-1"), wes.tes_headers("server")]
+        # Once read, the secrets of the gateway leave the environment, too
+        if oauth_source is not None:
+            wes.drop_secrets(gateway_environ, [oauth_source])
         gateway_refusals = {}
         for name, (url, token_url, source) in {
             "a gateway token without a gateway": ("", "", '{"token": "decoy-g1"}'),
@@ -225,7 +250,14 @@ def main() -> None:
             {"type": "allow", "backends": ["site-2-at-gateway"]},
         ],
         "the gateway gets its own token, for every site": gateway_own
-        == [{"Authorization": "Bearer decoy-gateway-1"}] * 3,
+        == [{"Authorization": "Bearer decoy-gateway-1"}] * 2,
+        "the gateway's token doesn't go to the TES of the FL server": gateway_server == {},
+        "the gateway's token can come from an OAuth provider": gateway_oauth.get("Authorization", "").startswith(
+            "Bearer access-"
+        ),
+        "the gateway's secrets don't go to child processes": gateway_environ == {},
+        "the fake identity provider's token is for the gateway only": fake_idp_headers
+        == [{"Authorization": "Bearer fake-idp-token"}, {}],
         "a gateway token that the gateway refused is renewed, and the request sent once more": gateway_renewed == 200
         and gateway_seen == ["Bearer decoy-gateway-1", "Bearer decoy-gateway-2"],
         "a shared refresh token is refused as such": all(
