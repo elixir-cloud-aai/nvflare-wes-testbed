@@ -1,7 +1,7 @@
 # Proposals
 
 !!! note "Draft; nothing posted"
-    Section 5 holds draft outcomes and proposals, for further consideration, and only what test results support. These come from the local runs and from the two dress rehearsals on Rahti; the run with two or more sites ([#10](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/10)) may add to them. Nothing is posted anywhere without the maintainer's OK. Whatever is added here stays a draft: it gets finalized elsewhere.
+    Section 5 holds draft outcomes and proposals, for further consideration, and only what test results support. These come from the local runs and from the two dress rehearsals on Rahti; the run with two or more sites ([#10](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/10)) may add to them: boxes headed "To be updated with the results of T8, #10" mark where. Nothing is posted anywhere without the maintainer's OK. Whatever is added here stays a draft: it gets finalized elsewhere.
 
 Each proposal links the [gaps](gap-analysis.md) it closes.
 
@@ -32,6 +32,9 @@ Not every federated job needs all four. A plain FedAvg run ([C4](../testbed/opti
 
 **Open points.** Whether endpoints reachable from other sites are something a TES at a site would offer at all; T5 asks node operators exactly that ([Open questions](open-questions.md)). Names and TLS: the FL server's certificate holds its name, so the name must be known before the task runs, or certificates must be issued once the address is.
 
+!!! info "To be updated with the results of T8, #10"
+    What the operators of partner nodes say to T5's question ([Open questions](open-questions.md)): whether their TES could give a task an endpoint that tasks at other sites reach, and how (for example, a Service and an ingress per task on a TES on Kubernetes, as [B2](../testbed/options.md#b2-server-as-a-tes-task-too) notes), or why not. If none would, that is a result for the Work Stream, too: the server then needs a TES of the federation that offers endpoints, rather than a TES at a site.
+
 ### Time limits for tasks
 
 **Problem.** A task can't state how long it may run. Here, each client runs under a `timeout` of 30 minutes, in the image, and the WES has constants of its own ([H14](../testbed/shortcuts.md#h14)); without the wrapper, a client that loses the server retries forever, and holds its slot at the site. A plain FedAvg run needs the same: the WES fails a round that doesn't end in time, and cancels its tasks ([T10](../tests/t10-fedavg.md)). No backend enforces the limit, and a site can't see it before it admits a task.
@@ -41,6 +44,9 @@ Not every federated job needs all four. A plain FedAvg run ([C4](../testbed/opti
 **What it changes here.** The limit is a backstop, not the way a run ends: when the job ends, the WES should still cancel its participants with TES's existing cancel call, so that they free their slots at once ([H15](../testbed/shortcuts.md#h15)). Cancel does that today when a site is lost: the WES cancels the other clients, and no task is left behind ([T6](../tests/t6-site-loss.md)). The limit covers what that misses, such as a WES that fails before it cancels. Sites also know up front how long a federated task may hold resources, and the wrapper goes away.
 
 **Related in TES.** [#213](https://github.com/ga4gh/task-execution-schemas/issues/213) asks for a time limit on tasks or executors. [#141](https://github.com/ga4gh/task-execution-schemas/pull/141), an open pull request of 2020 marked as work in progress, adds `resources.max_time`, a requested maximum wall time in hours that a queuing engine "may" use to set the priority of a task. This proposal asks for more than a hint: a limit that the TES enforces, and says it enforces, as a federated task that outlives its job holds its slot at the site.
+
+!!! info "To be updated with the results of T8, #10"
+    The limits on the run time of tasks at partner nodes, from question 2 of [What to ask node operators](../setup/real-sites.md#what-to-ask-node-operators), and how long a task took there to start ([T8](../tests/t8-real-sites.md)). Whether the time a task waits counts against its limit, and whether the 30 minutes of the wrapper and the WES's constants fit those nodes.
 
 ### Secrets for tasks
 
@@ -52,6 +58,9 @@ Not every federated job needs all four. A plain FedAvg run ([C4](../testbed/opti
 
 **Related in TES.** Two open issues ask for secrets that the TES itself uses, not the task: credentials to pull images from private registries ([#167](https://github.com/ga4gh/task-execution-schemas/issues/167), asked for by ELIXIR nodes) and to stage inputs and outputs ([#169](https://github.com/ga4gh/task-execution-schemas/issues/169)). They need the same thing, a value that reaches where it's used and no record or log on the way, and one mechanism could serve all three.
 
+!!! info "To be updated with the results of T8, #10"
+    Who can read task records and logs at partner nodes, from question 5 of [What to ask node operators](../setup/real-sites.md#what-to-ask-node-operators), and whether their TES, or anything in front of it, logs the commands of executors. That says how far the one-time links reach at a real node, beyond the hub's own Funnel and TESK.
+
 ### Pinning tasks by a property of a site
 
 **Problem.** A task is pinned to a site by the URL of a TES: directly, or through proTES with the tag `gateway.backends`, which also takes proTES's identifier of the TES (the site's `backend`), a static map all the same ([T4](../tests/t4-protes.md), [H11](../testbed/shortcuts.md#h11)). A run is tied to addresses, and nothing says which site holds which data. A federated job needs exactly one participant at each site that holds a share of the data, wherever that site's TES is. With three or four sites, each must get a different share of the test set, or the expected accuracies don't hold ([Running with n sites](../setup/real-sites.md#running-with-n-sites)): which share is where is in the sites file of the hub, not in anything a site says. A plain FedAvg run pins its tasks from the same sites file ([T10](../tests/t10-fedavg.md)).
@@ -61,6 +70,20 @@ Not every federated job needs all four. A plain FedAvg run ([C4](../testbed/opti
 **What it changes here.** The WES's static map of sites becomes a lookup, in a registry such as the [Cloud Registry](https://github.com/elixir-cloud-aai/cloud-registry), and a site can move its TES without changing any sites file.
 
 **Related in TES.** [#188](https://github.com/ga4gh/task-execution-schemas/issues/188) asks how a TES describes what it can do, so that a WES can choose among TES instances for a task: the routing half of this proposal. [#206](https://github.com/ga4gh/task-execution-schemas/issues/206) asks for a capabilities endpoint, which the open pull request [#244](https://github.com/ga4gh/task-execution-schemas/pull/244) adds. Properties of a site, such as who runs it and which data it holds, would fit there, or in service info, as long as a gateway can match a task against them.
+
+!!! info "To be updated with the results of T8, #10"
+    For each partner node: what its TES says in its service info (implementation, version, and whether `organization` names who runs it), and what it took to put its TES and its share of the test set into the sites file. Through proTES on real nodes, pinning is the [stretch goal](../testbed/index.md#goals) ([#18](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/18)), not part of T8.
+
+### Seen, not proposed
+
+What the tests showed of TES that isn't a proposal here, as it's guidance or a node's own policy, or has a proposal in TES already.
+
+- **What a task returns.** A plain FedAvg run gets each site's update from the output of its task (`stdout` in view `FULL`), and TES promises nothing about how much of it a TES keeps ([C4](../testbed/options.md#c4-fedavg-as-a-plain-workflow), [T10](../tests/t10-fedavg.md)). That works for a model of three numbers. [#102](https://github.com/ga4gh/task-execution-schemas/issues/102) proposes outputs whose content the TES returns in the task's record, up to a size that every TES supports: the same need, from workflow engines.
+- **Where a task may connect to.** Whether a task may reach the hub's FL port, or only 443, is a node's policy ([G11](gap-analysis.md#g11), [T7](../tests/t7-port-443.md)). A TES could say in its service info what its tasks may reach, so that a WES knows before it submits, as the [probe](../setup/real-sites.md#probing-a-node) finds out now.
+- **Tokens for the TES of each site.** Where the WES gets a token that every site accepts ([G5](gap-analysis.md#g5)) is guidance for a federation, not a field of TES. [#198](https://github.com/ga4gh/task-execution-schemas/issues/198) and [#199](https://github.com/ga4gh/task-execution-schemas/pull/199) would mandate bearer tokens as JWT, which settles their format, not where they come from.
+
+!!! info "To be updated with the results of T8, #10"
+    What the probes and the run found about egress at partner nodes: which ports their tasks reached, and through what ([Open questions](open-questions.md)). If nodes differ, or a proxy is in between, "Where a task may connect to" may become a proposal. Also whether a TES at a partner node needs a token, and where the hub got one ([G5](gap-analysis.md#g5)), and, if [T10](../tests/t10-fedavg.md) runs on the same nodes, how much of a task's output their TES keeps.
 
 ## ELIXIR On-Cloud
 
