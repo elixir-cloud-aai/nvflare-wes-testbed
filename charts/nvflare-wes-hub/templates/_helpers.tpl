@@ -23,3 +23,24 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "hub.image" -}}
 {{- printf "%s:%s" .Values.image.repository .Values.image.tag -}}
 {{- end -}}
+
+{{/* The token source of the gateway (`TES_GATEWAY_TOKEN_SOURCE`): a token file
+of `tokenSecret`, or `oauth`, never a token */}}
+{{- define "hub.gatewayTokenSource" -}}
+{{- $gateway := .Values.tesGateway -}}
+{{- if and $gateway.tokenFile $gateway.oauth -}}
+{{- fail "tesGateway: set tokenFile or oauth, not both" -}}
+{{- else if $gateway.tokenFile -}}
+{{- if not .Values.tokenSecret -}}
+{{- fail "tesGateway.tokenFile is a key of tokenSecret, which is empty" -}}
+{{- end -}}
+{{- dict "token_file" (printf "/run/secrets/tes-tokens/%s" $gateway.tokenFile) | toJson -}}
+{{- else if $gateway.oauth -}}
+{{- if not .Values.envSecret -}}
+{{- fail "tesGateway.oauth takes its secrets from envSecret, which is empty" -}}
+{{- end -}}
+{{- dict "oauth" $gateway.oauth | toJson -}}
+{{- else -}}
+{{- fail "tesGateway.url needs tesGateway.tokenFile or tesGateway.oauth" -}}
+{{- end -}}
+{{- end -}}

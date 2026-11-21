@@ -21,7 +21,9 @@ custom:
         url_schemes: [http]
         auth: none
         labels: {tes.version: "1.1"}
+      # Named, so that the WES pins site 2 by this identifier (its `backend`)
       - type: ga4gh-tes
+        id: site-2
         url: http://funnel-site-2:8000
         url_schemes: [http]
         auth: none

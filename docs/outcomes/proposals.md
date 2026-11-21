@@ -44,7 +44,7 @@ What TES lacks for participants of a federated job, against [TES 1.1](https://gi
 
 ### Pinning tasks by a property of a site
 
-**Problem.** A task is pinned to a site by the URL of a TES: directly, or through proTES with the tag `gateway.backends` ([T4](../tests/t4-protes.md), [H11](../testbed/shortcuts.md#h11)). A run is tied to addresses, and nothing says which site holds which data. A federated job needs exactly one participant at each site that holds a share of the data, wherever that site's TES is.
+**Problem.** A task is pinned to a site by the URL of a TES: directly, or through proTES with the tag `gateway.backends`, which also takes proTES's identifier of the TES (the site's `backend`), a static map all the same ([T4](../tests/t4-protes.md), [H11](../testbed/shortcuts.md#h11)). A run is tied to addresses, and nothing says which site holds which data. A federated job needs exactly one participant at each site that holds a share of the data, wherever that site's TES is.
 
 **Proposal.** A task may state constraints on where it runs by properties of a site, or of the data it needs, rather than by an address: for example, the organization that runs a TES, as in the `organization` of its GA4GH service info, or a data identifier that only resolves at its site, as with DRS. A gateway routes the task to a TES that meets them, or refuses it when none does; a TES refuses a task whose constraints it doesn't meet. TES 1.1's `resources.zones` and `tags` don't carry this: zones are within a TES, and tags have no agreed meaning.
 

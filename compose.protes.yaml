@@ -25,6 +25,11 @@ services:
     environment:
       TES_GATEWAY_URL: http://protes:8080
       TES_GATEWAY_TOKEN_URL: http://fake-idp:8080/oidc/token?sub=fl-wes
+      # Site 1 is pinned by the URL of its TES, site 2 by the identifier that
+      # proTES gives its TES (`id` in `compose/protes.yaml`)
+      WES_SITES: >-
+        {"site-1": {"tes": "http://funnel-site-1:8000", "data": "file:///data/site-1.csv"},
+        "site-2": {"tes": "http://funnel-site-2:8000", "backend": "site-2", "data": "file:///data/site-2.csv"}}
     depends_on:
       protes:
         condition: service_healthy

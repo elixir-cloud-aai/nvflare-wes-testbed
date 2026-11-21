@@ -81,6 +81,38 @@ refuse "an address out of range" "${args[@]}" --set loadBalancerIP=256.0.0.1
 refuse "an unknown value" "${args[@]}" --set flport=30003
 refuse "a token Secret that isn't a name" "${args[@]}" --set tokenSecret=Not_A_Name
 refuse "an environment Secret that isn't a name" "${args[@]}" --set envSecret=Not_A_Name
+refuse "a gateway that isn't https" "${args[@]}" --set tesGateway.url=http://protes.example.invalid \
+    --set tokenSecret=tes-tokens --set tesGateway.tokenFile=gateway
+refuse "a gateway token file that isn't a key" "${args[@]}" --set tesGateway.url=https://protes.example.invalid \
+    --set tokenSecret=tes-tokens --set tesGateway.tokenFile=../gateway
+refuse "a gateway token as a value" "${args[@]}" --set tesGateway.url=https://protes.example.invalid \
+    --set tesGateway.token=decoy
+refuse "a gateway client secret as a value" "${args[@]}" --set tesGateway.url=https://protes.example.invalid \
+    --set envSecret=tes-oauth --set tesGateway.oauth.client_secret=decoy
+
+# Each of these must fail to render, by the chart's own checks
+refuse_render() {
+    local what="$1" why="$2"
+    shift 2
+    if helm template hub "${chart}" "$@" >/dev/null 2>"${out}"; then
+        fail "renders ${what}"
+    elif grep -q "${why}" "${out}"; then
+        ok "refuses ${what}"
+    else
+        fail "fails otherwise ${what}: $(head -c 300 "${out}")"
+    fi
+}
+gateway_arg=(--set tesGateway.url=https://protes.example.invalid)
+refuse_render "a gateway without a token" "needs tesGateway.tokenFile or tesGateway.oauth" \
+    "${args[@]}" "${gateway_arg[@]}"
+refuse_render "a gateway token file without tokenSecret" "which is empty" \
+    "${args[@]}" "${gateway_arg[@]}" --set tesGateway.tokenFile=gateway
+refuse_render "a gateway token without a gateway" "need tesGateway.url" "${args[@]}" \
+    --set tokenSecret=tes-tokens --set tesGateway.tokenFile=gateway
+refuse_render "a gateway oauth without envSecret" "from envSecret, which is empty" "${args[@]}" "${gateway_arg[@]}" \
+    --set tesGateway.oauth.grant_type=refresh_token
+refuse_render "a gateway token file and oauth" "not both" "${args[@]}" "${gateway_arg[@]}" \
+    --set tokenSecret=tes-tokens --set tesGateway.tokenFile=gateway --set tesGateway.oauth.grant_type=refresh_token
 
 helm lint --strict "${chart}" "${args[@]}" >/dev/null && ok "lint" || fail "lint"
 
@@ -184,6 +216,7 @@ expect "no token Secret by default" \
     "[${dep} | .spec.template.spec.volumes[] | select(.name == \"tes-tokens\")] | length" "0"
 expect "no token mount by default" "[${ctr} | .volumeMounts[] | select(.name == \"tes-tokens\")] | length" "0"
 expect "no environment from a Secret by default" "[${ctr} | .envFrom // [] | .[]] | length" "0"
+expect "no gateway by default" "[${env} | select(.name | test(\"^TES_GATEWAY\"))] | length" "0"
 
 # Non-default OIDC values, to see them arrive
 helm template hub "${chart}" "${args[@]}" --set oidcAudience=other-aud --set 'oidcAlgorithms=RS256\,ES256' \
@@ -209,6 +242,22 @@ expect "the sites file still from its Secret" \
     "${ctr} | .volumeMounts[] | select(.name == \"sites\") | .mountPath" "/run/secrets/sites"
 expect "environment from the Secret" "${ctr} | .envFrom[0].secretRef.name" "tes-oauth"
 expect "no secret as a value of the chart" "[${env} | select(.name | test(\"TOKEN|SECRET\"))] | length" "0"
+
+# A gateway, with its token from a file of the token Secret, or from `oauth`:
+# the source names a file or variables, never a token
+helm template hub "${chart}" "${args[@]}" "${gateway_arg[@]}" --set tokenSecret=tes-tokens \
+    --set tesGateway.tokenFile=gateway >"${out}"
+expect "the gateway" "${env} | select(.name == \"TES_GATEWAY_URL\") | .value" "https://protes.example.invalid"
+expect "the gateway's token file" "${env} | select(.name == \"TES_GATEWAY_TOKEN_SOURCE\") | .value" \
+    '{"token_file":"/run/secrets/tes-tokens/gateway"}'
+helm template hub "${chart}" "${args[@]}" "${gateway_arg[@]}" --set envSecret=tes-oauth \
+    --set tesGateway.oauth.issuer=https://login.example.invalid/oidc/ \
+    --set tesGateway.oauth.grant_type=refresh_token \
+    --set tesGateway.oauth.client_id=hub \
+    --set tesGateway.oauth.refresh_token_env=GATEWAY_REFRESH_TOKEN >"${out}"
+expect "the gateway's oauth source" \
+    "${env} | select(.name == \"TES_GATEWAY_TOKEN_SOURCE\") | .value | from_json | .oauth.refresh_token_env" \
+    "GATEWAY_REFRESH_TOKEN"
 
 # Clusters with a LimitRange often allow a CPU limit of at most 5 times the
 # request (`maxLimitRequestRatio`), and refuse pods above it. Every container

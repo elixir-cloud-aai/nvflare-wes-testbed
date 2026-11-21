@@ -42,7 +42,7 @@ import threading
 import time
 import urllib.parse
 import uuid
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Iterable, Mapping, MutableMapping
 from typing import Annotated, Any, NamedTuple
 
 import anyio
@@ -94,28 +94,131 @@ def load_sites(
     sources: dict[str, tokens.TokenSource] = {}
     # Refresh token -> site, to find one in two sites, by the same variable or another
     refresh_tokens: dict[str, str] = {}
+    # Backend -> site: a backend pins the tasks of one site only
+    backends: dict[str, str] = {}
     for name, site in sites.items():
+        if "backend" in site:
+            backend = site["backend"]
+            if not (isinstance(backend, str) and backend):
+                raise ValueError(f"The backend of site {name} must be a non-empty string")
+            if backend in backends:
+                raise ValueError(f"Sites {backends[backend]} and {name} have the same backend")
+            backends[backend] = name
         source = tokens.from_site(name, site, environ)
         if source is None:
             continue
         if not str(site.get("tes", "")).startswith("https://"):
             raise ValueError(f"The token of site {name} only goes to a TES over https")
-        # Each source renews on its own: with a provider that rotates refresh tokens, a shared one
-        # would be spent by one site and refused (or the whole family revoked) for the other
-        variable = site.get("oauth", {}).get("refresh_token_env")
-        if variable:
-            value = environ[variable]
-            if value in refresh_tokens:
-                raise ValueError(f"Sites {refresh_tokens[value]} and {name} share a refresh token")
-            refresh_tokens[value] = name
+        claim_refresh_token(refresh_tokens, f"site {name}", site, environ)
         sources[name] = source
     return sites, sources
 
 
+def claim_refresh_token(
+    owners: dict[str, str], owner: str, config: Mapping[str, Any], environ: Mapping[str, str]
+) -> None:
+    """Note the refresh token of a token source, unless another source has it already.
+
+    Each source renews on its own: with a provider that rotates refresh tokens, a shared
+    one would be spent by one source and refused (or the whole family revoked) for the
+    other.
+
+    Args:
+        owners: The owner of each refresh token so far, updated here.
+        owner: Who the source is for, as in messages (e.g. `site site-1`).
+        config: The token source, with `oauth` if it is one.
+        environ: The environment with the refresh token.
+
+    Raises:
+        ValueError: Another source has the same refresh token, by the same variable or
+            another. The message doesn't hold the token.
+    """
+    variable = config.get("oauth", {}).get("refresh_token_env")
+    if not variable:
+        return
+    value = environ[variable]
+    if value in owners:
+        raise ValueError(f"The {owners[value]} and the {owner} share a refresh token")
+    owners[value] = owner
+
+
+def load_gateway(
+    url: str,
+    token_url: str,
+    source_json: str,
+    sites: Mapping[str, Mapping[str, Any]],
+    environ: Mapping[str, str] | None = None,
+) -> tokens.TokenSource | None:
+    """Read the token source of the gateway, and check it as the sources of sites.
+
+    Args:
+        url: The URL of the gateway (`TES_GATEWAY_URL`), empty without one.
+        token_url: The token URL of the fake identity provider of the local tests
+            (`TES_GATEWAY_TOKEN_URL`), empty without one.
+        source_json: The token source of the gateway (`TES_GATEWAY_TOKEN_SOURCE`), a JSON
+            object with one of the keys of a site's token source (`token`, `token_file`
+            or `oauth`), empty without one.
+        sites: The sites, whose `oauth` sources must not share a refresh token with it.
+        environ: The environment that an `oauth` source takes its secrets from, by
+            default the process's.
+
+    Returns:
+        The source, or `None` without a gateway, or with the token URL.
+
+    Raises:
+        ValueError: A source without a gateway, or over plain HTTP, or with the token URL,
+            or one that can't work, or a gateway without a source or the token URL. The message doesn't hold a token or secret.
+    """
+    if not source_json:
+        if url and not token_url:
+            raise ValueError("A gateway (TES_GATEWAY_URL) needs a token source (TES_GATEWAY_TOKEN_SOURCE)")
+        return None
+    if not url:
+        raise ValueError("A gateway token source needs a gateway (TES_GATEWAY_URL)")
+    if token_url:
+        raise ValueError("Set either TES_GATEWAY_TOKEN_SOURCE or TES_GATEWAY_TOKEN_URL")
+    if not url.startswith("https://"):
+        raise ValueError("The token of the gateway only goes to a gateway over https")
+    try:
+        config = json.loads(source_json)
+    except json.JSONDecodeError:
+        # Without the error, which may quote the token
+        raise ValueError("The gateway token source isn't JSON") from None
+    if not isinstance(config, dict):
+        raise ValueError("The gateway token source must be a JSON object")  # noqa: TRY004 - a config error, as the others
+    environ = os.environ if environ is None else environ
+    source = tokens.from_site("gateway", config, environ)
+    if source is None:
+        raise ValueError("The gateway token source needs token, token_file or oauth")
+    owners: dict[str, str] = {}
+    for name, site in sites.items():
+        # The sites' variables may be gone already (`drop_secrets`), once their sources hold them
+        if (variable := site.get("oauth", {}).get("refresh_token_env")) and variable in environ:
+            claim_refresh_token(owners, f"site {name}", site, environ)
+    claim_refresh_token(owners, "gateway", config, environ)
+    return source
+
+
+def drop_secrets(environ: MutableMapping[str, str], sources: Iterable[tokens.TokenSource]) -> None:
+    """Remove the token sources' secrets from the environment, once they hold them.
+
+    Args:
+        environ: The environment, changed here: without `TES_GATEWAY_TOKEN_SOURCE` and
+            the variables that the sources read (`env_names`).
+        sources: The token sources of the sites and the gateway.
+    """
+    for name in {"TES_GATEWAY_TOKEN_SOURCE", *(name for source in sources for name in source.env_names)}:
+        environ.pop(name, None)
+
+
 SITES, TOKENS = load_sites(pathlib.Path(SITES_FILE).read_text() if SITES_FILE else os.environ.get("WES_SITES", "{}"))
-# If set, tasks go to this gateway (proTES), pinned to the TES of the site by tag
-TES_GATEWAY = os.environ.get("TES_GATEWAY_URL", "")
+# If set, tasks go to this gateway (proTES), pinned to the TES of the site (or its `backend`) by tag
+# Without a trailing slash or the API's path, which `tes_base` appends
+TES_GATEWAY = os.environ.get("TES_GATEWAY_URL", "").rstrip("/").removesuffix("/ga4gh/tes/v1").rstrip("/")
+# The fake identity provider of the local tests; real gateways take TES_GATEWAY_TOKEN_SOURCE
 TES_GATEWAY_TOKEN_URL = os.environ.get("TES_GATEWAY_TOKEN_URL", "")
+# One token for all tasks through the gateway, whoever starts the run (H25)
+GATEWAY_TOKEN = load_gateway(TES_GATEWAY, TES_GATEWAY_TOKEN_URL, os.environ.get("TES_GATEWAY_TOKEN_SOURCE", ""), SITES)
 FL_SERVER_MODE = os.environ.get("FL_SERVER_MODE", "local")
 FL_SERVER_TES = os.environ.get("FL_SERVER_TES", "")
 # `grpc` or `http`, the latter (WebSocket) for sites that only allow port 443 out
@@ -123,8 +226,7 @@ FL_SCHEME = os.environ.get("FL_SCHEME", "grpc")
 FL_PORT = int(os.environ.get("FL_PORT", "8002"))
 # The sources hold the secrets now, and all settings are read: child processes (`nvflare`, the
 # FL server) aren't passed them
-for _name in {name for source in TOKENS.values() for name in source.env_names}:
-    os.environ.pop(_name, None)
+drop_secrets(os.environ, [*TOKENS.values(), *([GATEWAY_TOKEN] if GATEWAY_TOKEN is not None else [])])
 ORG = "testbed"
 ADMIN_PORT = 8003
 START_TIMEOUT = 180
@@ -483,16 +585,24 @@ def publish_kit(kit_dir: pathlib.Path, run_dir: pathlib.Path) -> tuple[str, str]
 
 
 def site_source(site: str) -> tokens.TokenSource | None:
-    """Get the token source of a site, if its token goes anywhere.
+    """Get the token source for the requests of a site.
 
     Args:
         site: Name of the site, or `server` for the task of the FL server.
 
     Returns:
-        The source, or `None` if the site has none, or there's a gateway: the
-        token of a site is for its TES alone, and never goes to a gateway.
+        With a gateway, its source (`TES_GATEWAY_TOKEN_SOURCE`) for all sites, if
+        it has one, and none for the FL server, whose TES isn't the gateway: the
+        token of a site is for its TES alone, and never goes to a gateway (H25).
+        Without one, the site's source, if any. `None` with the token URL of the
+        local tests, which `tes_headers` asks itself.
     """
-    return None if TES_GATEWAY_TOKEN_URL or TES_GATEWAY else TOKENS.get(site)
+    if TES_GATEWAY_TOKEN_URL:
+        return None
+    if TES_GATEWAY:
+        # The task of the FL server goes straight to its TES (`FL_SERVER_TES`), never to the gateway
+        return GATEWAY_TOKEN if site in SITES else None
+    return TOKENS.get(site)
 
 
 def tes_headers(site: str) -> dict[str, str]:
@@ -509,7 +619,8 @@ def tes_headers(site: str) -> dict[str, str]:
         tokens.TokenError: The site's token couldn't be had.
     """
     if TES_GATEWAY_TOKEN_URL:
-        token = requests.get(TES_GATEWAY_TOKEN_URL, timeout=10).json()["access_token"]
+        # A token of the fake identity provider is for the gateway, which the FL server's task skips
+        token = requests.get(TES_GATEWAY_TOKEN_URL, timeout=10).json()["access_token"] if site in SITES else ""
     else:
         source = site_source(site)
         token = source.token() if source is not None else ""
@@ -622,11 +733,14 @@ def pin_to_site(task: dict[str, Any], site: str) -> dict[str, Any]:
         site: Name of the site.
 
     Returns:
-        The task, with the tag `gateway.backends` if there's a gateway. Without
-        one, the task goes straight to the TES of the site anyway.
+        The task, with the tag `gateway.backends` if there's a gateway: the site's
+        `backend` (an identifier of the gateway's TES instance, or a URL), else
+        the URL of its TES. Without one, the task goes straight to the TES of the
+        site anyway.
     """
     if TES_GATEWAY:
-        task["tags"]["gateway.backends"] = json.dumps({"type": "allow", "backends": [SITES[site]["tes"]]})
+        backend = SITES[site].get("backend") or SITES[site]["tes"]
+        task["tags"]["gateway.backends"] = json.dumps({"type": "allow", "backends": [backend]})
     return task
 
 
