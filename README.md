@@ -3,7 +3,7 @@
 A sandbox for running federated learning jobs with [NVIDIA FLARE](https://github.com/NVIDIA/NVFlare) through [GA4GH WES](https://github.com/ga4gh/workflow-execution-service-schemas) and [TES](https://github.com/ga4gh/task-execution-schemas), and an evaluation of the ways to do that.
 
 > [!WARNING]
-> **This has only run on laptops, against two local Funnel instances, and twice on one cluster, with both sites in the hub's own cluster. It has not touched a partner's node.** Its WES trusts one identity provider and gives every caller the same role, it sends one-time links for certificates through task records, and it takes every shortcut it can: [all of them are listed](docs/testbed/shortcuts.md). Never for production, and never for real data: its test set is synthetic and tiny.
+> **This has run on laptops, against two local Funnel instances, and three times on one cluster, with both sites on a TESK in the hub's own cluster (the last time with tokens sent to that TESK, which didn't check them). No run has used a node of another organization yet: probes at the DE Node reached two TES deployments there, and neither can take part as it stands.** Its WES trusts one identity provider and gives every caller the same role, it sends one-time links for certificates through task records, and it takes every shortcut it can: [all of them are listed](docs/testbed/shortcuts.md). Never for production, and never for real data: its test set is synthetic and tiny.
 
 ## Quick start
 
