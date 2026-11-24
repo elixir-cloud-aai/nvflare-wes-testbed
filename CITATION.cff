@@ -20,7 +20,7 @@ authors:
     affiliation: >-
       Biozentrum, University of Basel, Basel, Switzerland; SIB Swiss Institute
       of Bioinformatics, Lausanne, Switzerland
-  - given-names: Francois
+  - given-names: François
     family-names: Ancien
     alias: Fancien
 repository-code: "https://github.com/elixir-cloud-aai/nvflare-wes-testbed"
