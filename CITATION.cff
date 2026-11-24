@@ -1,0 +1,35 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software, please cite it using the metadata from this file.
+  Authors are listed by the number of lines they committed, then by the
+  number of their commits (see "Citation metadata" in the contributing guide
+  of elixir-cloud-aai).
+title: NVFlare on WES and TES testbed
+abstract: >-
+  A sandbox for running federated learning jobs with NVIDIA FLARE through
+  GA4GH Workflow Execution Service (WES) and Task Execution Service (TES),
+  and an evaluation of the ways to do that: a thin WES with the FL server
+  beside it, FL clients as TES tasks at each site, tests from a laptop to
+  real ELIXIR Nodes, and a report of the results, gaps and proposals for
+  TES. Not for production, and not for real data.
+type: software
+authors:
+  - given-names: Alexander
+    family-names: Kanitz
+    orcid: "https://orcid.org/0000-0002-3468-0652"
+    affiliation: >-
+      Biozentrum, University of Basel, Basel, Switzerland; SIB Swiss Institute
+      of Bioinformatics, Lausanne, Switzerland
+  - given-names: François
+    family-names: Ancien
+    alias: Fancien
+repository-code: "https://github.com/elixir-cloud-aai/nvflare-wes-testbed"
+keywords:
+  - GA4GH
+  - TES
+  - WES
+  - federated learning
+  - NVIDIA FLARE
+license: Apache-2.0
+version: "0.1.0"
+date-released: "2026-11-24"

@@ -1,9 +1,14 @@
 # One image for the FL server, the FL clients, the simulator and the thin WES.
 # Sandbox only. Holds no startup kits, keys or site data: those come in at run
 # time, and the job in the image has no data in it.
-FROM python:3.12-slim@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30
-RUN apt update \
-    && apt install -y curl \
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+# Upgrades the packages of the base image, whose fixes may not be in it yet,
+# as the scan of the release image (`release.yml`) fails on fixable critical
+# and high vulnerabilities
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y curl \
+    && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir \
         "nvflare==2.9.0" \
         "numpy>=1.26,<3" \
