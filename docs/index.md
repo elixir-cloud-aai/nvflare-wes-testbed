@@ -6,10 +6,10 @@ It's work towards milestone M4.5 of ECP work package 4 ("ELIXIR Cloud is availab
 
 ## Status
 
-!!! warning "This has only run on laptops, and on one cluster"
-    What ran: a WES run, through a thin WES in this repository, with one NVFlare client per site as a TES task on two local [Funnel](https://github.com/calypr/funnel) instances, also through [proTES](https://github.com/elixir-cloud-aai/proTES), with mutual TLS and a federated model that beats local ones ([results of the local runs](tests/index.md#local-runs)). Three times, on 2026-11-12, 2026-11-16 and 2026-11-19, as dress rehearsals: the hub on Rahti, with both sites as tasks on one TESK without authentication in the same cluster, ending `COMPLETE`; the last time, the hub sent an LS Login token to that TESK for each site, which it ignored ([results](outcomes/results.md)). Probes at the DE Node, on 2026-11-21, reached two TES deployments that check tokens; neither can take part as it stands. What didn't run: a run at a node of another organization, a run on a TES that checks tokens, or Poiesis. The WES only takes callers with a token of one trusted OIDC issuer ([H5](testbed/shortcuts.md#h5)), but every caller gets the same role in NVFlare. Sites make their own keys, and only a one-time link for a certificate passes through task records ([H3](testbed/shortcuts.md#h3)). Locally, the "sites" share a kernel. A passing run shows that the pieces fit, and says nothing about whether a real node lets a task reach the FL server.
+!!! warning "This has run once over two Nodes, both with TES of our own"
+    On 2026-11-24, a WES run with one NVFlare client per site as a TES task ran over the FI Node's TESK on Rahti and the CZ Node's TESK at CERIT-SC, both checking LS Login tokens, and ended `COMPLETE`, with a federated model as good as in the simulator. Before that: local runs on laptops, with two Funnel instances, also through [proTES](https://github.com/elixir-cloud-aai/proTES) ([results of the local runs](tests/index.md#local-runs)), and three dress rehearsals on Rahti, with both sites on one TESK in the hub's cluster. See the [Report](outcomes/report.md) for the milestones, the evidence and the limitations. Both TES of the run are run by this testbed's maintainers, both are TESK, and the DE Node couldn't join, as its tasks have no way out. The WES only takes callers with a token of one trusted OIDC issuer ([H5](testbed/shortcuts.md#h5)), but every caller gets the same role in NVFlare, and the hub holds one user's token for all sites. Sites make their own keys, and only a one-time link for a certificate passes through task records ([H3](testbed/shortcuts.md#h3)).
 
-The [Outcomes](outcomes/open-questions.md) are drafts, from the local runs, the dress rehearsals and the probes; rows from real sites follow from the run with two or more sites ([#10](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/10)).
+The [Outcomes](outcomes/report.md) are drafts: the report, the results, open questions, the gap analysis and proposals.
 
 ## Goals
 
@@ -31,7 +31,7 @@ It ends with `8/8 checks passed`.
 
 ## Reading paths
 
-- **For the recommendation, or the M4.5 report:** [Options](testbed/options.md), then [Shortcuts and hacks](testbed/shortcuts.md).
+- **For the results, or the M4.5 report:** the [Report](outcomes/report.md), then [Options](testbed/options.md) and [Shortcuts and hacks](testbed/shortcuts.md).
 - **To understand the idea:** [Use case](background/use-case.md), [Requirements](background/requirements.md), [Design](background/design.md). These don't depend on any product.
 - **To try it on your machine:** [Installation](setup/installation.md), then the [Tests](tests/index.md).
 - **To run it on real sites, or as a node operator:** [Real sites](setup/real-sites.md) and [T8](tests/t8-real-sites.md).
