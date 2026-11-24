@@ -2,8 +2,18 @@
 
 A sandbox for running federated learning jobs with [NVIDIA FLARE](https://github.com/NVIDIA/NVFlare) through [GA4GH WES](https://github.com/ga4gh/workflow-execution-service-schemas) and [TES](https://github.com/ga4gh/task-execution-schemas), and an evaluation of the ways to do that.
 
+## Milestones
+
+| Milestone | Date | Sites | Auth at the TES | Result |
+|---|---|---|---|---|
+| First run on one cluster | 2026-11-12 | Both on one TESK, in the hub's cluster on Rahti | None | `COMPLETE` |
+| First run with tokens | 2026-11-19 | As above | Sent, not checked | `COMPLETE` |
+| First multi-site run | 2026-11-24 | FI Node (TESK on Rahti, CSC) and CZ Node (TESK at CERIT-SC) | LS Login, checked | `COMPLETE`, accuracy 0.975 as in the simulator |
+
+What ran, how, and what it means: the [Report](docs/outcomes/report.md); the raw rows: [Results](docs/outcomes/results.md).
+
 > [!WARNING]
-> **This has only run on laptops, against two local Funnel instances, and twice on one cluster, with both sites in the hub's own cluster. It has not touched a partner's node.** Its WES trusts one identity provider and gives every caller the same role, it sends one-time links for certificates through task records, and it takes every shortcut it can: [all of them are listed](docs/testbed/shortcuts.md). Never for production, and never for real data: its test set is synthetic and tiny.
+> **A sandbox, and never for production or real data.** Both TES of the multi-site run are run by this testbed's maintainers, both are TESK, and the model and data are toys. Its WES trusts one identity provider and gives every caller the same role, it holds one user's token for all sites, it sends one-time links for certificates through task records, and it takes every shortcut it can: [all of them are listed](docs/testbed/shortcuts.md). Its test set is synthetic and tiny.
 
 ## Quick start
 
@@ -32,7 +42,7 @@ Docs are written for Read the Docs (MkDocs Material), and readable here as Markd
 - [Shortcuts and hacks](docs/testbed/shortcuts.md): each with what the proper way would be
 - [Setup](docs/setup/installation.md)
 - [Tests](docs/tests/index.md)
-- [Outcomes](docs/outcomes/open-questions.md): drafts from the local runs and the dress rehearsals; real-site rows follow
+- [Outcomes](docs/outcomes/report.md): the report of results and discussion, and drafts of open questions, gaps and proposals
 - [Issues](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues): the work ahead
 - [About](docs/about/index.md)
 
