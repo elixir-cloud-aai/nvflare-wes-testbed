@@ -120,7 +120,9 @@ All of them, in one place, each with the proper way. Their numbers are referred 
 
 ### H20
 
-**A loose image.** One image holds all participants, the WES and the tests, on Python 3.12, with version ranges for most packages. Pushed to Docker Hub without scans or signatures, with only the default build provenance. **Proper way:** separate images, locked dependencies, and signing, as in the other repositories of the organization.
+**A loose image.** One image holds all participants, the WES and the tests, on Python 3.12, with version ranges for most packages. Pushed to Docker Hub by CI, as `dev` and `sha-<commit>`, without scans or signatures, with only the default build provenance. **Proper way:** separate images, locked dependencies, and signing, as in the other repositories of the organization.
+
+**Update:** releases (`X.Y.Z`, from version tags) are scanned for fixable critical and high vulnerabilities, signed with Sigstore and attested, as in the other repositories of the organization ([Releasing](../about/index.md#releasing)). It's still one image for all, with version ranges, and the images of `dev` stay unscanned and unsigned.
 
 ### H21
 

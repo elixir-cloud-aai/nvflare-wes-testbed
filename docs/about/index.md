@@ -10,7 +10,7 @@ See the repository's [contributors](https://github.com/elixir-cloud-aai/nvflare-
 
 ## Citation
 
-There's no citable release. To refer to the testbed, give the repository's URL and the commit you used.
+Cite a release, with the metadata in [`CITATION.cff`](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/blob/dev/CITATION.cff). The notes of each release are in [Releases](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/releases) and under `docs/releases/`.
 
 ## License
 
@@ -39,3 +39,15 @@ python3 -m venv .venv && .venv/bin/pip install '.[docs]' && .venv/bin/mkdocs ser
 ```
 
 To change the job or the data, see [`testset/README.md`](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/blob/dev/testset/README.md).
+
+## Releasing
+
+Releases are version tags `vX.Y.Z` on a commit of `dev`, from which `.github/workflows/release.yml` publishes the image of the participants as `elixircloud/nvflare-wes-testbed:X.Y.Z`, scanned, signed and with its build provenance attested, and creates the GitHub release, a pre-release until 1.0.0. The chart of the hub isn't released: install it from the repository at the tag.
+
+1. **Release preparation:** a pull request sets the version in `pyproject.toml` and `CITATION.cff`, and `date-released` in `CITATION.cff` to the day of the tag, and adds the curated notes `docs/releases/X.Y.Z.md`, in the organization's format: an intro paragraph, then the sections `## Breaking changes`, `## Features`, `## Security`, `## Fixes`, `## Documentation` and `## Maintenance` (empty ones left out), each bullet ending with its issue and pull request numbers. Add the notes to the nav under "Releases", newest first.
+2. **Tag** the merged commit, once CI passed for its push to `dev`, with a signed annotated tag, and push only that tag.
+3. **Approve** the jobs `Push release image` and `Release image` in the `release` environment.
+
+The workflow's first job, `Prepare release`, fails before anything is published unless the tag is `vX.Y.Z`, annotated, with a signature that GitHub verified, on a commit of `dev` for which CI passed, with the same version in `pyproject.toml` and `CITATION.cff`, a `date-released`, and notes in the format. The image is pushed by digest and scanned first, and only signed and tagged once the scan found no fixable critical or high vulnerabilities. Tags and releases are never changed or reused: a release with a mistake is fixed by the next one. A fork can try the workflow on a test tag, with its repository variable `DOCKERHUB_ORG` set to its own Docker Hub organization, and an environment `release` with its own Docker Hub secrets.
+
+The repository needs an environment `release`, with the maintainer as required reviewer and the Docker Hub secrets `DOCKERHUB_LOGIN` and `DOCKERHUB_TOKEN`, tag rulesets that allow only release tags, created by the maintainer, and immutable releases.

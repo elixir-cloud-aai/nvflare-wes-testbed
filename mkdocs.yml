@@ -93,3 +93,5 @@ nav:
   - about/index.md
   - Glossary: about/glossary.md
   - References: about/references.md
+  - Releases:
+    - "0.1.0": releases/0.1.0.md
