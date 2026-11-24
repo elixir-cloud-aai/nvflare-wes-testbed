@@ -115,6 +115,8 @@ jobs:
       # format before anything is published; also checks that the tag
       # points to the release commit and that no published release of it
       # exists
+      # Shared actions of elixir-cloud-aai/.github at v1.2.0, ahead of the
+      # gate of ci.yml (v1.0.0), as `publish-release` needs it
       - name: Check release notes
         uses: elixir-cloud-aai/.github/actions/publish-release@bf3840c9c072aaf37d6cafe199aaa1994087d1ef # v1.2.0
         with:

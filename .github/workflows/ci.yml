@@ -185,8 +185,9 @@ jobs:
       - name: Test chart
         run: KUBECONFORM="${RUNNER_TEMP}/kubeconform" tests/chart.sh
 
-  # The image of the participants, which real nodes pull. A sandbox image, so
-  # not signed or scanned (hack H20)
+  # The image of the participants, which real nodes pull. A sandbox image:
+  # `dev` and `sha-<commit>` aren't signed or scanned, only releases are
+  # (`release.yml`; hack H20)
   push:
     name: Push image
     runs-on: ubuntu-latest

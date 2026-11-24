@@ -10,7 +10,7 @@ See the repository's [contributors](https://github.com/elixir-cloud-aai/nvflare-
 
 ## Citation
 
-Cite a release, with the metadata in [`CITATION.cff`](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/blob/dev/CITATION.cff). The notes of each release are in [Releases](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/releases) and under `docs/releases/`.
+Cite a release, with the metadata in [`CITATION.cff`](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/blob/dev/CITATION.cff); a DOI follows with the first release. The notes of each release are in [Releases](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/releases) and under `docs/releases/`.
 
 ## License
 
@@ -48,6 +48,6 @@ Releases are version tags `vX.Y.Z` on a commit of `dev`, from which `.github/wor
 2. **Tag** the merged commit, once CI passed for its push to `dev`, with a signed annotated tag, and push only that tag.
 3. **Approve** the jobs `Push release image` and `Release image` in the `release` environment.
 
-The workflow's first job, `Prepare release`, fails before anything is published unless the tag is `vX.Y.Z`, annotated, with a signature that GitHub verified, on a commit of `dev` for which CI passed, with the same version in `pyproject.toml` and `CITATION.cff`, a `date-released`, and notes in the format. The image is pushed by digest and scanned first, and only signed and tagged once the scan found no fixable critical or high vulnerabilities. Tags and releases are never changed or reused: a release with a mistake is fixed by the next one. A fork can try the workflow on a test tag, with its repository variable `DOCKERHUB_ORG` set to its own Docker Hub organization, and an environment `release` with its own Docker Hub secrets.
+The workflow's first job, `Prepare release`, fails before anything is published unless the tag is `vX.Y.Z`, annotated, with a signature that GitHub verified, on a commit of `dev` for which CI passed, with the same version in `pyproject.toml` and `CITATION.cff`, a `date-released`, and notes in the format, and if a published release of the tag exists already. The image is pushed by digest and scanned first, and only signed and tagged once the scan found no fixable critical or high vulnerabilities. Tags and releases are never changed or reused: a release with a mistake is fixed by the next one. If a run fails, re-run only its failed jobs, which reuse the pushed digest; a re-run of all jobs stops once the image's version tag exists. You approve twice: `Push release image` and `Release image` both run in the environment `release`. A fork can try the workflow on a test tag, with its repository variable `DOCKERHUB_ORG` set to its own Docker Hub organization, and an environment `release` with its own Docker Hub secrets.
 
-The repository needs an environment `release`, with the maintainer as required reviewer and the Docker Hub secrets `DOCKERHUB_LOGIN` and `DOCKERHUB_TOKEN`, tag rulesets that allow only release tags, created by the maintainer, and immutable releases.
+The repository needs an environment `release`, with the maintainer as required reviewer, a deployment policy that allows only tags `v*`, and the Docker Hub secrets `DOCKERHUB_LOGIN` and `DOCKERHUB_TOKEN`, tag rulesets that allow only release tags, created by the maintainer, and immutable releases.
