@@ -85,6 +85,7 @@ nav:
   - "T9 The WES's OIDC gate": tests/t9-auth.md
   - T10 FedAvg as a plain workflow: tests/t10-fedavg.md
 - Outcomes:
+  - Report: outcomes/report.md
   - Open questions: outcomes/open-questions.md
   - Results: outcomes/results.md
   - Gap analysis: outcomes/gap-analysis.md

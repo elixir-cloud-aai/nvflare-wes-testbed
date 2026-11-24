@@ -6,8 +6,8 @@ The [Background](../background/use-case.md) describes an end state. This testbed
 
 The question is whether a federated job fits WES and TES at all, as TES tasks are batch and FL participants must reach each other. See [Options](options.md) for what was evaluated, and the recommendation. This is a sandbox: see [Shortcuts and hacks](shortcuts.md).
 
-!!! warning "Status: this has only run on laptops, and twice on one cluster"
-    See [Home](../index.md#status). Results of the local runs are in [Tests](../tests/index.md#local-runs). The hub has run twice on Rahti, with both sites on one TESK in the same cluster: see [Results](../outcomes/results.md). Nothing has run at a partner's node.
+!!! warning "Status: this has run once over two Nodes, both with TES of our own"
+    See [Home](../index.md#status) and the [Report](../outcomes/report.md). Results of the local runs are in [Tests](../tests/index.md#local-runs). The hub has run three times on Rahti with both sites on one TESK in the same cluster, and on 2026-11-24 over the TESK of the FI and CZ Nodes, with LS Login tokens: see [Results](../outcomes/results.md).
 
 ## Goals
 
@@ -18,7 +18,7 @@ In this order, each one only after the one before:
 
 The hub runs on [Rahti](https://docs.csc.fi/cloud/rahti/), which exposes the FL port through a `LoadBalancer` Service; a plain VM with Nebius credits is the fallback ([Real sites](../setup/real-sites.md#where-it-goes), [What differed on Rahti](../setup/real-sites.md#what-differed-on-rahti)).
 
-The event is over; the testbed continues until the run with two or more sites is done. Its plan is in [#10](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/10), and the order of the tests in [Order for a live session](../tests/index.md#order-for-a-live-session).
+The event is over. The main goal was reached on 2026-11-24, with a run over two Nodes ([#10](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/10), [Report](../outcomes/report.md)); the order of the tests is in [Order for a live session](../tests/index.md#order-for-a-live-session).
 
 ## Scope
 
