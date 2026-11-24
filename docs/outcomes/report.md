@@ -92,7 +92,7 @@ Port 443 timed out at both nodes, as the hub's address for the FL port publishes
 
 ### The DE Node
 
-The DE Node took part in the probes only. On 2026-11-21, two TES deployments there accepted an LS Login access token. A Funnel ran the probe, but its tasks got out to the hub neither on the FL port nor on 443, and the download of the input failed too; a TESK failed before the probe ran, when its taskmaster's own access to Kubernetes was refused ([#3](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/3#issuecomment-7063257957), [Results](results.md)). The DE Node can join once its tasks get out: that's a follow-up of ELIXIR On-Cloud, not a milestone of this testbed.
+The DE Node took part in the probes only. On 2026-11-21, two TES deployments there accepted an LS Login access token. A Funnel ran the probe, but its tasks got out to the hub neither on the FL port nor on 443, and the download of the input failed too; a TESK failed before the probe ran, when its taskmaster's own access to Kubernetes was refused ([#3](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/3#issuecomment-7063257957), [Results](results.md)). The DE Node can join once its tasks reach the hub and the download of the input works: that's a follow-up of ELIXIR On-Cloud, not a milestone of this testbed.
 
 ## Discussion
 
@@ -116,6 +116,7 @@ The DE Node took part in the probes only. On 2026-11-21, two TES deployments the
 - **Two sites, one job.** The job takes exactly two sites (`min_clients` 2). Jobs for three and four sites exist and run in CI ([#54](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/pull/54)), not on real nodes. Any lost site fails the run, and sites don't rejoin ([H18](../testbed/shortcuts.md#h18)).
 - **Short runs.** About 90 seconds, well within the lifetime of one access token. Renewal during a run, long rounds and the 30-minute `timeout` of the clients ([H14](../testbed/shortcuts.md#h14)) weren't put to the test.
 - **One multi-site run.** Run `ae7742f2` passed once; it isn't a series.
+- **No one-site runs.** The plan of [#10](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/10) called for a run with one site per Node (`min_clients` 1) before the run with all sites. The probes at each Node took their place, and the run with both sites passed at once.
 - **Central evaluation.** The models of one site alone are trained by `evaluate.py`, from the shares of the test set, not at the sites ([H12](../testbed/shortcuts.md#h12)).
 
 ### Of the sites
@@ -173,6 +174,6 @@ For TES, the specification, and for TESK in particular:
 
 ## Outlook
 
-- **A third site, or a second implementation.** The jobs for three and four sites are ready ([Running with n sites](../setup/real-sites.md#running-with-n-sites)). A third Node, or a site on another TES implementation, such as a Funnel, would test what two TESK can't. The DE Node can join once its tasks get out.
+- **A third site, or a second implementation.** The jobs for three and four sites are ready ([Running with n sites](../setup/real-sites.md#running-with-n-sites)). A third Node, or a site on another TES implementation, such as a Funnel, would test what two TESK can't. The DE Node can join once its tasks reach the hub and the download of the input works.
 - **Through proTES.** The [stretch goal](../testbed/index.md#goals) ([#18](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/18)): the same run, with its tasks routed through proTES to each site.
 - **Into ELIXIR On-Cloud.** A permanent deployment, with more sites, implementations and models, proper authentication, and integration with proWES and Conquest, in place of a testbed that takes every shortcut.
