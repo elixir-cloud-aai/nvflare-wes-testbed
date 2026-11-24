@@ -1,7 +1,7 @@
 # Real sites
 
-!!! warning "Tried twice, without partner nodes"
-    The hub has run on Rahti, with the chart, and [T8](../tests/t8-real-sites.md) runs there ended `COMPLETE` on 2026-11-12 and 2026-11-16 (accuracies not checked), with both sites on one TES in the same cluster as the hub: see [What differed on Rahti](#what-differed-on-rahti). No node outside that cluster has taken part yet, and the hub hasn't run with Compose on a VM. The rest is what we expect it to take: see the [issues](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues).
+!!! warning "Tried on Rahti and over two Nodes"
+    The hub has run on Rahti, with the chart. [T8](../tests/t8-real-sites.md) runs there ended `COMPLETE` on 2026-11-12, 2026-11-16 and 2026-11-19, with both sites on one TES in the same cluster as the hub ([What differed on Rahti](#what-differed-on-rahti)), and on 2026-11-24 over the TESK of the FI and CZ Nodes, with LS Login tokens ([Report](../outcomes/report.md)). Both TES are ours; the hub hasn't run with Compose on a VM. The rest is what we expect it to take: see the [issues](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues).
 
 ## What the hub needs
 
