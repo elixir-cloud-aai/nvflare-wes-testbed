@@ -90,6 +90,12 @@ Port 443 timed out at both nodes, as the hub's address for the FL port publishes
 
 **What it means.** A WES can run an NVFlare job over the TES of two Nodes, at two organizations' infrastructure, with the user's LS Login token checked by each TES, and with nothing inbound at either site. Tasks started at once on both nodes, well within the WES's start timeout of 3 minutes.
 
+### First run through proTES
+
+**What ran.** Pending ([#18](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/18)). The run of [First multi-site run](#first-multi-site-run), with both client tasks sent to proTES, each pinned to its site's TESK, which proTES called with a service token of its own client.
+
+**What it means.** Pending. What a plugin of proTES for sites would add, and what it can't do: [A site plugin for proTES](protes-plugin.md).
+
 ### The DE Node
 
 The DE Node took part in the probes only. On 2026-11-21, two TES deployments there accepted an LS Login access token. A Funnel ran the probe, but its tasks got out to the hub neither on the FL port nor on 443, and the download of the input failed too; a TESK failed before the probe ran, when its taskmaster's own access to Kubernetes was refused ([#3](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/3#issuecomment-7063257957), [Results](results.md)). The DE Node can join once its tasks reach the hub and the download of the input works: that's a follow-up of ELIXIR On-Cloud, not a milestone of this testbed.
@@ -175,5 +181,5 @@ For TES, the specification, and for TESK in particular:
 ## Outlook
 
 - **A third site, or a second implementation.** The jobs for three and four sites are ready ([Running with n sites](../setup/real-sites.md#running-with-n-sites)). A third Node, or a site on another TES implementation, such as a Funnel, would test what two TESK can't. The DE Node can join once its tasks reach the hub and the download of the input works.
-- **Through proTES.** The [stretch goal](../testbed/index.md#goals) ([#18](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/18)): the same run, with its tasks routed through proTES to each site.
+- **A site plugin for proTES.** Name sites rather than TES instances, from a registry ([A site plugin for proTES](protes-plugin.md)).
 - **Into ELIXIR On-Cloud.** A permanent deployment, with more sites, implementations and models, proper authentication, and integration with proWES and Conquest, in place of a testbed that takes every shortcut.

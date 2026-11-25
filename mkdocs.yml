@@ -90,6 +90,7 @@ nav:
   - Results: outcomes/results.md
   - Gap analysis: outcomes/gap-analysis.md
   - Proposals: outcomes/proposals.md
+  - A site plugin for proTES: outcomes/protes-plugin.md
 - About:
   - about/index.md
   - Glossary: about/glossary.md

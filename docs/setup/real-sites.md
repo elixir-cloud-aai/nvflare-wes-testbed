@@ -69,7 +69,7 @@ docker run --rm -e TES_TOKEN elixircloud/nvflare-wes-testbed:dev \
 
 `--fl-port` is the port that decides. `--ports` lists others to try, for information, such as 443 or the port of a [hub on Rahti](#where-it-goes).
 
-`TES_TOKEN` is taken from your environment, if the TES needs a token, and only goes over HTTPS. Through proTES, use its URL as `--tes`, and add `--backend https://<tes>` to pin the task to that TES. proTES keeps no output of tasks, so the script reads it from that TES, which must be reachable with the same token.
+`TES_TOKEN` is taken from your environment, if the TES needs a token, and only goes over HTTPS. Through proTES, use its URL as `--tes`, and add `--backend https://<tes>` to pin the task to that TES. proTES 0.6.0 keeps the logs of the TES once a task has finished, so the script reads its findings from proTES. Only if they're missing does it ask that TES for the task, with the same token, which a TES refuses if it sees proTES's own client as the task's owner, as TESK does with [service tokens](#through-protes).
 
 | Outcome for a port | Meaning |
 |---|---|
@@ -406,6 +406,14 @@ For example, a sites file for a proTES that names the TES of site 2 `site-2` (si
 ```
 
 All tasks are then owned in proTES by the one user whose token the hub holds, whoever starts the run ([H25](../testbed/shortcuts.md#h25)).
+
+A TES that takes proTES's own token, a service token of proTES's client rather than the user's, sees that client as the owner of every task that proTES forwards. The user then reads the tasks through proTES only, which has their states and, once they have finished, the logs of the TES; asking the TES directly with the user's token is refused, as the task isn't the user's there. What a plugin of proTES for sites would add is in [A site plugin for proTES](../outcomes/protes-plugin.md).
+
+On Rahti, for a hub that sends its tasks through proTES with a token file (the token in the key `gateway` of a Secret of your own, renewed there without a restart), add these to the update of [Running it on Rahti](#running-it-on-rahti) (Fish):
+
+```fish
+helm upgrade hub charts/nvflare-wes-hub --reset-then-reuse-values --set tokenSecret=<secret> --set tesGateway.url=https://<protes> --set tesGateway.tokenFile=gateway
+```
 
 ### Checking the hub from outside
 

@@ -25,7 +25,7 @@ It ends with `10/10 checks passed`. The first build takes a few minutes, as it b
 ## Questions it answers
 
 - Does proTES pass on tasks with kit links and site-local data URLs? It does, with the settings of `compose/protes.yaml`.
-- Can a client choose a site without any change to proTES? It can.
+- Can a client choose a site without any change to proTES? It can. What a plugin of proTES for sites would add: [A site plugin for proTES](../outcomes/protes-plugin.md).
 
 ## What to record
 
