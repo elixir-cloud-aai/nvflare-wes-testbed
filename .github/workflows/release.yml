@@ -10,7 +10,7 @@
 # create the GitHub release with the curated notes followed by GitHub's
 # generated notes (`publish`, shared action
 # `elixir-cloud-aai/.github/actions/publish-release`), a pre-release until
-# 1.0.0. Independently of `publish`, tell Pubgrade about the image
+# 1.0.0. Independently of `publish`, register the image at Pubgrade
 # (`notify`), if it is configured (repository variable `PUBGRADE_URL`).
 # `push` and `release-image` each need approval in the `release`
 # environment (required reviewer, Docker Hub secrets `DOCKERHUB_LOGIN` and
