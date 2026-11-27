@@ -1,8 +1,8 @@
 """Check a hub for real sites from outside, as a node or anyone on the internet sees it.
 
 Usage:
-    outside_check.py [--fl-port <port>] [--admin-port <port>] [--during-run] [--insecure]
-                     [--timeout <seconds>] <hub name> <kits host>
+    outside_check.py [--fl-port <port>] [--admin-port <port>] [--during-run] [--wes-public]
+                     [--insecure] [--timeout <seconds>] <hub name> <kits host>
 
 Run it from a machine outside the hub's network that isn't in `WES_ALLOWED_IPS`.
 The hub name is the name in the kits, without a port; the kits host serves
@@ -10,7 +10,9 @@ The hub name is the name in the kits, without a port; the kits host serves
 
 - `/kits` and `/sites` answer with the WES' own 404s: no such kit or token, but
   the way is open.
-- The WES doesn't answer with 200 on either name.
+- The WES doesn't answer with 200 on either name. With `--wes-public`, for a
+  WES API that is public on purpose, it answers service-info on the kits host
+  instead, and refuses runs there without a token, with its own 401.
 - The FL port is open. Outside a run, only the hub's probe responder answers
   there, which can be switched off, so a closed one is a warning, unless
   `--during-run` says that a run is going on.
@@ -254,6 +256,34 @@ def check_no_wes(host: str, *, timeout: float) -> Result:
     )
 
 
+def check_public_wes(kits: str, *, verify: bool, timeout: float) -> list[Result]:
+    """Check that the WES API answers on the kits host, and refuses runs without a token.
+
+    For a hub whose WES API is public on purpose (`wesRoute.enabled` of the chart).
+
+    Args:
+        kits: Kits host.
+        verify: Whether to check the certificate.
+        timeout: Seconds to wait.
+
+    Returns:
+        ok for service-info if it answered 200; ok for the runs if the WES' own
+        401 came back without a token.
+    """
+    info = f"https://{kits}/ga4gh/wes/v1/service-info"
+    runs = f"https://{kits}/ga4gh/wes/v1/runs"
+    info_answer = request(info, verify=verify, timeout=timeout)
+    runs_answer = request(runs, verify=verify, timeout=timeout)
+    refused = runs_answer.status == 401 and detail(runs_answer) == "Bearer token required"
+    return [
+        Result("ok" if info_answer.status == 200 else "FAIL", f"GET {info}: {describe(info_answer)}, expected 200"),
+        Result(
+            "ok" if refused else "FAIL",
+            f"GET {runs} without a token: {describe(runs_answer)}, expected 401 'Bearer token required' from the WES",
+        ),
+    ]
+
+
 def check_fl_port(hub: str, port: int, *, during_run: bool, timeout: float) -> Result:
     """Check that the FL port is open.
 
@@ -447,7 +477,10 @@ def run_checks(args: argparse.Namespace) -> list[Result]:
         ),
     ]
     for host in names:
-        results.append(check_no_wes(host, timeout=args.timeout))
+        if args.wes_public and host == args.kits:
+            results += check_public_wes(host, verify=verify, timeout=args.timeout)
+        else:
+            results.append(check_no_wes(host, timeout=args.timeout))
     results.append(check_fl_port(args.hub, args.fl_port, during_run=args.during_run, timeout=args.timeout))
     results.append(check_admin_closed(args.hub, args.admin_port, timeout=args.timeout))
     return results
@@ -470,6 +503,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--fl-port", type=port_number, default=8002, help="FL port (default: %(default)s)")
     parser.add_argument("--admin-port", type=port_number, default=8003, help="FLARE admin port (default: %(default)s)")
     parser.add_argument("--during-run", action="store_true", help="a run is going on, so the FL port must be open")
+    parser.add_argument(
+        "--wes-public",
+        action="store_true",
+        help="the WES API is public on the kits host (wesRoute of the chart): it must answer there, with tokens",
+    )
     parser.add_argument(
         "--insecure", action="store_true", help="don't check certificates of /kits and /sites, e.g., of a test CA"
     )

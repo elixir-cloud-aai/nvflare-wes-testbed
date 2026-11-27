@@ -296,6 +296,26 @@ class ChecksTest(unittest.TestCase):
                 "https://hub.example.org/ga4gh/wes/v1/service-info", verify=False, timeout=1
             )
 
+    def test_public_wes(self) -> None:
+        """A public WES answers service-info, and refuses runs without a token with its own 401."""
+        info = "https://kits.example.org/ga4gh/wes/v1/service-info"
+        runs = "https://kits.example.org/ga4gh/wes/v1/runs"
+        refused = Answer(401, '{"detail": "Bearer token required"}')
+        for info_answer, runs_answer, outcomes in [
+            (Answer(200, "{}"), refused, ["ok", "ok"]),
+            (Answer(503, "Application is not available"), refused, ["FAIL", "ok"]),
+            # Runs without a token: a hole, a router's page, or nothing
+            (Answer(200, "{}"), Answer(200, '{"runs": []}'), ["ok", "FAIL"]),
+            (Answer(200, "{}"), Answer(401, "<html>Unauthorized</html>"), ["ok", "FAIL"]),
+            (Answer(None, error="timed out"), Answer(None, error="timed out"), ["FAIL", "FAIL"]),
+        ]:
+            answers = {info: info_answer, runs: runs_answer}
+            with mock.patch.object(outside_check, "request", side_effect=lambda url, a=answers, **_: a[url]) as request:
+                results = outside_check.check_public_wes("kits.example.org", verify=True, timeout=1)
+            self.assertEqual([result.outcome for result in results], outcomes)
+            request.assert_any_call(info, verify=True, timeout=1)
+            request.assert_any_call(runs, verify=True, timeout=1)
+
     def test_fl_port(self) -> None:
         """A closed FL port only fails during a run."""
         for is_open, during_run, outcome in [
@@ -388,6 +408,27 @@ class MainTest(unittest.TestCase):
         self.assertEqual(sum(line.startswith("[FAIL]") for line in lines), 2)
         self.assertEqual(lines[-1], "2 of 8 checks failed")
         self.assertFalse(any(kwargs["verify"] for _, kwargs in self.calls))
+
+    def test_wes_public(self) -> None:
+        """With `--wes-public`, the WES must answer on the kits host, and still not on the hub's name."""
+        answers = self.answers(wes=200)
+        answers["https://kits.example.org/ga4gh/wes/v1/runs"] = Answer(401, '{"detail": "Bearer token required"}')
+        code, lines = self.run_main(
+            ["hub.example.org", "kits.example.org", "--wes-public"], answers, {8002: False, 8003: False}
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(lines[-1], "all 9 checks passed")
+        self.assertIn(
+            ("https://hub.example.org/ga4gh/wes/v1/service-info", {"verify": False, "timeout": 10}), self.calls
+        )
+        # Not public after all: the kits host has no Route for it
+        answers = self.answers(wes=503)
+        answers["https://kits.example.org/ga4gh/wes/v1/runs"] = Answer(503)
+        code, lines = self.run_main(
+            ["hub.example.org", "kits.example.org", "--wes-public"], answers, {8002: False, 8003: False}
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(lines[-1], "2 of 9 checks failed")
 
     def test_same_name(self) -> None:
         """With one name for both, as with Compose, the WES is checked once."""
