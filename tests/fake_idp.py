@@ -2,6 +2,11 @@
 
 Hands access tokens to anyone who asks, at `GET /oidc/token?sub=<user>`. Cut down
 from the fake TES of the smoke test of proTES (Apache-2.0).
+
+As LS Login, it releases entitlements at userinfo only, not in access tokens:
+every subject is in the group `ENTITLEMENT`, which the WES of `compose.yaml`
+requires to start runs, except subjects that start with `outsider`, which are
+only in another group (#70).
 """
 
 import json
@@ -16,6 +21,9 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 ISSUER = "http://fake-idp:8080/oidc/"
 AUDIENCE = "fl-wes"
 GROUP = "fl-users"
+# Entitlements, in the form of LS Login's, under a domain that can't be real
+ENTITLEMENT = "urn:geant:testbed.invalid:group:fl-users#testbed.invalid"
+OTHER_ENTITLEMENT = "urn:geant:testbed.invalid:group:others#testbed.invalid"
 KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
 
@@ -54,7 +62,9 @@ class Handler(BaseHTTPRequestHandler):
             except jwt.InvalidTokenError:
                 self._send(HTTPStatus.UNAUTHORIZED, {"error": "invalid_token"})
                 return
-            self._send(HTTPStatus.OK, {"sub": claims["sub"], "groups": [GROUP]})
+            sub = claims["sub"]
+            entitlements = [OTHER_ENTITLEMENT] if sub.startswith("outsider") else [OTHER_ENTITLEMENT, ENTITLEMENT]
+            self._send(HTTPStatus.OK, {"sub": sub, "groups": [GROUP], "eduperson_entitlement": entitlements})
         elif url.path == "/oidc/token":
             sub = parse_qs(url.query).get("sub", ["fl-wes"])[0]
             now = int(time.time())
