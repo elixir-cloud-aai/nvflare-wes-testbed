@@ -1,7 +1,7 @@
 # T4 Through proTES
 
 !!! note "Stretch goal"
-    The plan for real nodes is the [direct run](../testbed/index.md#goals). This test shows locally that a gateway fits, too. On real nodes, it's [#18](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/18).
+    The plan for real nodes is the [direct run](../testbed/index.md#goals). This test shows locally that a gateway fits, too. On real nodes, it ran at the FI and CZ Nodes on 2026-11-27 ([First run through proTES](../outcomes/report.md#first-run-through-protes), [#18](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/18)).
 
 ## Description
 
