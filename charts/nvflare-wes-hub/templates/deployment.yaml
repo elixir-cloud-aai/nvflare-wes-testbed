@@ -60,6 +60,13 @@ spec:
             - name: WES_OIDC_ALLOWED_SUBS
               value: {{ . | quote }}
             {{- end }}
+            {{- with .Values.oidcRequiredEntitlements }}
+            # Starting a run needs one of these entitlements
+            - name: WES_OIDC_REQUIRED_ENTITLEMENTS
+              value: {{ . | quote }}
+            - name: WES_OIDC_ENTITLEMENT_CLAIM
+              value: {{ $.Values.oidcEntitlementClaim | quote }}
+            {{- end }}
             {{- with .Values.corsAllowedOrigins }}
             # Pages of these origins may call the WES API (`/ga4gh/wes/v1` only)
             - name: WES_CORS_ALLOWED_ORIGINS

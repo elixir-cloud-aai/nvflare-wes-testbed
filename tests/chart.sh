@@ -23,6 +23,8 @@ image="docker.io/elixircloud/nvflare-wes-testbed:${tag}"
 hub=flare-wes.example.invalid
 kits=flare-wes-kits.example.rahtiapp.fi
 issuer=https://login.example.invalid/oidc/
+# The entitlement of the live deployment: no placeholder, as it's public
+eoc='urn:geant:lifescience-ri.eu:group:elixir:ECP_CLN:EOC-Compute#aai.lifescience-ri.eu'
 wes=hub-nvflare-wes-hub-wes
 tag_arg=(--set "image.tag=${tag}")
 hub_arg=(--set "hubName=${hub}")
@@ -85,6 +87,11 @@ refuse "a WES Route that isn't on or off" "${args[@]}" --set-string wesRoute.ena
 refuse "an allow-list of empty entries, which the WES reads as none" "${args[@]}" --set 'oidcAllowedSubs=\,'
 refuse "an allow-list of spaces" "${args[@]}" --set-string 'oidcAllowedSubs= '
 refuse "an allow-list with spaces around entries" "${args[@]}" --set 'oidcAllowedSubs=researcher-1 \, researcher-2'
+refuse "entitlements of empty entries, which the WES refuses" "${args[@]}" --set 'oidcRequiredEntitlements=\,'
+refuse "entitlements with spaces around entries" "${args[@]}" \
+    --set 'oidcRequiredEntitlements=urn:x:a#y \, urn:x:b#y'
+refuse "an empty entitlement claim" "${args[@]}" --set-string oidcEntitlementClaim=
+refuse "an entitlement claim with spaces" "${args[@]}" --set-string 'oidcEntitlementClaim=eduperson entitlement'
 refuse "an open WES that isn't on or off" "${args[@]}" --set-string wesRoute.allowAnySubject=yes
 refuse "an unknown key of the WES Route" "${args[@]}" --set wesRoute.path=/
 refuse "any origin for CORS" "${args[@]}" --set 'corsAllowedOrigins=*'
@@ -122,8 +129,8 @@ refuse_render "a gateway token without a gateway" "need tesGateway.url" "${args[
     --set tokenSecret=tes-tokens --set tesGateway.tokenFile=gateway
 refuse_render "a gateway oauth without envSecret" "from envSecret, which is empty" "${args[@]}" "${gateway_arg[@]}" \
     --set tesGateway.oauth.grant_type=refresh_token
-refuse_render "a public WES open to anyone the issuer vouches for, unless said so" "while oidcAllowedSubs is empty" \
-    "${args[@]}" --set wesRoute.enabled=true
+refuse_render "a public WES open to anyone the issuer vouches for, unless said so" \
+    "while oidcAllowedSubs and oidcRequiredEntitlements are empty" "${args[@]}" --set wesRoute.enabled=true
 refuse_render "a gateway token file and oauth" "not both" "${args[@]}" "${gateway_arg[@]}" \
     --set tokenSecret=tes-tokens --set tesGateway.tokenFile=gateway --set tesGateway.oauth.grant_type=refresh_token
 
@@ -222,6 +229,24 @@ expect "the kits Route unchanged with the WES Route" "${route_kits} | .spec.path
 expect "the origins for CORS" "${env} | select(.name == \"WES_CORS_ALLOWED_ORIGINS\") | .value" \
     "https://portal.example.invalid,http://localhost:3000"
 
+# The WES API in public for the members of a group (#70), without an
+# allow-list: the entitlement is enough for the guard against an open WES
+helm template hub "${chart}" "${args[@]}" --set wesRoute.enabled=true \
+    --set "oidcRequiredEntitlements=${eoc}" >"${out}"
+expect "a public WES for the members of a group" "[${route_wes}] | length" "1"
+expect "the entitlement" "${env} | select(.name == \"WES_OIDC_REQUIRED_ENTITLEMENTS\") | .value" \
+    "${eoc}"
+expect "the entitlement claim by default" "${env} | select(.name == \"WES_OIDC_ENTITLEMENT_CLAIM\") | .value" \
+    "eduperson_entitlement"
+expect "no allow-list with the entitlement alone" "[${env} | select(.name == \"WES_OIDC_ALLOWED_SUBS\")] | length" "0"
+
+# Both, and another claim: both must hold in the WES
+helm template hub "${chart}" "${args[@]}" --set wesRoute.enabled=true --set oidcAllowedSubs=researcher-1 \
+    --set 'oidcRequiredEntitlements=urn:x:a#y\,urn:x:b#y' --set oidcEntitlementClaim=entitlements >"${out}"
+expect "the allow-list with the entitlements" "${env} | select(.name == \"WES_OIDC_ALLOWED_SUBS\") | .value" "researcher-1"
+expect "entitlements" "${env} | select(.name == \"WES_OIDC_REQUIRED_ENTITLEMENTS\") | .value" "urn:x:a#y,urn:x:b#y"
+expect "another entitlement claim" "${env} | select(.name == \"WES_OIDC_ENTITLEMENT_CLAIM\") | .value" "entitlements"
+
 # Names stay within 63 characters, with the longest release name of Helm (53)
 helm template "$(printf 'r%.0s' {1..53})" "${chart}" "${args[@]}" --set wesRoute.enabled=true \
     --set wesRoute.allowAnySubject=true >"${out}"
@@ -248,6 +273,9 @@ expect "no token mount by default" "[${ctr} | .volumeMounts[] | select(.name == 
 expect "no environment from a Secret by default" "[${ctr} | .envFrom // [] | .[]] | length" "0"
 expect "no gateway by default" "[${env} | select(.name | test(\"^TES_GATEWAY\"))] | length" "0"
 expect "no WES Route by default" "[${route_wes}] | length" "0"
+expect "no entitlement by default" "[${env} | select(.name == \"WES_OIDC_REQUIRED_ENTITLEMENTS\")] | length" "0"
+expect "no entitlement claim without entitlements" \
+    "[${env} | select(.name == \"WES_OIDC_ENTITLEMENT_CLAIM\")] | length" "0"
 expect "no CORS by default" "[${env} | select(.name == \"WES_CORS_ALLOWED_ORIGINS\")] | length" "0"
 
 # Non-default OIDC values, to see them arrive
