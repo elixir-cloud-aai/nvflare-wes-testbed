@@ -13,10 +13,22 @@ The hub {{ .Values.hubName }} is starting. Sandbox only.
      oc get route {{ include "hub.fullname" . }}-kits -o jsonpath='{.status.ingress[0].conditions[0].type}={.status.ingress[0].conditions[0].status}'
      oc get route {{ include "hub.fullname" . }}-csr -o jsonpath='{.status.ingress[0].conditions[0].type}={.status.ingress[0].conditions[0].status}'
 
+{{ if .Values.wesRoute.enabled -}}
+3. The WES API: https://{{ .Values.kitsHost }}/ga4gh/wes/v1 (only this path),
+   with a bearer token of {{ .Values.oidcIssuer }} for all but service-info.
+   The Route must say Admitted=True:
+
+     oc get route {{ include "hub.fullname" . }}-wes -o jsonpath='{.status.ingress[0].conditions[0].type}={.status.ingress[0].conditions[0].status}'
+{{- if .Values.corsAllowedOrigins }}
+
+   Pages of {{ .Values.corsAllowedOrigins }} may call it from a browser.
+{{- end }}
+{{- else -}}
 3. The WES is not exposed. Reach it with:
 
      oc port-forward service/{{ include "hub.fullname" . }}-wes 8080:8080
 
    then http://localhost:8080/ga4gh/wes/v1/service-info
+{{- end }}
 
 The pod waits for the Secret {{ .Values.sitesSecret }} with the key sites.json.

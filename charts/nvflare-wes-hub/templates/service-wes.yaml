@@ -1,5 +1,5 @@
-# The WES, inside the cluster only: for the Route's `/kits`, and for `oc
-# port-forward`
+# The WES, inside the cluster only: for the Routes (`/kits`, `/sites`, and
+# `/ga4gh/wes/v1` with `wesRoute.enabled`), and for `oc port-forward`
 apiVersion: v1
 kind: Service
 metadata:

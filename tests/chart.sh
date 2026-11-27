@@ -81,6 +81,13 @@ refuse "an address out of range" "${args[@]}" --set loadBalancerIP=256.0.0.1
 refuse "an unknown value" "${args[@]}" --set flport=30003
 refuse "a token Secret that isn't a name" "${args[@]}" --set tokenSecret=Not_A_Name
 refuse "an environment Secret that isn't a name" "${args[@]}" --set envSecret=Not_A_Name
+refuse "a WES Route that isn't on or off" "${args[@]}" --set-string wesRoute.enabled=yes
+refuse "an unknown key of the WES Route" "${args[@]}" --set wesRoute.path=/
+refuse "any origin for CORS" "${args[@]}" --set 'corsAllowedOrigins=*'
+refuse "an origin without a scheme" "${args[@]}" --set corsAllowedOrigins=portal.example.invalid
+refuse "an origin with a path" "${args[@]}" --set corsAllowedOrigins=https://portal.example.invalid/app
+refuse "origins separated otherwise than by commas" "${args[@]}" \
+    --set 'corsAllowedOrigins=https://portal.example.invalid https://other.example.invalid'
 refuse "a gateway that isn't https" "${args[@]}" --set tesGateway.url=http://protes.example.invalid \
     --set tokenSecret=tes-tokens --set tesGateway.tokenFile=gateway
 refuse "a gateway token file that isn't a key" "${args[@]}" --set tesGateway.url=https://protes.example.invalid \
@@ -194,8 +201,23 @@ expect "csr Route to the WES' Service" "${route_csr} | .spec.to.name + \":\" + .
 expect "the WES' Service inside only" \
     "select(.kind == \"Service\" and .metadata.name == \"${wes}\") | .spec.type" "ClusterIP"
 
+# The WES API in public, for portals and clients: one more Route, for
+# `/ga4gh/wes/v1` alone, on the kits host. The WES checks tokens itself (H5)
+route_wes="select(.kind == \"Route\" and .metadata.name == \"${wes}\")"
+helm template hub "${chart}" "${args[@]}" --set wesRoute.enabled=true \
+    --set 'corsAllowedOrigins=https://portal.example.invalid\,http://localhost:3000' >"${out}"
+expect "kinds with the WES Route" '[.kind] | sort | join(",")' "Deployment,Route,Route,Route,Service,Service"
+expect "WES Route only for /ga4gh/wes/v1" "${route_wes} | .spec.path" "/ga4gh/wes/v1"
+expect "WES Route at the kits host" "${route_wes} | .spec.host" "${kits}"
+expect "WES Route ends TLS at the router" "${route_wes} | .spec.tls.termination" "edge"
+expect "WES Route redirects plain HTTP" "${route_wes} | .spec.tls.insecureEdgeTerminationPolicy" "Redirect"
+expect "WES Route to the WES' Service" "${route_wes} | .spec.to.name + \":\" + .spec.port.targetPort" "${wes}:http"
+expect "the kits Route unchanged with the WES Route" "${route_kits} | .spec.path" "/kits"
+expect "the origins for CORS" "${env} | select(.name == \"WES_CORS_ALLOWED_ORIGINS\") | .value" \
+    "https://portal.example.invalid,http://localhost:3000"
+
 # Names stay within 63 characters, with the longest release name of Helm (53)
-helm template "$(printf 'r%.0s' {1..53})" "${chart}" "${args[@]}" >"${out}"
+helm template "$(printf 'r%.0s' {1..53})" "${chart}" "${args[@]}" --set wesRoute.enabled=true >"${out}"
 expect "names within 63 characters, also with a long release name" \
     '[.metadata.name | select(length > 63)] | length' "0"
 
@@ -217,6 +239,8 @@ expect "no token Secret by default" \
 expect "no token mount by default" "[${ctr} | .volumeMounts[] | select(.name == \"tes-tokens\")] | length" "0"
 expect "no environment from a Secret by default" "[${ctr} | .envFrom // [] | .[]] | length" "0"
 expect "no gateway by default" "[${env} | select(.name | test(\"^TES_GATEWAY\"))] | length" "0"
+expect "no WES Route by default" "[${route_wes}] | length" "0"
+expect "no CORS by default" "[${env} | select(.name == \"WES_CORS_ALLOWED_ORIGINS\")] | length" "0"
 
 # Non-default OIDC values, to see them arrive
 helm template hub "${chart}" "${args[@]}" --set oidcAudience=other-aud --set 'oidcAlgorithms=RS256\,ES256' \
