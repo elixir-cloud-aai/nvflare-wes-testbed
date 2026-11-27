@@ -160,6 +160,8 @@ Caddy gets a certificate for that name, which needs ports 80 and 443 reachable. 
 | `WES_OIDC_AUDIENCE` | `fl-wes` | The `aud` a token must carry, matching this deployment's registration at the issuer |
 | `WES_OIDC_ALGORITHMS` | `RS256` | Signing algorithms accepted from the issuer, comma-separated |
 | `WES_OIDC_ALLOWED_SUBS` | None, any caller | Subjects allowed to use the WES, comma-separated; a static allow-list, not real access control ([H22](../testbed/shortcuts.md#h22)) |
+| `WES_OIDC_REQUIRED_ENTITLEMENTS` | None, no entitlement needed | Entitlements, one of which a caller needs to start runs, comma-separated, each matched exactly (no prefixes or wildcards): see [The WES API in public](#the-wes-api-in-public). From the token's `WES_OIDC_ENTITLEMENT_CLAIM`, or from the issuer's userinfo endpoint if the token has no such claim. Without one, `POST /runs` gets `403`; reading runs stays with their owner. With `WES_OIDC_ALLOWED_SUBS`, both must hold. A value of only commas or spaces stops the hub from starting |
+| `WES_OIDC_ENTITLEMENT_CLAIM` | `eduperson_entitlement` | The claim that carries the entitlements. Empty, with `WES_OIDC_REQUIRED_ENTITLEMENTS` set, stops the hub from starting |
 | `WES_CORS_ALLOWED_ORIGINS` | None | Origins whose pages may call the WES API from a browser (CORS), comma-separated, such as `https://portal.example.org`: see [The WES API in public](#the-wes-api-in-public). Only for `/ga4gh/wes/v1`; the proxy still lets the WES through from `WES_ALLOWED_IPS` alone. An entry that isn't an origin, such as `*`, stops the hub from starting |
 | `WES_OIDC_ALLOW_HTTP` | None, https required | Local tests only: allows the issuer and its JWKS over plain HTTP. Never set it on a real deployment; an on-path attacker with it set could forge tokens |
 | `WES_INTERNAL_URL` | `https://<FL_SERVER_NAME>` | Base of the links to kits. Keep it `https`, as kits hold private keys |
@@ -245,11 +247,13 @@ The Route must say `Admitted=True`. If another project already has its name, the
 | `oidcAudience` | `fl-wes` | The `aud` a token must carry, matching this deployment's registration at the issuer |
 | `oidcAlgorithms` | `RS256` | Signing algorithms accepted from the issuer, comma-separated |
 | `oidcAllowedSubs` | Empty, any caller | Subjects allowed to use the WES, comma-separated, without spaces or empty entries; a static allow-list, not real access control ([H22](../testbed/shortcuts.md#h22)) |
+| `oidcRequiredEntitlements` | Empty, no entitlement needed | Entitlements, one of which a caller needs to start runs, comma-separated, without spaces or empty entries, each matched exactly, such as LS Login's `urn:geant:lifescience-ri.eu:group:elixir:ECP_CLN:EOC-Compute#aai.lifescience-ri.eu`: see [The WES API in public](#the-wes-api-in-public). `WES_OIDC_REQUIRED_ENTITLEMENTS` of the WES |
+| `oidcEntitlementClaim` | `eduperson_entitlement` | The claim that carries the entitlements, in the token or at the issuer's userinfo endpoint. Only passed on with `oidcRequiredEntitlements` |
 | `sitesSecret` | `nvflare-wes-sites` | Secret with the sites file under the key `sites.json` |
 | `tokenSecret` | Empty | Secret with [token files](#tokens-for-the-tes-of-the-sites), one key per site, mounted whole at `/run/secrets/tes-tokens`, so that renewed tokens arrive without a restart. Empty: none |
 | `envSecret` | Empty | Secret whose keys become environment variables of the hub: the secrets that [`oauth`](#tokens-for-the-tes-of-the-sites) sources name. Empty: none |
-| `wesRoute.enabled` | `false` | A Route for the WES API, `/ga4gh/wes/v1` alone, on `kitsHost`: see [The WES API in public](#the-wes-api-in-public). Needs `oidcAllowedSubs`, or `wesRoute.allowAnySubject` |
-| `wesRoute.allowAnySubject` | `false` | `true` allows the Route with an empty `oidcAllowedSubs`: anyone the issuer vouches for may then start runs ([H22](../testbed/shortcuts.md#h22)) |
+| `wesRoute.enabled` | `false` | A Route for the WES API, `/ga4gh/wes/v1` alone, on `kitsHost`: see [The WES API in public](#the-wes-api-in-public). Needs `oidcRequiredEntitlements`, `oidcAllowedSubs`, or `wesRoute.allowAnySubject` |
+| `wesRoute.allowAnySubject` | `false` | `true` allows the Route with empty `oidcRequiredEntitlements` and `oidcAllowedSubs`: anyone the issuer vouches for may then start runs ([H22](../testbed/shortcuts.md#h22)) |
 | `corsAllowedOrigins` | Empty, none | Origins whose pages may call the WES API from a browser (CORS), comma-separated, such as `https://portal.example.org`: scheme, host and an optional port, no path, no wildcard. `WES_CORS_ALLOWED_ORIGINS` of the WES |
 | `tesGateway.url` | Empty, straight to each TES | A TES gateway (proTES), `https`, that all tasks go through: see [Through proTES](#through-protes) |
 | `tesGateway.tokenFile` | Empty | The gateway's token: a key of `tokenSecret` with a token file. Or: |
@@ -270,7 +274,19 @@ Then use `http://localhost:8080/ga4gh/wes/v1` in place of `https://<hub>/ga4gh/w
 
 For a portal or a client elsewhere, such as a WES form in a browser or the GA4GH SDK's CLI, `wesRoute.enabled` adds a Route for `/ga4gh/wes/v1` alone, on the kits name: `https://<kits name>/ga4gh/wes/v1`. Nothing else of the WES gets routed: not `/outputs`, not FastAPI's `/docs` and `/openapi.json`. Rahti's router matches paths by whole segments, so `/ga4gh/wes/v1x` isn't routed either, and answers paths without a Route with its own 503, "Application is not available". The WES doesn't resolve `..` in paths, so `/ga4gh/wes/v1/../../docs` gets the WES' own 404. Every endpoint but `service-info` needs a bearer token of `oidcIssuer`, for `oidcAudience` ([H5](../testbed/shortcuts.md#h5)). There's no rate limiting ([H23](../testbed/shortcuts.md#h23)).
 
-**Who may use it:** without `oidcAllowedSubs`, anyone with an account at the issuer and a token for `oidcAudience` could start runs at the sites, and hold the one run slot ([H2](../testbed/shortcuts.md#h2), [H22](../testbed/shortcuts.md#h22)); with LS Login and a portal's client as audience, that's anyone who logs in to the portal. So the chart refuses `wesRoute.enabled` with an empty `oidcAllowedSubs`: name the subjects there, or set `wesRoute.allowAnySubject=true` to open it on purpose.
+**Who may use it:** without a further check, anyone with an account at the issuer and a token for `oidcAudience` could start runs at the sites, and hold the one run slot ([H2](../testbed/shortcuts.md#h2), [H22](../testbed/shortcuts.md#h22)); with LS Login and a portal's client as audience, that's anyone who logs in to the portal. So the chart refuses `wesRoute.enabled` unless one of these says who may:
+
+- `oidcRequiredEntitlements`: the members of a group. ELIXIR On-Cloud's compute services admit the members of EOC-Compute, `urn:geant:lifescience-ri.eu:group:elixir:ECP_CLN:EOC-Compute#aai.lifescience-ri.eu`, and so should this WES: access is then managed in one place, the group at LS Login, and not per deployment. Starting a run (`POST /runs`) needs one of the entitlements, matched exactly: the parent group `…:ECP_CLN#…` or a sibling such as `…:ECP_CLN:ADMIN#…` alone get `403`, and so does a subgroup of EOC-Compute, unless it is listed too. Reading runs, their status and logs stays with each run's owner, as before, also for callers without the entitlement.
+- `oidcAllowedSubs`: a static list of subjects. With `oidcRequiredEntitlements` too, both must hold: a caller must be listed (for every endpoint) and have the entitlement (to start runs).
+- `wesRoute.allowAnySubject=true`: open to anyone the issuer vouches for, on purpose.
+
+Where the entitlements come from: the token's `oidcEntitlementClaim` (`eduperson_entitlement`) if it has that claim at all, even an empty one; otherwise the issuer's userinfo endpoint, from its discovery document, asked with the caller's token. LS Login releases `eduperson_entitlement` at userinfo only, not in access tokens, and only if the client asked for the scope `eduperson_entitlement`: a portal whose login doesn't ask for it gets `403` for every member. The WES keeps a userinfo answer per token, by its SHA-256, for 5 minutes at most and never beyond the token's expiry, so a member removed from the group can start runs for up to 5 more minutes with a token it already has. A userinfo endpoint that can't be reached, refuses the token, redirects, or answers otherwise than with a JSON object about the token's `sub` is a `401`, never a pass, and isn't kept. The WES logs subjects and what failed, never tokens or entitlements.
+
+Check what the WES will see, with an access token of the portal's client (Fish):
+
+```fish
+curl -s -H "Authorization: Bearer $TOKEN" https://login.aai.lifescience-ri.eu/oidc/userinfo | jq .eduperson_entitlement
+```
 
 **What it shows and what it doesn't serve:** `service-info` needs no token, so it shows the names of the sites (`tags.sites`) to anyone. The global model of a `FEDAVG` run stays under `/outputs`, which isn't routed: a run log's `outputs.global_model` link doesn't work from outside. Fetch the model with `oc port-forward`, as above. The WES doesn't redirect a trailing slash (such as `/runs/`, a 404), as a redirect from behind the router would lead to `http://`.
 
@@ -279,7 +295,7 @@ A page in a browser that calls the WES from another origin needs CORS: name its 
 ```fish
 helm upgrade hub charts/nvflare-wes-hub --reset-then-reuse-values \
     --set wesRoute.enabled=true \
-    --set 'oidcAllowedSubs=<sub 1>\,<sub 2>' \
+    --set 'oidcRequiredEntitlements=urn:geant:lifescience-ri.eu:group:elixir:ECP_CLN:EOC-Compute#aai.lifescience-ri.eu' \
     --set corsAllowedOrigins=https://<portal>
 oc get route hub-nvflare-wes-hub-wes -o jsonpath='{.status.ingress[0].conditions[0].type}={.status.ingress[0].conditions[0].status}'; echo
 curl -s https://<kits name>/ga4gh/wes/v1/service-info                    # 200
@@ -289,7 +305,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -X OPTIONS https://<kits name>/ga4gh/we
     -H 'Access-Control-Request-Headers: authorization'                 # 200
 ```
 
-Several origins go with an escaped comma, as `--set 'corsAllowedOrigins=https://a.example.org\,https://b.example.org'`. Then run the [checks from outside](#checking-the-hub-from-outside) with `--wes-public`. To take the WES API off again, `--set wesRoute.enabled=false`.
+Or, for a list of subjects instead, `--set 'oidcAllowedSubs=<sub 1>\,<sub 2>'`. Several origins go with an escaped comma, as `--set 'corsAllowedOrigins=https://a.example.org\,https://b.example.org'`. Then run the [checks from outside](#checking-the-hub-from-outside) with `--wes-public`. To take the WES API off again, `--set wesRoute.enabled=false`.
 
 **Check from outside**, from a machine outside Rahti, with `flPort` as the FL port (see [Checking the hub from outside](#checking-the-hub-from-outside)):
 
