@@ -244,7 +244,7 @@ The Route must say `Admitted=True`. If another project already has its name, the
 | `oidcIssuer` | None, required | Trusted OIDC issuer, https (e.g. LS Login's). The WES refuses every run and most endpoints without one ([H5](../testbed/shortcuts.md#h5)) |
 | `oidcAudience` | `fl-wes` | The `aud` a token must carry, matching this deployment's registration at the issuer |
 | `oidcAlgorithms` | `RS256` | Signing algorithms accepted from the issuer, comma-separated |
-| `oidcAllowedSubs` | Empty, any caller | Subjects allowed to use the WES, comma-separated; a static allow-list, not real access control ([H22](../testbed/shortcuts.md#h22)) |
+| `oidcAllowedSubs` | Empty, any caller | Subjects allowed to use the WES, comma-separated, without spaces or empty entries; a static allow-list, not real access control ([H22](../testbed/shortcuts.md#h22)) |
 | `sitesSecret` | `nvflare-wes-sites` | Secret with the sites file under the key `sites.json` |
 | `tokenSecret` | Empty | Secret with [token files](#tokens-for-the-tes-of-the-sites), one key per site, mounted whole at `/run/secrets/tes-tokens`, so that renewed tokens arrive without a restart. Empty: none |
 | `envSecret` | Empty | Secret whose keys become environment variables of the hub: the secrets that [`oauth`](#tokens-for-the-tes-of-the-sites) sources name. Empty: none |

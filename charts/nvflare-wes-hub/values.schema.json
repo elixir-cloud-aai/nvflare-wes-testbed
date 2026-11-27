@@ -57,8 +57,9 @@
       "pattern": "^[A-Za-z0-9]+(,[A-Za-z0-9]+)*$"
     },
     "oidcAllowedSubs": {
-      "description": "Subjects allowed to use the WES, comma-separated, or empty for any the issuer vouches for",
-      "type": "string"
+      "description": "Subjects allowed to use the WES, comma-separated without spaces or empty entries, or empty for any the issuer vouches for",
+      "type": "string",
+      "pattern": "^$|^[^,\\s]+(,[^,\\s]+)*$"
     },
     "sitesSecret": {"type": "string", "minLength": 1},
     "tokenSecret": {
