@@ -118,7 +118,7 @@ What else differs on Rahti:
 
 - Compose doesn't run there: it takes a Deployment, the `LoadBalancer` Service with `allocateLoadBalancerNodePorts: false`, and a Secret for the sites file. The Helm chart [`charts/nvflare-wes-hub`](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/tree/dev/charts/nvflare-wes-hub) has them: see [Running it on Rahti](#running-it-on-rahti).
 - **Name:** the kits contain the name of the hub, and it must lead to the address of the `LoadBalancer`. Names under `rahtiapp.fi` should lead to the routers instead, so this takes a name of your own, with an `A` record.
-- **Kits:** an edge Route with `path: /kits` exposes the links to kits, and nothing else of the WES. Reach the WES itself with `oc port-forward`, which needs no address list. To limit the FL port to the addresses of nodes, Rahti has a [NetworkPolicy](https://docs.csc.fi/cloud/rahti/configurations/loadbalancer-service/) with `externalTrafficPolicy: Local`. That takes the node selector `rahti.csc.fi/local-load-balancer: ''` on the pod, an address that no other Service shares, and a policy that still lets the router reach the `/kits` Route.
+- **Kits:** an edge Route with `path: /kits` exposes the links to kits, and nothing else of the WES. Reach the WES itself with `oc port-forward`, which needs no address list, or [make its API public](#the-wes-api-in-public) with a Route of its own for `/ga4gh/wes/v1`. To limit the FL port to the addresses of nodes, Rahti has a [NetworkPolicy](https://docs.csc.fi/cloud/rahti/configurations/loadbalancer-service/) with `externalTrafficPolicy: Local`. That takes the node selector `rahti.csc.fi/local-load-balancer: ''` on the pod, an address that no other Service shares, and a policy that still lets the router reach the `/kits` Route.
 - **User:** pods run as an arbitrary user. The hub works that way, with `HOME=/tmp`: `tests/hub.sh` runs it so.
 - **Name inside the pod:** the WES talks to its FL server by the name in the kits, so that name must lead to the pod itself, with `hostAliases`, as `extra_hosts` does in `compose.hub.yaml`.
 
@@ -160,6 +160,7 @@ Caddy gets a certificate for that name, which needs ports 80 and 443 reachable. 
 | `WES_OIDC_AUDIENCE` | `fl-wes` | The `aud` a token must carry, matching this deployment's registration at the issuer |
 | `WES_OIDC_ALGORITHMS` | `RS256` | Signing algorithms accepted from the issuer, comma-separated |
 | `WES_OIDC_ALLOWED_SUBS` | None, any caller | Subjects allowed to use the WES, comma-separated; a static allow-list, not real access control ([H22](../testbed/shortcuts.md#h22)) |
+| `WES_CORS_ALLOWED_ORIGINS` | None | Origins whose pages may call the WES API from a browser (CORS), comma-separated, such as `https://portal.example.org`: see [The WES API in public](#the-wes-api-in-public). Only for `/ga4gh/wes/v1`; the proxy still lets the WES through from `WES_ALLOWED_IPS` alone. An entry that isn't an origin, such as `*`, stops the hub from starting |
 | `WES_OIDC_ALLOW_HTTP` | None, https required | Local tests only: allows the issuer and its JWKS over plain HTTP. Never set it on a real deployment; an on-path attacker with it set could forge tokens |
 | `WES_INTERNAL_URL` | `https://<FL_SERVER_NAME>` | Base of the links to kits. Keep it `https`, as kits hold private keys |
 | `WES_SITES_FILE` | `./sites.json` | The sites file: name, `tes` and `data`. Add a [token source](#tokens-for-the-tes-of-the-sites) for a TES that needs one, which must then be at an `https` URL, and a `backend` for a site [through proTES](#through-protes) |
@@ -183,8 +184,9 @@ The chart [`charts/nvflare-wes-hub`](https://github.com/elixir-cloud-aai/nvflare
 | `ClusterIP` Service `…-wes` | The WES, inside the cluster only |
 | Route `…-kits` | `https://<kits name>/kits`, edge TLS, and no other path |
 | Route `…-csr` | `https://<kits name>/sites`, where sites post the requests for their certificates, edge TLS |
+| Route `…-wes` | Only with `wesRoute.enabled`: `https://<kits name>/ga4gh/wes/v1`, the WES API, edge TLS. See [The WES API in public](#the-wes-api-in-public) |
 
-The sites file comes from a Secret that you create, which isn't part of the chart. The WES is not exposed at all: reach it with `oc port-forward`, which needs no address list (in place of `WES_ALLOWED_IPS` and [#5](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/5)). The FLARE admin port stays inside the pod. Other pods of the same Rahti project could still reach the WES and the admin port at the pod's address, so keep the hub in a project of its own.
+The sites file comes from a Secret that you create, which isn't part of the chart. By default, the WES API is not exposed at all: reach it with `oc port-forward`, which needs no address list (in place of `WES_ALLOWED_IPS` and [#5](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/5)), or make it public with `wesRoute.enabled`. The FLARE admin port stays inside the pod. Other pods of the same Rahti project could still reach the WES and the admin port at the pod's address, so keep the hub in a project of its own.
 
 **Before you start:**
 
@@ -246,6 +248,8 @@ The Route must say `Admitted=True`. If another project already has its name, the
 | `sitesSecret` | `nvflare-wes-sites` | Secret with the sites file under the key `sites.json` |
 | `tokenSecret` | Empty | Secret with [token files](#tokens-for-the-tes-of-the-sites), one key per site, mounted whole at `/run/secrets/tes-tokens`, so that renewed tokens arrive without a restart. Empty: none |
 | `envSecret` | Empty | Secret whose keys become environment variables of the hub: the secrets that [`oauth`](#tokens-for-the-tes-of-the-sites) sources name. Empty: none |
+| `wesRoute.enabled` | `false` | A Route for the WES API, `/ga4gh/wes/v1` alone, on `kitsHost`: see [The WES API in public](#the-wes-api-in-public) |
+| `corsAllowedOrigins` | Empty, none | Origins whose pages may call the WES API from a browser (CORS), comma-separated, such as `https://portal.example.org`: scheme, host and an optional port, no path, no wildcard. `WES_CORS_ALLOWED_ORIGINS` of the WES |
 | `tesGateway.url` | Empty, straight to each TES | A TES gateway (proTES), `https`, that all tasks go through: see [Through proTES](#through-protes) |
 | `tesGateway.tokenFile` | Empty | The gateway's token: a key of `tokenSecret` with a token file. Or: |
 | `tesGateway.oauth` | Empty | The gateway's token from an OAuth provider, with the keys of [`oauth`](#tokens-for-the-tes-of-the-sites) in the sites file (secrets by variable name only), and its secrets from `envSecret`, which it then needs. One of `tokenFile` and `oauth` is required with a gateway, and neither works without one; the chart takes no token or secret as a value |
@@ -261,13 +265,33 @@ oc port-forward service/hub-nvflare-wes-hub-wes 8080:8080
 
 Then use `http://localhost:8080/ga4gh/wes/v1` in place of `https://<hub>/ga4gh/wes/v1`, for example in [T8](../tests/t8-real-sites.md). A run goes on in the pod if the tunnel drops.
 
+#### The WES API in public
+
+For a portal or a client elsewhere, such as a WES form in a browser or the GA4GH SDK's CLI, `wesRoute.enabled` adds a Route for `/ga4gh/wes/v1` alone, on the kits name: `https://<kits name>/ga4gh/wes/v1`. Nothing else of the WES gets routed: not `/outputs`, not FastAPI's `/docs` and `/openapi.json`. Rahti's router matches paths by whole segments, so `/ga4gh/wes/v1x` isn't routed either, and answers paths without a Route with its own 503, "Application is not available". The WES doesn't resolve `..` in paths, so `/ga4gh/wes/v1/../../docs` gets the WES' own 404. Every endpoint but `service-info` needs a bearer token of `oidcIssuer`, for `oidcAudience` ([H5](../testbed/shortcuts.md#h5)), and `oidcAllowedSubs` can limit who may use it ([H22](../testbed/shortcuts.md#h22)). There's no rate limiting ([H23](../testbed/shortcuts.md#h23)).
+
+A page in a browser that calls the WES from another origin needs CORS: name its origin in `corsAllowedOrigins`. The WES then answers preflights for `/ga4gh/wes/v1` from those origins, for `GET` and `POST` with the headers `Authorization` and `Content-Type`, without credentials (cookies), as bearer tokens need none. Other paths, such as `/kits`, never get CORS headers. Its token must carry the WES's audience: a portal registered with the issuer as a client of its own uses its client's ID as `oidcAudience`.
+
+```fish
+helm upgrade hub charts/nvflare-wes-hub --reset-then-reuse-values \
+    --set wesRoute.enabled=true \
+    --set corsAllowedOrigins=https://<portal>
+oc get route hub-nvflare-wes-hub-wes -o jsonpath='{.status.ingress[0].conditions[0].type}={.status.ingress[0].conditions[0].status}'; echo
+curl -s https://<kits name>/ga4gh/wes/v1/service-info                    # 200
+curl -s -o /dev/null -w '%{http_code}\n' https://<kits name>/ga4gh/wes/v1/runs   # 401
+curl -s -o /dev/null -w '%{http_code}\n' -X OPTIONS https://<kits name>/ga4gh/wes/v1/runs \
+    -H 'Origin: https://<portal>' -H 'Access-Control-Request-Method: POST' \
+    -H 'Access-Control-Request-Headers: authorization'                 # 200
+```
+
+Several origins go with an escaped comma, as `--set 'corsAllowedOrigins=https://a.example.org\,https://b.example.org'`. Then run the [checks from outside](#checking-the-hub-from-outside) with `--wes-public`. To take the WES API off again, `--set wesRoute.enabled=false`.
+
 **Check from outside**, from a machine outside Rahti, with `flPort` as the FL port (see [Checking the hub from outside](#checking-the-hub-from-outside)):
 
 ```sh
 python3 tests/outside_check.py --fl-port 30002 <hub name> <kits name>
 ```
 
-Every check should say `[ok]`, also for the FL port outside a run, where the probe responder answers (a `[warn]` with `probeResponder=false`): `/kits` and `/sites` give the WES' own 404, the WES doesn't answer with 200 on either name, as the router has no Route for it and the address has only the FL port, and 8003 is closed. If the FL port times out during a run although the Service has its address, look for NetworkPolicies of the project (`oc get networkpolicy`) that keep it out: by Rahti's docs, pods only talk to pods of the same project by default.
+Every check should say `[ok]`, also for the FL port outside a run, where the probe responder answers (a `[warn]` with `probeResponder=false`): `/kits` and `/sites` give the WES' own 404, the WES doesn't answer with 200 on either name, as the router has no Route for it and the address has only the FL port, and 8003 is closed. With `wesRoute.enabled`, add `--wes-public`: then the WES must answer `service-info` on the kits name, and refuse runs there without a token, with its own 401; it still mustn't answer on the hub's name. If the FL port times out during a run although the Service has its address, look for NetworkPolicies of the project (`oc get networkpolicy`) that keep it out: by Rahti's docs, pods only talk to pods of the same project by default.
 
 **Acceptance:** a run with one site ([T8](../tests/t8-real-sites.md)) passes, `/kits` is reachable from outside, and the WES isn't.
 
@@ -420,7 +444,7 @@ helm upgrade hub charts/nvflare-wes-hub --reset-then-reuse-values --set tokenSec
 `tests/outside_check.py` checks a deployed hub as a node, or anyone on the internet, sees it. Run it from a machine outside the hub's network that isn't in `WES_ALLOWED_IPS`, with Python 3.12 or later and a clone of this repository; it needs nothing beyond the standard library. It takes the hub's name, as in the kits, and the host that serves `/kits` and `/sites`: with Compose, both are `FL_SERVER_NAME`.
 
 ```sh
-python3 tests/outside_check.py [--fl-port <port>] [--admin-port <port>] [--during-run] [--insecure] [--timeout <seconds>] <hub name> <kits host>
+python3 tests/outside_check.py [--fl-port <port>] [--admin-port <port>] [--during-run] [--wes-public] [--insecure] [--timeout <seconds>] <hub name> <kits host>
 ```
 
 | Check | Passes when |
@@ -428,7 +452,8 @@ python3 tests/outside_check.py [--fl-port <port>] [--admin-port <port>] [--durin
 | Both names | They resolve, as an unknown name would pass the checks of closed ports. The hub's name comes without a port: give it with `--fl-port`. The kits host takes `:<port>` if HTTPS isn't on 443 |
 | `GET /kits/no-such-token/site-1.tgz` at the kits host | 404 `No such kit`, from the WES: no such kit, but the way is open. A 404 or 503 of a router or proxy fails |
 | `POST /sites/no-such-token/csr` at the kits host | 404 `No such token`, from the WES |
-| `GET /ga4gh/wes/v1/service-info` at both names | Anything but 200, including no answer. Certificates aren't checked here, as any answer counts |
+| `GET /ga4gh/wes/v1/service-info` at both names; with `--wes-public`, at the hub's name only | Anything but 200, including no answer. Certificates aren't checked here, as any answer counts |
+| With `--wes-public` ([the WES API in public](#the-wes-api-in-public)): `GET /ga4gh/wes/v1/service-info` and `GET /ga4gh/wes/v1/runs` without a token, at the kits host | 200, and 401 `Bearer token required` from the WES |
 | FL port at the hub's name (`--fl-port`, default 8002) | Open. Outside a run, only the hub's probe responder answers there, which can be switched off, so a closed one is a warning; with `--during-run`, a failure |
 | FLARE admin port at the hub's name (`--admin-port`, default 8003) | Closed |
 

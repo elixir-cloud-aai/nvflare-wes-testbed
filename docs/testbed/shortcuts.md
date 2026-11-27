@@ -34,6 +34,8 @@ All of them, in one place, each with the proper way. Their numbers are referred 
 
 **No rate limiting anywhere.** Not at the WES, not at the reverse proxy: any authenticated caller can submit requests as fast as it likes. The one-run-at-a-time lock ([H2](#h2)) keeps a flood of `POST /runs` cheap to refuse, but every gated request still costs a signature verification that didn't exist before the OIDC gate ([H5](#h5)) — a cost an attacker can spend at will, with nothing to slow them down. **Proper way:** rate limiting at the proxy or the WES, per subject or per address.
 
+**Update:** the chart can make the WES API public on Rahti (`wesRoute.enabled`, see [The WES API in public](../setup/real-sites.md#the-wes-api-in-public)), for portals and clients, with no address list in front of it. Then anyone on the internet can spend that signature verification, not only those in `WES_ALLOWED_IPS`; Rahti's router adds no rate limit of its own.
+
 ### H7
 
 **Plain HTTP between the WES, proTES and TES, in the local testbed.** Only FLARE's own connections use TLS, there. On [real sites](../setup/real-sites.md#deploying-the-hub), links to kits go over HTTPS, through a reverse proxy. **Proper way:** HTTPS everywhere, which real nodes have anyway.
