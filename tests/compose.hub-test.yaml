@@ -128,6 +128,13 @@ services:
     command: ["python3", "/app/tests/auth_check.py"]
     network_mode: none
 
+  # CORS for the WES API alone, for the origins configured: no network needed
+  cors-check:
+    image: nvflare-testbed:local
+    profiles: [test]
+    command: ["python3", "/app/tests/cors_check.py"]
+    network_mode: none
+
   # Hands access tokens to anyone, as the trusted issuer of the sandbox. Also
   # on `hub`, so that `proxy-check` can reach it without joining `control`
   # (where it would hit the hub service's own alias for `${FL_SERVER_NAME}`)

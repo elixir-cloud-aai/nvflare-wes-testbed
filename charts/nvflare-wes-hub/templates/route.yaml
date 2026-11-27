@@ -1,6 +1,7 @@
 # Links to kits and to a site's certificate signing slot, which nodes fetch or
-# post to, and nothing else of the WES: it has no authentication (hack H5).
-# Reach the WES itself with `oc port-forward`.
+# post to with one-time tokens rather than a caller's identity (hacks H3, H4).
+# The WES API only with `wesRoute.enabled` (`route-wes.yaml`); otherwise reach
+# it with `oc port-forward`.
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:

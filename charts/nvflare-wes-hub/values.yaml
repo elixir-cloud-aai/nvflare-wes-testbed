@@ -70,6 +70,20 @@ tokenSecret: ""
 # (`client_secret_env`, `refresh_token_env`). Not part of the chart. Empty: none
 envSecret: ""
 
+# The WES API in public: a Route for `/ga4gh/wes/v1` alone, on `kitsHost`, so
+# that portals and clients reach it without `oc port-forward`. The WES checks
+# every caller's token itself (`oidcIssuer`); nothing else of it is routed
+wesRoute:
+  enabled: false
+  # With an empty `oidcAllowedSubs`, anyone the issuer vouches for could start
+  # runs at the sites (H22): the chart refuses that, unless this says so
+  allowAnySubject: false
+
+# Origins whose pages may call the WES API from a browser (CORS), such as
+# `https://portal.example.org`, comma-separated: scheme, host and an optional
+# port, no path, no wildcard. For `/ga4gh/wes/v1` only. Empty: none
+corsAllowedOrigins: ""
+
 # Optional: a TES gateway (proTES) that all tasks go through, pinned to the TES
 # of their site (or its `backend` in the sites file). See "Through proTES" in
 # docs/setup/real-sites.md. Empty `url`: tasks go straight to the TES of each

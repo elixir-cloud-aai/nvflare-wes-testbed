@@ -49,6 +49,7 @@ import anyio
 import jwt
 import requests
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -308,7 +309,94 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await anyio.to_thread.run_sync(RESPONDER.stop)
 
 
-app = FastAPI(title="Thin WES for NVFlare (sandbox)", lifespan=lifespan)
+# No redirects for a trailing slash: behind an edge-TLS router, they would lead
+# to `http://` and lose a POST
+app = FastAPI(title="Thin WES for NVFlare (sandbox)", lifespan=lifespan, redirect_slashes=False)
+
+# The WES API, the only part of the service that browsers may call from other
+# origins. Keep it in sync with the paths of the WES endpoints below, and with
+# the Route of the chart (`route-wes.yaml`)
+WES_PREFIX = "/ga4gh/wes/v1"
+# An origin as browsers send it: scheme, host and an optional port, nothing else
+ORIGIN = re.compile(r"https?://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?")
+
+
+def parse_cors_origins(value: str) -> list[str]:
+    """Read the origins whose pages may call the WES API, from `WES_CORS_ALLOWED_ORIGINS`.
+
+    Args:
+        value: Origins, comma-separated, such as `https://portal.example.org`; a
+            trailing slash and a default port are dropped, and scheme and host
+            are lower-cased, as browsers send them.
+
+    Returns:
+        The origins, each once, in order; empty for none.
+
+    Raises:
+        ValueError: An entry isn't an `http` or `https` origin without a path,
+            such as `*`: the WES allows named origins only.
+    """
+    origins: list[str] = []
+    for entry in (part.strip() for part in value.split(",")):
+        if not entry:
+            continue
+        origin = entry.removesuffix("/").lower()
+        # Browsers send no default port
+        for scheme, port in (("https", ":443"), ("http", ":80")):
+            if origin.startswith(f"{scheme}://") and origin.endswith(port):
+                origin = origin.removesuffix(port)
+        port = origin.rpartition(":")[2] if origin.count(":") == 2 else ""
+        if not ORIGIN.fullmatch(origin) or (port and not 0 < int(port) < 65536):
+            raise ValueError(
+                f"WES_CORS_ALLOWED_ORIGINS: {entry!r} isn't an origin such as https://portal.example.org"
+                " (scheme and host, an optional port, no path, no wildcard)"
+            )
+        if origin not in origins:
+            origins.append(origin)
+    return origins
+
+
+class WesCorsMiddleware:
+    """CORS for the WES API alone: `/kits`, `/sites` and `/outputs` stay out of reach of other origins' pages."""
+
+    def __init__(self, app: Any, origins: list[str]) -> None:
+        """Wrap an application.
+
+        Args:
+            app: The application, as Starlette passes it.
+            origins: The origins allowed to call the WES API.
+        """
+        self.app = app
+        # Bearer tokens in a header, never cookies, so no credentials
+        self.cors = CORSMiddleware(
+            app,
+            allow_origins=origins,
+            allow_methods=["GET", "POST"],
+            allow_headers=["Authorization", "Content-Type"],
+            max_age=600,
+        )
+
+    async def __call__(self, scope: MutableMapping[str, Any], receive: Any, send: Any) -> None:
+        """Handle a request, with CORS if it is for the WES API.
+
+        Args:
+            scope: The ASGI scope.
+            receive: The ASGI receive channel.
+            send: The ASGI send channel.
+        """
+        # Only HTTP requests: lifespan events pass through as they are
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        if path == WES_PREFIX or path.startswith(f"{WES_PREFIX}/"):
+            await self.cors(scope, receive, send)
+        else:
+            await self.app(scope, receive, send)
+
+
+CORS_ALLOWED_ORIGINS = parse_cors_origins(os.environ.get("WES_CORS_ALLOWED_ORIGINS", ""))
+if CORS_ALLOWED_ORIGINS:
+    app.add_middleware(WesCorsMiddleware, origins=CORS_ALLOWED_ORIGINS)
+    logger.info("CORS: pages of %s may call %s", ", ".join(CORS_ALLOWED_ORIGINS), WES_PREFIX)
+
 RUNS: dict[str, dict[str, Any]] = {}
 KITS: dict[str, pathlib.Path] = {}
 # Token -> (run_id, site) of a site's one slot to send its certificate signing

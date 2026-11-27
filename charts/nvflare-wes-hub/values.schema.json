@@ -57,8 +57,9 @@
       "pattern": "^[A-Za-z0-9]+(,[A-Za-z0-9]+)*$"
     },
     "oidcAllowedSubs": {
-      "description": "Subjects allowed to use the WES, comma-separated, or empty for any the issuer vouches for",
-      "type": "string"
+      "description": "Subjects allowed to use the WES, comma-separated without spaces or empty entries, or empty for any the issuer vouches for",
+      "type": "string",
+      "pattern": "^$|^[^,\\s]+(,[^,\\s]+)*$"
     },
     "sitesSecret": {"type": "string", "minLength": 1},
     "tokenSecret": {
@@ -70,6 +71,23 @@
       "description": "Secret whose keys become environment variables, for the secrets of oauth sources, or empty",
       "type": "string",
       "pattern": "^$|^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$"
+    },
+    "wesRoute": {
+      "description": "A Route for /ga4gh/wes/v1 alone, on kitsHost",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "allowAnySubject": {
+          "description": "Allow a public WES with an empty oidcAllowedSubs, open to anyone the issuer vouches for",
+          "type": "boolean"
+        }
+      }
+    },
+    "corsAllowedOrigins": {
+      "description": "Origins whose pages may call the WES API, comma-separated: scheme, host and an optional port, or empty. Stricter than WES_CORS_ALLOWED_ORIGINS of the WES (no spaces, no trailing slash)",
+      "type": "string",
+      "pattern": "^$|^https?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?(,https?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?)*$"
     },
     "tesGateway": {
       "description": "TES gateway (proTES) that all tasks go through, with its token from a file of tokenSecret or oauth",

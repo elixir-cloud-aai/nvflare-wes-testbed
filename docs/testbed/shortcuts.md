@@ -30,9 +30,13 @@ All of them, in one place, each with the proper way. Their numbers are referred 
 
 **Authorization is a static allow-list, not real access control.** `WES_OIDC_ALLOWED_SUBS`, if set, limits who may use the WES to a fixed list of token subjects; unset, any caller the trusted issuer ([H5](#h5)) vouches for is allowed, with no way to tell a federation's own researchers from anyone else with an account at the same issuer. There's no group, role or study membership behind it, and no connection to NVFlare's own roles ([H5](#h5)'s `lead`, fixed for everyone). The list is of subjects, never of emails or FLARE admin names, which [H5](#h5) derives from the token's `email` or `sub` and which aren't unique. **Proper way:** a claim or group check (e.g. against the issuer's `/userinfo`, at the cost of a network call per request), or NVFlare's own Multi-Study Support, if the provisioning flow here ever supports it.
 
+**Update:** with the WES API public on Rahti (`wesRoute.enabled`, see [The WES API in public](../setup/real-sites.md#the-wes-api-in-public)), an empty list opens the WES to anyone with an account at the issuer, so the chart refuses that unless `wesRoute.allowAnySubject=true` says so. Public too: `service-info` names the sites to anyone, without a token.
+
 ### H23
 
 **No rate limiting anywhere.** Not at the WES, not at the reverse proxy: any authenticated caller can submit requests as fast as it likes. The one-run-at-a-time lock ([H2](#h2)) keeps a flood of `POST /runs` cheap to refuse, but every gated request still costs a signature verification that didn't exist before the OIDC gate ([H5](#h5)) — a cost an attacker can spend at will, with nothing to slow them down. **Proper way:** rate limiting at the proxy or the WES, per subject or per address.
+
+**Update:** the chart can make the WES API public on Rahti (`wesRoute.enabled`, see [The WES API in public](../setup/real-sites.md#the-wes-api-in-public)), for portals and clients, with no address list in front of it. Then anyone on the internet can spend that signature verification, not only those in `WES_ALLOWED_IPS`; Rahti's router adds no rate limit of its own.
 
 ### H7
 
@@ -63,6 +67,8 @@ All of them, in one place, each with the proper way. Their numbers are referred 
 **One run at a time, all state in memory, no restart.** Ports are fixed, so a second server wouldn't fit, and a restart forgets runs. **Proper way:** a database and a queue, as in any real WES, and a port per run or one long-running server.
 
 **Update:** now that starting a run needs an identity ([H5](#h5)), the single run slot is also a way for one authenticated caller to shut everyone else out: resubmit the instant each run ends, and no one else ever gets a turn. There's no cancel or evict endpoint to recover the slot from them either. A queue (above) would fix the starvation; a cancel endpoint would at least let an operator recover without a restart.
+
+**Update:** with the WES API public on Rahti (`wesRoute.enabled`), that caller no longer needs access to the Rahti project, only a token the WES accepts: one more reason to keep `oidcAllowedSubs` ([H22](#h22)) short.
 
 ### H6
 

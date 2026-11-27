@@ -56,6 +56,8 @@ services:
       WES_OIDC_ISSUER: http://fake-idp:8080/oidc/
       WES_OIDC_ALLOW_HTTP: "1"
       WES_OIDC_TOKEN_URL: http://fake-idp:8080/oidc/token
+      # Pages of this origin may call the WES API, for `auth-e2e-check`
+      WES_CORS_ALLOWED_ORIGINS: https://portal.testbed.invalid
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://localhost:8080/ga4gh/wes/v1/service-info')"]
       interval: 3s
@@ -195,6 +197,13 @@ services:
     command: ["python3", "/app/tests/auth_check.py"]
     network_mode: none
 
+  # CORS for the WES API alone, for the origins configured: no network needed
+  cors-check:
+    image: nvflare-testbed:local
+    profiles: [test]
+    command: ["python3", "/app/tests/cors_check.py"]
+    network_mode: none
+
   # The same gate, over real HTTP, through the fake identity provider (H5)
   auth-e2e-check:
     image: nvflare-testbed:local
@@ -203,6 +212,7 @@ services:
     environment:
       WES_URL: http://fl-hub:8080/ga4gh/wes/v1
       WES_OIDC_TOKEN_URL: http://fake-idp:8080/oidc/token
+      WES_CORS_ORIGIN: https://portal.testbed.invalid
     depends_on:
       fl-hub:
         condition: service_healthy

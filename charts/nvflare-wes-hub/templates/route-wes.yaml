@@ -1,0 +1,28 @@
+{{- if .Values.wesRoute.enabled }}
+{{- if not (or .Values.oidcAllowedSubs .Values.wesRoute.allowAnySubject) }}
+{{- fail "wesRoute.enabled while oidcAllowedSubs is empty: anyone the issuer vouches for could start runs at the sites (H22). Name the subjects in oidcAllowedSubs, or set wesRoute.allowAnySubject=true on purpose" }}
+{{- end }}
+# The WES API in public, for portals and clients, on the kits host: only
+# `/ga4gh/wes/v1`, not `/kits`, `/sites` (their own Routes), `/outputs`, or
+# FastAPI's `/docs` and `/openapi.json`. The WES checks every caller's bearer
+# token itself (H5), except for `service-info`, and allows other origins'
+# pages only with `corsAllowedOrigins`
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "hub.fullname" . }}-wes
+  labels:
+    {{- include "hub.labels" . | nindent 4 }}
+spec:
+  host: {{ .Values.kitsHost | quote }}
+  path: /ga4gh/wes/v1
+  to:
+    kind: Service
+    name: {{ include "hub.fullname" . }}-wes
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+{{- end }}
