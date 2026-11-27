@@ -345,7 +345,8 @@ def parse_cors_origins(value: str) -> list[str]:
         for scheme, port in (("https", ":443"), ("http", ":80")):
             if origin.startswith(f"{scheme}://") and origin.endswith(port):
                 origin = origin.removesuffix(port)
-        if not ORIGIN.fullmatch(origin):
+        port = origin.rpartition(":")[2] if origin.count(":") == 2 else ""
+        if not ORIGIN.fullmatch(origin) or (port and not 0 < int(port) < 65536):
             raise ValueError(
                 f"WES_CORS_ALLOWED_ORIGINS: {entry!r} isn't an origin such as https://portal.example.org"
                 " (scheme and host, an optional port, no path, no wildcard)"
@@ -358,17 +359,17 @@ def parse_cors_origins(value: str) -> list[str]:
 class WesCorsMiddleware:
     """CORS for the WES API alone: `/kits`, `/sites` and `/outputs` stay out of reach of other origins' pages."""
 
-    def __init__(self, asgi_app: Any, origins: list[str]) -> None:
+    def __init__(self, app: Any, origins: list[str]) -> None:
         """Wrap an application.
 
         Args:
-            asgi_app: The application.
+            app: The application, as Starlette passes it.
             origins: The origins allowed to call the WES API.
         """
-        self.app = asgi_app
+        self.app = app
         # Bearer tokens in a header, never cookies, so no credentials
         self.cors = CORSMiddleware(
-            asgi_app,
+            app,
             allow_origins=origins,
             allow_methods=["GET", "POST"],
             allow_headers=["Authorization", "Content-Type"],

@@ -94,15 +94,23 @@ def raises(function: Callable[[str], object], value: str) -> bool:
 
 
 def cors_installed_without_setting() -> bool:
-    """Whether the WES installs its CORS middleware with `WES_CORS_ALLOWED_ORIGINS` unset.
+    """Whether the WES sends CORS headers, or installs its middleware, with `WES_CORS_ALLOWED_ORIGINS` unset.
 
-    In a process of its own, as the setting is read on import.
+    In a process of its own, as the setting is read on import: a preflight and
+    a GET from the portal's origin, and the middleware list.
 
     Returns:
-        Whether it does.
+        Whether it does any of that.
     """
     environ = {key: value for key, value in os.environ.items() if key != "WES_CORS_ALLOWED_ORIGINS"}
-    code = "from wes import app as w; print(any(m.cls is w.WesCorsMiddleware for m in w.app.user_middleware))"
+    code = (
+        "import sys; sys.path.insert(0, 'tests');"
+        " from cors_check import PORTAL, call, preflight; from wes import app as w;"
+        " _, pre = call(w.app, 'OPTIONS', '/ga4gh/wes/v1/runs', preflight(PORTAL));"
+        " _, get = call(w.app, 'GET', '/ga4gh/wes/v1/service-info', {'Origin': PORTAL});"
+        " headers = any('access-control-allow-origin' in h for h in (pre, get));"
+        " print(headers or any(m.cls is w.WesCorsMiddleware for m in w.app.user_middleware))"
+    )
     result = subprocess.run(
         [sys.executable, "-c", code], cwd=ROOT, env=environ, capture_output=True, text=True, check=True
     )
@@ -181,7 +189,15 @@ def main() -> None:
         parse = wes.parse_cors_origins
         checks["no origins by default"] = parse("") == [] and parse(" , ") == []
         checks["origins without a trailing slash, deduplicated"] = parse(f"{PORTAL}/,{PORTAL}") == [PORTAL]
-        for bad in ("*", "portal.example.org", "https://portal.example.org/path", "ftp://portal.example.org", "null"):
+        for bad in (
+            "*",
+            "portal.example.org",
+            "https://portal.example.org/path",
+            "ftp://portal.example.org",
+            "null",
+            "https://portal.example.org:0",
+            "https://portal.example.org:65536",
+        ):
             checks[f"refuses {bad!r}"] = raises(parse, bad)
         checks["drops default ports, as browsers send none"] = parse(
             "https://portal.example.org:443,http://localhost:80"
