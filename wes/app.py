@@ -298,7 +298,7 @@ def parse_entitlements(value: str, claim: str) -> frozenset[str]:
             typo must not silently leave the WES open.
     """
     entitlements = frozenset(e.strip() for e in value.split(",") if e.strip())
-    if value.strip() and not entitlements:
+    if value and not entitlements:
         raise ValueError("WES_OIDC_REQUIRED_ENTITLEMENTS is set, but names no entitlement")
     if entitlements and not claim:
         raise ValueError("WES_OIDC_ENTITLEMENT_CLAIM is empty, but WES_OIDC_REQUIRED_ENTITLEMENTS needs it")
@@ -322,8 +322,8 @@ if REQUIRED_ENTITLEMENTS:
 USERINFO_CACHE_SECONDS = 300
 # Answers kept at most, of different tokens
 USERINFO_CACHE_SIZE = 1024
-# Seconds to wait for the issuer's userinfo endpoint
-USERINFO_TIMEOUT = 10
+# Seconds to wait for the issuer's discovery document and userinfo endpoint
+OIDC_TIMEOUT = 10
 
 
 def start_responder() -> None:
@@ -1233,17 +1233,34 @@ def oidc_discovery() -> dict[str, Any]:
     Returns:
         The document.
 
+    Only a good document is kept: a failed fetch is tried again on the next
+    request, rather than kept until the WES restarts.
+
     Raises:
         ValueError: The issuer isn't reachable over https, and
-            `WES_OIDC_ALLOW_HTTP` isn't set, or the document isn't a JSON object.
+            `WES_OIDC_ALLOW_HTTP` isn't set; it answers otherwise than with
+            `200` (redirects included, which could lead to plain http); or the
+            document isn't a JSON object for this issuer with a `jwks_uri`
+            (OpenID Connect Discovery 1.0, 4.3).
     """
     global _discovery
     if _discovery is None:
         if not OIDC_ALLOW_HTTP:
             tokens.check_url(OIDC_ISSUER, "WES_OIDC_ISSUER")
-        document = requests.get(f"{OIDC_ISSUER.rstrip('/')}/.well-known/openid-configuration", timeout=10).json()
+        reply = requests.get(
+            f"{OIDC_ISSUER.rstrip('/')}/.well-known/openid-configuration", timeout=OIDC_TIMEOUT, allow_redirects=False
+        )
+        if reply.status_code != 200:
+            raise ValueError(f"The issuer's discovery document answered {reply.status_code}")
+        document = reply.json()
         if not isinstance(document, dict):
             raise ValueError("The issuer's discovery document isn't a JSON object")
+        # Trailing slashes aside: tokens' `iss` is checked against `OIDC_ISSUER` exactly anyway
+        issuer = document.get("issuer")
+        if not isinstance(issuer, str) or issuer.rstrip("/") != OIDC_ISSUER.rstrip("/"):
+            raise ValueError("The issuer's discovery document is for another issuer")
+        if not isinstance(document.get("jwks_uri"), str):
+            raise ValueError("The issuer's discovery document names no jwks_uri")
         _discovery = document
     return _discovery
 
@@ -1487,7 +1504,7 @@ def userinfo_entitlements(token: str, sub: str, expires: float) -> frozenset[str
         reply = requests.get(
             userinfo_endpoint(),
             headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-            timeout=USERINFO_TIMEOUT,
+            timeout=OIDC_TIMEOUT,
             # The token goes to the endpoint the issuer names, and nowhere else
             allow_redirects=False,
         )

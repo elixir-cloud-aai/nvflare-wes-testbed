@@ -181,6 +181,7 @@ def main() -> None:
 
         key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         wes.jwk_client = lambda: FakeJwkClient(key)
+        real_discovery = wes.oidc_discovery
         wes.oidc_discovery = lambda: {"issuer": ISSUER, "jwks_uri": f"{ISSUER}jwk", "userinfo_endpoint": USERINFO}
         userinfo = FakeUserinfo()
         wes.requests = types.SimpleNamespace(get=userinfo.get)
@@ -220,6 +221,7 @@ def main() -> None:
         }
 
         # From the token
+        token_calls = len(userinfo.calls)
         checks["a member, by the token, may start runs"] = status(*make(**{CLAIM: [ECP, EOC]})) == 200
         checks["a member, by a token with the claim as a string, may start runs"] = status(*make(**{CLAIM: EOC})) == 200
         checks["the parent group alone gets 403"] = status(*make(**{CLAIM: [ECP]})) == 403
@@ -231,8 +233,11 @@ def main() -> None:
         checks["the group in another case gets 403"] = status(*make(**{CLAIM: [EOC.upper()]})) == 403
         checks["an empty claim gets 403"] = status(*make(**{CLAIM: []})) == 403
         checks["a claim of another type gets 403"] = status(*make(**{CLAIM: {"value": EOC}})) == 403
+        checks["a null claim gets 403"] = status(*make(**{CLAIM: None})) == 403
         checks["the value under another claim gets 403"] = status(*make(entitlements=[EOC], **{CLAIM: []})) == 403
-        checks["a token that has the claim, but not the group, never asks userinfo"] = userinfo.calls == []
+        checks["a token that has the claim, but not the group, never asks userinfo"] = (
+            len(userinfo.calls) == token_calls
+        )
 
         # From userinfo, when the token lacks the claim
         value, claims = make()
@@ -242,7 +247,9 @@ def main() -> None:
         checks["userinfo is asked at the issuer's userinfo endpoint"] = call.get("url") == USERINFO
         checks["userinfo gets the caller's token"] = call.get("headers", {}).get("Authorization") == f"Bearer {value}"
         checks["userinfo follows no redirects"] = call.get("allow_redirects") is False
-        checks["userinfo has a timeout"] = isinstance(call.get("timeout"), (int, float)) and call["timeout"] <= 10
+        checks["userinfo has a timeout"] = (
+            isinstance(call.get("timeout"), (int, float)) and call["timeout"] == wes.OIDC_TIMEOUT
+        )
         checks["userinfo is cached per token"] = status(value, claims) == 200 and len(userinfo.calls) == 1
         other_value, other_claims = make()
         userinfo.answers[other_value] = FakeResponse(200, {"sub": "researcher-1", CLAIM: [ECP]})
@@ -286,6 +293,33 @@ def main() -> None:
                 status(discovery_value, discovery_claims) == 401 and len(userinfo.calls) == calls
             )
         wes.oidc_discovery = discovery
+
+        # Fetching the discovery document itself: only a good one is kept, so
+        # that a failed fetch doesn't stick until a restart. Requests without
+        # a token are discovery requests here
+        good = {"issuer": ISSUER, "jwks_uri": f"{ISSUER}jwk", "userinfo_endpoint": USERINFO}
+        for case, answer in {
+            "answers 503": FakeResponse(503, {"error": "temporarily_unavailable"}),
+            "redirects": FakeResponse(302, {}),
+            "isn't an object": FakeResponse(200, [good]),
+            "is for another issuer": FakeResponse(200, {**good, "issuer": "https://else.test/"}),
+            "names no jwks_uri": FakeResponse(200, {"issuer": ISSUER, "userinfo_endpoint": USERINFO}),
+        }.items():
+            wes._discovery = None
+            userinfo.answers[""] = answer
+            try:
+                real_discovery()
+                refused = False
+            except ValueError:
+                refused = True
+            checks[f"a discovery document that {case} is refused, and not kept"] = refused and wes._discovery is None
+        userinfo.answers[""] = FakeResponse(200, {**good, "issuer": ISSUER.rstrip("/")})
+        checks["a good discovery document is kept, trailing slash aside"] = (
+            real_discovery()["jwks_uri"] == good["jwks_uri"] and wes._discovery is not None
+        )
+        checks["discovery follows no redirects"] = userinfo.calls[-1].get("allow_redirects") is False
+        del userinfo.answers[""]
+        wes._discovery = None
 
         # The cache lasts no longer than the token
         short_value, short_claims = make(lifetime=1)
@@ -333,6 +367,17 @@ def main() -> None:
             form_call(wes.app, runs, outsider, bad_run) == 403
         )
         checks["POST /runs as a member gets as far as the request"] = form_call(wes.app, runs, member, bad_run) == 400
+        # The same, with the entitlement only at userinfo, as from LS Login
+        by_userinfo, _ = make()
+        userinfo.answers[by_userinfo] = member_info()
+        outsider_by_userinfo, _ = make(sub="outsider-1")
+        userinfo.answers[outsider_by_userinfo] = FakeResponse(200, {"sub": "outsider-1", CLAIM: [ECP]})
+        checks["POST /runs as a member by userinfo gets as far as the request"] = (
+            form_call(wes.app, runs, by_userinfo, bad_run) == 400
+        )
+        checks["POST /runs as a non-member by userinfo: 403"] = (
+            form_call(wes.app, runs, outsider_by_userinfo, bad_run) == 403
+        )
         wes.RUNS["run-of-outsider"] = {"state": "COMPLETE", "sub": "outsider-1", "submitter": "outsider-1@x.invalid"}
         checks["a non-member still lists runs, its own only"] = form_call(wes.app, runs, outsider, None) == 200 and [
             r["run_id"] for r in wes.list_runs(wes.Identity("outsider-1", "x"))["runs"]
@@ -350,6 +395,9 @@ def main() -> None:
         )
         checks["refuses to start with entitlements of empty entries only"] = (
             "WES_OIDC_REQUIRED_ENTITLEMENTS" in refuses_to_start({"WES_OIDC_REQUIRED_ENTITLEMENTS": " , "})
+        )
+        checks["refuses to start with entitlements of spaces only"] = (
+            "WES_OIDC_REQUIRED_ENTITLEMENTS" in refuses_to_start({"WES_OIDC_REQUIRED_ENTITLEMENTS": "  "})
         )
         checks["starts with another claim name"] = (
             refuses_to_start({"WES_OIDC_REQUIRED_ENTITLEMENTS": EOC, "WES_OIDC_ENTITLEMENT_CLAIM": "entitlements"})
