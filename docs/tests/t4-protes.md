@@ -26,6 +26,7 @@ It ends with `10/10 checks passed`. The first build takes a few minutes, as it b
 
 - Does proTES pass on tasks with kit links and site-local data URLs? It does, with the settings of `compose/protes.yaml`.
 - Can a client choose a site without any change to proTES? It can. What a plugin of proTES for sites would add: [A site plugin for proTES](../outcomes/protes-plugin.md).
+- Does it work at real nodes, with TES that check proTES's own token? It did at the FI and CZ Nodes on 2026-11-27 ([First run through proTES](../outcomes/report.md#first-run-through-protes)).
 
 ## What to record
 

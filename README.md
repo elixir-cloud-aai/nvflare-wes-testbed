@@ -9,7 +9,7 @@ A sandbox for running federated learning jobs with [NVIDIA FLARE](https://github
 | First run on one cluster | 2026-11-12 | Both on one TESK, in the hub's cluster on Rahti | None | `COMPLETE` |
 | First run with tokens | 2026-11-19 | As above | Sent, not checked | `COMPLETE` |
 | First multi-site run | 2026-11-24 | FI Node (TESK on Rahti, CSC) and CZ Node (TESK at CERIT-SC) | LS Login, checked | `COMPLETE`, accuracy 0.975 as in the simulator |
-| First run through proTES | Pending | As above, each task pinned through proTES | LS Login at proTES; proTES's service token at the TESKs | Pending |
+| First run through proTES | 2026-11-27 | As above, each task pinned to its site's TESK through proTES | LS Login at proTES; proTES's service token at the TESKs | `COMPLETE`, accuracy 0.975 as directly |
 
 What ran, how, and what it means: the [Report](docs/outcomes/report.md); the raw rows: [Results](docs/outcomes/results.md).
 

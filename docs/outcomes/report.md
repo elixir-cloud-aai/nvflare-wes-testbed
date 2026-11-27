@@ -1,19 +1,20 @@
 # Report
 
-!!! note "Results and discussion of the testbed, as of 2026-11-24"
+!!! note "Results and discussion of the testbed, as of 2026-11-27"
     What ran, on what, with which evidence, and what it means. The raw rows are in [Results](results.md); what follows from them in general is in the [Gap analysis](gap-analysis.md), the [Open questions](open-questions.md) and the draft [Proposals](proposals.md). Section 5 holds draft outcomes and proposals, for further consideration: whatever is added here stays a draft, and gets finalized elsewhere. No host names of nodes, no tokens, no personal data; people are named by their roles.
 
 ## Summary
 
 A federated learning job with NVIDIA FLARE (NVFlare) ran through a GA4GH WES, with one NVFlare client per site as a GA4GH TES task, on the TES of two ELIXIR Nodes at two organizations' infrastructure: the FI Node's TESK on Rahti, at CSC, and the CZ Node's TESK at CERIT-SC. On 2026-11-24, run `ae7742f2` ended `COMPLETE` in about 90 seconds, with the NVFlare job `FINISHED:COMPLETED`. Both TES checked the LS Login access token that the hub sent with each task. The federated model reached a holdout accuracy of 0.975, against 0.825 and 0.875 for models trained on either site's share alone: the same as in the simulator ([T1](../tests/t1-simulator.md)).
 
-It took three milestones to get there:
+It took three milestones to get there, and a fourth sent the same run through proTES:
 
 | Milestone | Date | Sites | Authentication at the TES | Result |
 |---|---|---|---|---|
 | [First run on one cluster](#first-run-on-one-cluster) | 2026-11-12 | Both sites on one TESK, in the hub's cluster on Rahti | None | `COMPLETE`, after a first `SYSTEM_ERROR` |
 | [First run with tokens](#first-run-with-tokens) | 2026-11-19 | As above | Tokens sent, not checked | `COMPLETE` |
 | [First multi-site run](#first-multi-site-run) | 2026-11-24 | FI Node (TESK on Rahti, CSC) and CZ Node (TESK at CERIT-SC) | LS Login tokens, checked by both | `COMPLETE`, accuracy 0.975 |
+| [First run through proTES](#first-run-through-protes) | 2026-11-27 | As above, each task pinned to its site's TESK through proTES | LS Login at proTES; proTES's service token, checked by both TESKs | `COMPLETE`, accuracy 0.975 |
 
 What it shows: TES as it is can schedule the clients of a federated job, because clients only dial out to the FL server, and the server runs beside the WES, outside TES ([option B1](../testbed/options.md#b1-server-beside-the-wes)). Whether a node can take part depends on whether its tasks get out to the hub, and on details of its TES deployment, such as its storage. What it doesn't show: a production setup. Both TES are run by the maintainers of this testbed, both are TESK, the model and data are toys, and the testbed takes every shortcut it can ([Limitations](#limitations)). ELIXIR Cloud isn't "available" for federated learning in the sense of milestone M4.5 yet: see [What this does not deliver](results.md#text-for-the-m45-report).
 
@@ -92,9 +93,29 @@ Port 443 timed out at both nodes, as the hub's address for the FL port publishes
 
 ### First run through proTES
 
-**What ran.** Pending ([#18](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/18)). The run of [First multi-site run](#first-multi-site-run), with both client tasks sent to proTES, each pinned to its site's TESK, which proTES called with a service token of its own client.
+**What ran.** 2026-11-27, at 16:11 UTC, run `607ecdff` ([#18](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/18)). The run of [First multi-site run](#first-multi-site-run), with both client tasks sent to proTES 0.7.0 at `https://gateway-tes.elixir-on.cloud`, each pinned to its site's TESK by URL (`gateway.backends`), which proTES called with a service token of its own client. The hub (revision 8 of its release on Rahti, image `sha-55309b5`) called proTES with one LS Login access token of a member of EOC-Compute.
 
-**What it means.** Pending. What a plugin of proTES for sites would add, and what it can't do: [A site plugin for proTES](protes-plugin.md).
+**Evidence.** Probes of both sites through proTES, the same day; [Results](results.md), rows of 2026-11-27.
+
+| What | FI Node (site 1) | CZ Node (site 2) |
+|---|---|---|
+| Probe through proTES | `COMPLETE`. FL port 30002 `open`, 443 timeout (not needed), input downloaded, `env` passed, uid 1002390000 and gid 0, `/tmp` writable, `/` not | Ran as on 2026-11-24 (executor's log at the node: 30002 `open`, 443 timeout, input downloaded, `env` passed, uid 100 and gid 0, `/tmp` writable, `/` not), but stored by proTES as `SYSTEM_ERROR`, without logs: a race, below |
+| Client task | Ran at `https://tesk.rahtiapp.fi`, as pinned, `COMPLETE` | Ran at `https://tesk.dyn.cloud.e-infra.cz`, as pinned, `COMPLETE` |
+
+| Run `607ecdff` | |
+|---|---|
+| `QUEUED` | 16:11:30 UTC |
+| `COMPLETE` | 16:13:02 UTC, about 92 s after `QUEUED`, as the direct run |
+| NVFlare job | `FINISHED:COMPLETED` |
+| Holdout accuracy | Federated 0.975; site 1 alone 0.825; site 2 alone 0.875 |
+
+The times that proTES stores for a task aren't the task's: proTES sets its start when it receives the task and its end when it has forwarded it, less than 1 s apart, and doesn't take the times of the TES ([protes#528](https://github.com/elixir-cloud-aai/protes/issues/528)). This section gives none of them.
+
+**The race.** The CZ probe's task finished at the node: its executor logged its findings, the taskmaster exited with 0 and its Kubernetes job was `Complete`. proTES polled the CZ TESK in the same second as that job finished. Kubernetes briefly reports a job that has just finished with neither an active nor a succeeded pod, and tesk-api's `TaskStateResolver` returns `SYSTEM_ERROR` for that ([tesk-api#233](https://github.com/elixir-cloud-aai/tesk-api/issues/233)). proTES's follow-up request for the full task, 0.3 s later, disagreed, but proTES kept the first final state and dropped the logs ([protes#527](https://github.com/elixir-cloud-aai/protes/issues/527)). Any task at either TESK can hit this, client tasks of a run included; this run didn't.
+
+**Result.** The run met the criteria of [First multi-site run](#first-multi-site-run) through proTES: `COMPLETE`, the NVFlare job `FINISHED:COMPLETED`, the accuracy of T1, and each task at its site's TESK.
+
+**What it means.** A WES can send the tasks of a federated job to a TES gateway and pin each one to its site, without any change to proTES, and the TES of each site can check the gateway's own token rather than the user's. The gateway adds a step that can go wrong, though: it keeps its own copy of a task's state, which can be wrong when it polls at the wrong moment, and its own task times. What a plugin of proTES for sites would add, and what it can't do: [A site plugin for proTES](protes-plugin.md).
 
 ### The DE Node
 
@@ -121,7 +142,7 @@ The DE Node took part in the probes only. On 2026-11-21, two TES deployments the
 - **A toy model and toy data.** Logistic regression over two features, 40 synthetic rows per site, 5 rounds. Nothing about performance, scale or the value of a model follows ([Scope](../testbed/index.md#scope)).
 - **Two sites, one job.** The job takes exactly two sites (`min_clients` 2). Jobs for three and four sites exist and run in CI ([#54](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/pull/54)), not on real nodes. Any lost site fails the run, and sites don't rejoin ([H18](../testbed/shortcuts.md#h18)).
 - **Short runs.** About 90 seconds, well within the lifetime of one access token. Renewal during a run, long rounds and the 30-minute `timeout` of the clients ([H14](../testbed/shortcuts.md#h14)) weren't put to the test.
-- **One multi-site run.** Run `ae7742f2` passed once; it isn't a series.
+- **Two multi-site runs.** Run `ae7742f2`, directly, and run `607ecdff`, through proTES, passed once each; they aren't a series.
 - **No one-site runs.** The plan of [#10](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/10) called for a run with one site per Node (`min_clients` 1) before the run with all sites. The probes at each Node took their place, and the run with both sites passed at once.
 - **Central evaluation.** The models of one site alone are trained by `evaluate.py`, from the shares of the test set, not at the sites ([H12](../testbed/shortcuts.md#h12)).
 
@@ -167,12 +188,19 @@ For this WES, and for a WES of ELIXIR On-Cloud that runs federated jobs, such as
 - **Show the tasks.** Put the TES records of a run's tasks, their states, start times and system logs, into the run log, in the fields of the WES specification ([H17](../testbed/shortcuts.md#h17)): with owner-only TES, the WES is where the user sees them.
 - **More than one run.** A queue and persistent state ([G12](gap-analysis.md#g12)).
 
+### For proTES
+
+- **Poll again before a final state.** Keep a final state of a task only when a second poll of the TES agrees, and keep the TES's logs with it ([First run through proTES](#first-run-through-protes), [protes#527](https://github.com/elixir-cloud-aai/protes/issues/527)).
+- **The TES's times.** Store the start and end times that the TES reports for a task, not when proTES received and forwarded it ([protes#528](https://github.com/elixir-cloud-aai/protes/issues/528)).
+- **Sites, not TES instances.** [A site plugin for proTES](protes-plugin.md).
+
 ### For TES
 
 For TES, the specification, and for TESK in particular:
 
 - **Keep a task's pods on one node, or use shared storage.** TESK's filer and executors share a volume. With storage that one node attaches at a time (`ReadWriteOnce`), its executors should be scheduled on the filer's node, for example by node affinity, or the deployment should use a storage class with `ReadWriteMany`. TESK's deployment guide should say which storage it needs ([G13](gap-analysis.md#g13)). No issue exists for this yet.
 - **Say what tasks may reach.** Node operators should document, and a TES could say in its service info, what its tasks may connect to: which ports, through which proxy ([Proposals](proposals.md), [G11](gap-analysis.md#g11)). A WES then knows before it submits.
+- **No error for a job that has just finished.** tesk-api reports `SYSTEM_ERROR` for a task whose Kubernetes job briefly shows neither an active nor a succeeded pod, as a job does right after it finishes ([First run through proTES](#first-run-through-protes), [tesk-api#233](https://github.com/elixir-cloud-aai/tesk-api/issues/233)).
 - **Report why a task failed.** Put reasons from the backend, such as a volume that can't be attached, into the task's `system_logs`, so that a WES and its user see them without access to the cluster.
 - **Tokens.** Accept tokens exchanged for the TES, with an audience, so that a WES can act for its caller without holding the caller's own token ([G5](gap-analysis.md#g5)).
 - **Pinning by site.** Pin tasks to a site by a property of the site or of its data, not by URL ([Pinning tasks by a property of a site](proposals.md#pinning-tasks-by-a-property-of-a-site)).

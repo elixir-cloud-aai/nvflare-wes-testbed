@@ -69,7 +69,7 @@ docker run --rm -e TES_TOKEN elixircloud/nvflare-wes-testbed:dev \
 
 `--fl-port` is the port that decides. `--ports` lists others to try, for information, such as 443 or the port of a [hub on Rahti](#where-it-goes).
 
-`TES_TOKEN` is taken from your environment, if the TES needs a token, and only goes over HTTPS. Through proTES, use its URL as `--tes`, and add `--backend https://<tes>` to pin the task to that TES. proTES 0.6.0 keeps the logs of the TES once a task has finished, so the script reads its findings from proTES. Only if they're missing does it ask that TES for the task, with the same token, which a TES refuses if it sees proTES's own client as the task's owner, as TESK does with [service tokens](#through-protes).
+`TES_TOKEN` is taken from your environment, if the TES needs a token, and only goes over HTTPS. Through proTES, use its URL as `--tes`, and add `--backend https://<tes>` to pin the task to that TES. proTES 0.6.0 keeps the logs of the TES once a task has finished, so the script reads its findings from proTES. Only if they're missing does it ask that TES for the task, with the same token, which a TES refuses if it sees proTES's own client as the task's owner, as TESK does with [service tokens](#through-protes). If proTES keeps a final state that the TES didn't have, as it can when it polls a TESK just as a task ends ([protes#527](https://github.com/elixir-cloud-aai/protes/issues/527)), it keeps no logs, and the probe says `inconclusive`: run it again ([First run through proTES](../outcomes/report.md#first-run-through-protes)).
 
 | Outcome for a port | Meaning |
 |---|---|

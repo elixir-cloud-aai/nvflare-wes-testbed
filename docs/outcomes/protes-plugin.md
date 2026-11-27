@@ -7,10 +7,11 @@ What a plugin of [proTES](https://github.com/elixir-cloud-aai/proTES) would need
 
 ## What there is now
 
-The hub pins each task to one TES with proTES's tag `gateway.backends` (`{"type": "allow", "backends": [...]}`), by the URL of the site's TES or by proTES's identifier of it (the site's `backend` in the sites file; [Through proTES](../setup/real-sites.md#through-protes)). proTES then uses that TES only, and refuses the task if it can't: no plugin is involved, and any routing plugin of proTES works with it. This is enough to run a federated job through proTES, but:
+The hub pins each task to one TES with proTES's tag `gateway.backends` (`{"type": "allow", "backends": [...]}`), by the URL of the site's TES or by proTES's identifier of it (the site's `backend` in the sites file; [Through proTES](../setup/real-sites.md#through-protes)). proTES then uses that TES only, and refuses the task if it can't: no plugin is involved, and any routing plugin of proTES works with it. This is enough to run a federated job through proTES, as run `607ecdff` did at the FI and CZ Nodes on 2026-11-27 ([First run through proTES](report.md#first-run-through-protes)), but:
 
 - **Sites are addresses.** The hub's sites file maps each site to a TES and to a share of the data ([H11](../testbed/shortcuts.md#h11), [G4](gap-analysis.md#g4)). Moving a site's TES changes every sites file that names it.
 - **The pin is all the client can say.** proTES doesn't know that a task is one participant of a job, or which site it stands for: the tag `site` of the testbed's tasks means nothing to it.
+- **States and times are proTES's.** The WES reads a task's state from proTES's copy, which can be wrong: in a probe at the CZ Node on 2026-11-27, proTES kept `SYSTEM_ERROR` for a task that had finished ([protes#527](https://github.com/elixir-cloud-aai/protes/issues/527)). proTES's task times are when it received and forwarded a task, not the TES's ([protes#528](https://github.com/elixir-cloud-aai/protes/issues/528)).
 - **One identity for all tasks.** proTES owns every task as the one user whose token the hub holds ([H25](../testbed/shortcuts.md#h25)), and a TES that takes proTES's own token sees proTES's client as the owner of all of them.
 
 ## What a site plugin would need
