@@ -309,7 +309,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await anyio.to_thread.run_sync(RESPONDER.stop)
 
 
-app = FastAPI(title="Thin WES for NVFlare (sandbox)", lifespan=lifespan)
+# No redirects for a trailing slash: behind an edge-TLS router, they would lead
+# to `http://` and lose a POST
+app = FastAPI(title="Thin WES for NVFlare (sandbox)", lifespan=lifespan, redirect_slashes=False)
 
 # The WES API, the only part of the service that browsers may call from other
 # origins. Keep it in sync with the paths of the WES endpoints below, and with
@@ -324,8 +326,8 @@ def parse_cors_origins(value: str) -> list[str]:
 
     Args:
         value: Origins, comma-separated, such as `https://portal.example.org`; a
-            trailing slash is dropped, and scheme and host are lower-cased, as
-            browsers send them.
+            trailing slash and a default port are dropped, and scheme and host
+            are lower-cased, as browsers send them.
 
     Returns:
         The origins, each once, in order; empty for none.
@@ -339,6 +341,10 @@ def parse_cors_origins(value: str) -> list[str]:
         if not entry:
             continue
         origin = entry.removesuffix("/").lower()
+        # Browsers send no default port
+        for scheme, port in (("https", ":443"), ("http", ":80")):
+            if origin.startswith(f"{scheme}://") and origin.endswith(port):
+                origin = origin.removesuffix(port)
         if not ORIGIN.fullmatch(origin):
             raise ValueError(
                 f"WES_CORS_ALLOWED_ORIGINS: {entry!r} isn't an origin such as https://portal.example.org"

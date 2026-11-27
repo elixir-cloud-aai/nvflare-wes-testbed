@@ -1,4 +1,7 @@
 {{- if .Values.wesRoute.enabled }}
+{{- if not (or .Values.oidcAllowedSubs .Values.wesRoute.allowAnySubject) }}
+{{- fail "wesRoute.enabled while oidcAllowedSubs is empty: anyone the issuer vouches for could start runs at the sites (H22). Name the subjects in oidcAllowedSubs, or set wesRoute.allowAnySubject=true on purpose" }}
+{{- end }}
 # The WES API in public, for portals and clients, on the kits host: only
 # `/ga4gh/wes/v1`, not `/kits`, `/sites` (their own Routes), `/outputs`, or
 # FastAPI's `/docs` and `/openapi.json`. The WES checks every caller's bearer

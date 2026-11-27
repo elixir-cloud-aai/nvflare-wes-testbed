@@ -75,6 +75,9 @@ envSecret: ""
 # every caller's token itself (`oidcIssuer`); nothing else of it is routed
 wesRoute:
   enabled: false
+  # With an empty `oidcAllowedSubs`, anyone the issuer vouches for could start
+  # runs at the sites (H22): the chart refuses that, unless this says so
+  allowAnySubject: false
 
 # Origins whose pages may call the WES API from a browser (CORS), such as
 # `https://portal.example.org`, comma-separated: scheme, host and an optional

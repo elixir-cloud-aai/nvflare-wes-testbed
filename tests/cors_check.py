@@ -135,6 +135,7 @@ def main() -> None:
         _, csr = call(app, "OPTIONS", "/sites/token/csr", preflight(PORTAL))
         _, kits_get = call(app, "GET", "/kits/token/site-1.tgz", {"Origin": PORTAL})
         _, outputs = call(app, "GET", "/outputs/run/global_model.npy", {"Origin": PORTAL})
+        slash_status, _ = call(app, "GET", f"{info}/", {})
         exact_status, exact = call(app, "OPTIONS", "/ga4gh/wes/v1", preflight(PORTAL, "GET"))
         _, lookalike = call(app, "OPTIONS", "/ga4gh/wes/v1x", preflight(PORTAL, "GET"))
         _, docs = call(app, "OPTIONS", "/docs", preflight(PORTAL, "GET"))
@@ -167,6 +168,7 @@ def main() -> None:
             "no CORS for a path that only starts like the WES's": "access-control-allow-origin" not in lookalike,
             "no CORS for /docs": "access-control-allow-origin" not in docs,
             "a header that isn't allowed fails the preflight": custom_status == 400,
+            "no redirect for a trailing slash, which would lead to http behind the router": slash_status == 404,
             "CORS for the WES's prefix itself": exact_status == 200
             and exact.get("access-control-allow-origin") == PORTAL,
             "the middleware is installed with the setting": any(
@@ -181,6 +183,9 @@ def main() -> None:
         checks["origins without a trailing slash, deduplicated"] = parse(f"{PORTAL}/,{PORTAL}") == [PORTAL]
         for bad in ("*", "portal.example.org", "https://portal.example.org/path", "ftp://portal.example.org", "null"):
             checks[f"refuses {bad!r}"] = raises(parse, bad)
+        checks["drops default ports, as browsers send none"] = parse(
+            "https://portal.example.org:443,http://localhost:80"
+        ) == [PORTAL, "http://localhost"]
         checks["takes a port"] = parse("https://portal.example.org:8443") == ["https://portal.example.org:8443"]
         checks["lower-cases scheme and host, as browsers send them"] = parse("HTTPS://Portal.Example.org") == [PORTAL]
 

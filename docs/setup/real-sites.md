@@ -248,7 +248,8 @@ The Route must say `Admitted=True`. If another project already has its name, the
 | `sitesSecret` | `nvflare-wes-sites` | Secret with the sites file under the key `sites.json` |
 | `tokenSecret` | Empty | Secret with [token files](#tokens-for-the-tes-of-the-sites), one key per site, mounted whole at `/run/secrets/tes-tokens`, so that renewed tokens arrive without a restart. Empty: none |
 | `envSecret` | Empty | Secret whose keys become environment variables of the hub: the secrets that [`oauth`](#tokens-for-the-tes-of-the-sites) sources name. Empty: none |
-| `wesRoute.enabled` | `false` | A Route for the WES API, `/ga4gh/wes/v1` alone, on `kitsHost`: see [The WES API in public](#the-wes-api-in-public) |
+| `wesRoute.enabled` | `false` | A Route for the WES API, `/ga4gh/wes/v1` alone, on `kitsHost`: see [The WES API in public](#the-wes-api-in-public). Needs `oidcAllowedSubs`, or `wesRoute.allowAnySubject` |
+| `wesRoute.allowAnySubject` | `false` | `true` allows the Route with an empty `oidcAllowedSubs`: anyone the issuer vouches for may then start runs ([H22](../testbed/shortcuts.md#h22)) |
 | `corsAllowedOrigins` | Empty, none | Origins whose pages may call the WES API from a browser (CORS), comma-separated, such as `https://portal.example.org`: scheme, host and an optional port, no path, no wildcard. `WES_CORS_ALLOWED_ORIGINS` of the WES |
 | `tesGateway.url` | Empty, straight to each TES | A TES gateway (proTES), `https`, that all tasks go through: see [Through proTES](#through-protes) |
 | `tesGateway.tokenFile` | Empty | The gateway's token: a key of `tokenSecret` with a token file. Or: |
@@ -267,13 +268,18 @@ Then use `http://localhost:8080/ga4gh/wes/v1` in place of `https://<hub>/ga4gh/w
 
 #### The WES API in public
 
-For a portal or a client elsewhere, such as a WES form in a browser or the GA4GH SDK's CLI, `wesRoute.enabled` adds a Route for `/ga4gh/wes/v1` alone, on the kits name: `https://<kits name>/ga4gh/wes/v1`. Nothing else of the WES gets routed: not `/outputs`, not FastAPI's `/docs` and `/openapi.json`. Rahti's router matches paths by whole segments, so `/ga4gh/wes/v1x` isn't routed either, and answers paths without a Route with its own 503, "Application is not available". The WES doesn't resolve `..` in paths, so `/ga4gh/wes/v1/../../docs` gets the WES' own 404. Every endpoint but `service-info` needs a bearer token of `oidcIssuer`, for `oidcAudience` ([H5](../testbed/shortcuts.md#h5)), and `oidcAllowedSubs` can limit who may use it ([H22](../testbed/shortcuts.md#h22)). There's no rate limiting ([H23](../testbed/shortcuts.md#h23)).
+For a portal or a client elsewhere, such as a WES form in a browser or the GA4GH SDK's CLI, `wesRoute.enabled` adds a Route for `/ga4gh/wes/v1` alone, on the kits name: `https://<kits name>/ga4gh/wes/v1`. Nothing else of the WES gets routed: not `/outputs`, not FastAPI's `/docs` and `/openapi.json`. Rahti's router matches paths by whole segments, so `/ga4gh/wes/v1x` isn't routed either, and answers paths without a Route with its own 503, "Application is not available". The WES doesn't resolve `..` in paths, so `/ga4gh/wes/v1/../../docs` gets the WES' own 404. Every endpoint but `service-info` needs a bearer token of `oidcIssuer`, for `oidcAudience` ([H5](../testbed/shortcuts.md#h5)). There's no rate limiting ([H23](../testbed/shortcuts.md#h23)).
+
+**Who may use it:** without `oidcAllowedSubs`, anyone with an account at the issuer and a token for `oidcAudience` could start runs at the sites, and hold the one run slot ([H2](../testbed/shortcuts.md#h2), [H22](../testbed/shortcuts.md#h22)); with LS Login and a portal's client as audience, that's anyone who logs in to the portal. So the chart refuses `wesRoute.enabled` with an empty `oidcAllowedSubs`: name the subjects there, or set `wesRoute.allowAnySubject=true` to open it on purpose.
+
+**What it shows and what it doesn't serve:** `service-info` needs no token, so it shows the names of the sites (`tags.sites`) to anyone. The global model of a `FEDAVG` run stays under `/outputs`, which isn't routed: a run log's `outputs.global_model` link doesn't work from outside. Fetch the model with `oc port-forward`, as above. The WES doesn't redirect a trailing slash (such as `/runs/`, a 404), as a redirect from behind the router would lead to `http://`.
 
 A page in a browser that calls the WES from another origin needs CORS: name its origin in `corsAllowedOrigins`. The WES then answers preflights for `/ga4gh/wes/v1` from those origins, for `GET` and `POST` with the headers `Authorization` and `Content-Type`, without credentials (cookies), as bearer tokens need none. Other paths, such as `/kits`, never get CORS headers. Its token must carry the WES's audience: a portal registered with the issuer as a client of its own uses its client's ID as `oidcAudience`.
 
 ```fish
 helm upgrade hub charts/nvflare-wes-hub --reset-then-reuse-values \
     --set wesRoute.enabled=true \
+    --set 'oidcAllowedSubs=<sub 1>\,<sub 2>' \
     --set corsAllowedOrigins=https://<portal>
 oc get route hub-nvflare-wes-hub-wes -o jsonpath='{.status.ingress[0].conditions[0].type}={.status.ingress[0].conditions[0].status}'; echo
 curl -s https://<kits name>/ga4gh/wes/v1/service-info                    # 200

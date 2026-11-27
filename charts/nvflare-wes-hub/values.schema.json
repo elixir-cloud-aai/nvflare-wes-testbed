@@ -76,7 +76,11 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "enabled": {"type": "boolean"}
+        "enabled": {"type": "boolean"},
+        "allowAnySubject": {
+          "description": "Allow a public WES with an empty oidcAllowedSubs, open to anyone the issuer vouches for",
+          "type": "boolean"
+        }
       }
     },
     "corsAllowedOrigins": {

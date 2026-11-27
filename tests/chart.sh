@@ -82,6 +82,7 @@ refuse "an unknown value" "${args[@]}" --set flport=30003
 refuse "a token Secret that isn't a name" "${args[@]}" --set tokenSecret=Not_A_Name
 refuse "an environment Secret that isn't a name" "${args[@]}" --set envSecret=Not_A_Name
 refuse "a WES Route that isn't on or off" "${args[@]}" --set-string wesRoute.enabled=yes
+refuse "an open WES that isn't on or off" "${args[@]}" --set-string wesRoute.allowAnySubject=yes
 refuse "an unknown key of the WES Route" "${args[@]}" --set wesRoute.path=/
 refuse "any origin for CORS" "${args[@]}" --set 'corsAllowedOrigins=*'
 refuse "an origin without a scheme" "${args[@]}" --set corsAllowedOrigins=portal.example.invalid
@@ -118,6 +119,8 @@ refuse_render "a gateway token without a gateway" "need tesGateway.url" "${args[
     --set tokenSecret=tes-tokens --set tesGateway.tokenFile=gateway
 refuse_render "a gateway oauth without envSecret" "from envSecret, which is empty" "${args[@]}" "${gateway_arg[@]}" \
     --set tesGateway.oauth.grant_type=refresh_token
+refuse_render "a public WES open to anyone the issuer vouches for, unless said so" "while oidcAllowedSubs is empty" \
+    "${args[@]}" --set wesRoute.enabled=true
 refuse_render "a gateway token file and oauth" "not both" "${args[@]}" "${gateway_arg[@]}" \
     --set tokenSecret=tes-tokens --set tesGateway.tokenFile=gateway --set tesGateway.oauth.grant_type=refresh_token
 
@@ -204,7 +207,7 @@ expect "the WES' Service inside only" \
 # The WES API in public, for portals and clients: one more Route, for
 # `/ga4gh/wes/v1` alone, on the kits host. The WES checks tokens itself (H5)
 route_wes="select(.kind == \"Route\" and .metadata.name == \"${wes}\")"
-helm template hub "${chart}" "${args[@]}" --set wesRoute.enabled=true \
+helm template hub "${chart}" "${args[@]}" --set wesRoute.enabled=true --set oidcAllowedSubs=researcher-1 \
     --set 'corsAllowedOrigins=https://portal.example.invalid\,http://localhost:3000' >"${out}"
 expect "kinds with the WES Route" '[.kind] | sort | join(",")' "Deployment,Route,Route,Route,Service,Service"
 expect "WES Route only for /ga4gh/wes/v1" "${route_wes} | .spec.path" "/ga4gh/wes/v1"
@@ -217,7 +220,9 @@ expect "the origins for CORS" "${env} | select(.name == \"WES_CORS_ALLOWED_ORIGI
     "https://portal.example.invalid,http://localhost:3000"
 
 # Names stay within 63 characters, with the longest release name of Helm (53)
-helm template "$(printf 'r%.0s' {1..53})" "${chart}" "${args[@]}" --set wesRoute.enabled=true >"${out}"
+helm template "$(printf 'r%.0s' {1..53})" "${chart}" "${args[@]}" --set wesRoute.enabled=true \
+    --set wesRoute.allowAnySubject=true >"${out}"
+expect "a public WES open to any subject, when said so" "[${route}] | length" "3"
 expect "names within 63 characters, also with a long release name" \
     '[.metadata.name | select(length > 63)] | length' "0"
 

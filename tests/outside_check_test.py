@@ -296,6 +296,35 @@ class ChecksTest(unittest.TestCase):
                 "https://hub.example.org/ga4gh/wes/v1/service-info", verify=False, timeout=1
             )
 
+    @staticmethod
+    def unrouted(answer: Answer) -> dict[str, Answer]:
+        """The same answer for every path of the WES that a public Route mustn't serve, at kits.example.org.
+
+        Args:
+            answer: The answer.
+
+        Returns:
+            Answer by URL.
+        """
+        return {f"https://kits.example.org{path}": answer for path in outside_check.UNROUTED}
+
+    def test_public_wes_routes_nothing_else(self) -> None:
+        """Other paths of the WES must not answer on the kits host: only a 2xx or 401 shows that they do."""
+        info = "https://kits.example.org/ga4gh/wes/v1/service-info"
+        runs = "https://kits.example.org/ga4gh/wes/v1/runs"
+        refused = Answer(401, '{"detail": "Bearer token required"}')
+        for answer, outcome in [
+            (Answer(503, "Application is not available"), "ok"),
+            (Answer(404, '{"detail": "Not Found"}'), "ok"),
+            (Answer(None, error="refused"), "ok"),
+            (Answer(200, "<html>Swagger UI</html>"), "FAIL"),
+            (Answer(401, '{"detail": "Bearer token required"}'), "FAIL"),
+        ]:
+            answers = {info: Answer(200, "{}"), runs: refused, **self.unrouted(answer)}
+            with mock.patch.object(outside_check, "request", side_effect=lambda url, a=answers, **_: a[url]):
+                results = outside_check.check_public_wes("kits.example.org", verify=True, timeout=1)
+            self.assertEqual([result.outcome for result in results[2:]], [outcome] * len(outside_check.UNROUTED))
+
     def test_public_wes(self) -> None:
         """A public WES answers service-info, and refuses runs without a token with its own 401."""
         info = "https://kits.example.org/ga4gh/wes/v1/service-info"
@@ -309,10 +338,10 @@ class ChecksTest(unittest.TestCase):
             (Answer(200, "{}"), Answer(401, "<html>Unauthorized</html>"), ["ok", "FAIL"]),
             (Answer(None, error="timed out"), Answer(None, error="timed out"), ["FAIL", "FAIL"]),
         ]:
-            answers = {info: info_answer, runs: runs_answer}
+            answers = {info: info_answer, runs: runs_answer, **self.unrouted(Answer(503))}
             with mock.patch.object(outside_check, "request", side_effect=lambda url, a=answers, **_: a[url]) as request:
                 results = outside_check.check_public_wes("kits.example.org", verify=True, timeout=1)
-            self.assertEqual([result.outcome for result in results], outcomes)
+            self.assertEqual([result.outcome for result in results], [*outcomes, "ok", "ok", "ok"])
             request.assert_any_call(info, verify=True, timeout=1)
             request.assert_any_call(runs, verify=True, timeout=1)
 
@@ -413,22 +442,24 @@ class MainTest(unittest.TestCase):
         """With `--wes-public`, the WES must answer on the kits host, and still not on the hub's name."""
         answers = self.answers(wes=200)
         answers["https://kits.example.org/ga4gh/wes/v1/runs"] = Answer(401, '{"detail": "Bearer token required"}')
+        answers.update(ChecksTest.unrouted(Answer(503)))
         code, lines = self.run_main(
             ["hub.example.org", "kits.example.org", "--wes-public"], answers, {8002: False, 8003: False}
         )
         self.assertEqual(code, 0)
-        self.assertEqual(lines[-1], "all 9 checks passed")
+        self.assertEqual(lines[-1], "all 12 checks passed")
         self.assertIn(
             ("https://hub.example.org/ga4gh/wes/v1/service-info", {"verify": False, "timeout": 10}), self.calls
         )
         # Not public after all: the kits host has no Route for it
         answers = self.answers(wes=503)
         answers["https://kits.example.org/ga4gh/wes/v1/runs"] = Answer(503)
+        answers.update(ChecksTest.unrouted(Answer(503)))
         code, lines = self.run_main(
             ["hub.example.org", "kits.example.org", "--wes-public"], answers, {8002: False, 8003: False}
         )
         self.assertEqual(code, 1)
-        self.assertEqual(lines[-1], "2 of 9 checks failed")
+        self.assertEqual(lines[-1], "2 of 12 checks failed")
 
     def test_same_name(self) -> None:
         """With one name for both, as with Compose, the WES is checked once."""

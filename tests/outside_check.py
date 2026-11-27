@@ -41,6 +41,9 @@ DNS_NAME = re.compile(
     r"(?=.{1,253}\.?$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.?", re.IGNORECASE
 )
 
+# Paths of the WES that a public Route for `/ga4gh/wes/v1` mustn't serve
+UNROUTED = ("/docs", "/openapi.json", "/outputs/no-such-run/global_model.npy")
+
 # Enough for the WES' error messages; nothing is read beyond that
 MAX_BODY = 4096
 
@@ -257,7 +260,7 @@ def check_no_wes(host: str, *, timeout: float) -> Result:
 
 
 def check_public_wes(kits: str, *, verify: bool, timeout: float) -> list[Result]:
-    """Check that the WES API answers on the kits host, and refuses runs without a token.
+    """Check that the WES API answers on the kits host, refuses runs without a token, and nothing else answers.
 
     For a hub whose WES API is public on purpose (`wesRoute.enabled` of the chart).
 
@@ -268,20 +271,29 @@ def check_public_wes(kits: str, *, verify: bool, timeout: float) -> list[Result]
 
     Returns:
         ok for service-info if it answered 200; ok for the runs if the WES' own
-        401 came back without a token.
+        401 came back without a token; and ok for each of `UNROUTED` unless it
+        answered with a 2xx or 401, which shows that the WES behind it was reached.
     """
     info = f"https://{kits}/ga4gh/wes/v1/service-info"
     runs = f"https://{kits}/ga4gh/wes/v1/runs"
     info_answer = request(info, verify=verify, timeout=timeout)
     runs_answer = request(runs, verify=verify, timeout=timeout)
     refused = runs_answer.status == 401 and detail(runs_answer) == "Bearer token required"
-    return [
+    results = [
         Result("ok" if info_answer.status == 200 else "FAIL", f"GET {info}: {describe(info_answer)}, expected 200"),
         Result(
             "ok" if refused else "FAIL",
             f"GET {runs} without a token: {describe(runs_answer)}, expected 401 'Bearer token required' from the WES",
         ),
     ]
+    for path in UNROUTED:
+        url = f"https://{kits}{path}"
+        answer = request(url, verify=verify, timeout=timeout)
+        reached = answer.status is not None and (200 <= answer.status < 300 or answer.status == 401)
+        results.append(
+            Result("FAIL" if reached else "ok", f"GET {url}: {describe(answer)}, expected no Route (not 2xx or 401)")
+        )
+    return results
 
 
 def check_fl_port(hub: str, port: int, *, during_run: bool, timeout: float) -> Result:
