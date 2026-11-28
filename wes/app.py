@@ -31,6 +31,7 @@ import contextlib
 import errno
 import hashlib
 import importlib.metadata
+import ipaddress
 import json
 import logging
 import os
@@ -517,10 +518,20 @@ def default_service_id(server_name: str | None) -> str:
         a valid id, or else an id under the org's domain, as for local runs
         or a name with a port.
     """
-    name = (server_name or "").strip().rstrip(".")
+    # Lower case, as DNS names compare, so that one name always gives one id
+    name = (server_name or "").strip().rstrip(".").lower()
     derived = ".".join(reversed(name.split(".")))
-    if "." not in name or not SERVICE_ID_FORMAT.fullmatch(derived):
-        # Never a reason not to start: only a WES_SERVICE_ID set by hand is
+    try:
+        ipaddress.ip_address(name)
+        is_address = True
+    except ValueError:
+        is_address = False
+    if "." not in name or is_address or not SERVICE_ID_FORMAT.fullmatch(derived):
+        # Never a reason not to start: only a WES_SERVICE_ID set by hand is refused
+        if name:
+            logger.warning(
+                "Service info: FL_SERVER_NAME %r gives no id of its own; set WES_SERVICE_ID before registering", name
+            )
         return "cloud.elixir-on.nvflare-wes-testbed"
     return derived
 
