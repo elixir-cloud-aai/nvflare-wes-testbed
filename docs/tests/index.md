@@ -99,3 +99,13 @@ Same versions as above, x86-64 laptop with Docker 28, after adding shares and jo
 | T2 | 11/11 checks; with public data URLs 13/13; with three sites (`compose.three-sites.yaml`) 13/13, `FINISHED:COMPLETED`, federated 0.975 |
 | T10 (`tests/fedavg_check.py`, fake TES) | 46/46 checks, among them a run of three sites, `NVFLARE` runs with another number of sites than the job takes refused, and jobs without a usable `min_clients` |
 | T10 (`fedavg-e2e`) | 18/18 checks with two sites, 22/22 with three; federated 0.975 in both |
+
+### 2026-11-28
+
+Same versions as above, x86-64 laptop with Docker 28, after adding real values to the service info ([#71](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/71)).
+
+| Test | Result |
+|---|---|
+| Service info (`tests/service_info_check.py`, in `tests/hub.sh`) | All checks: the defaults, each `WES_SERVICE_*` setting, the id from `FL_SERVER_NAME` in reverse, empty settings, refused values, and the package's version, which nothing sets. In CI, `tests/hub.sh` passes the version of `pyproject.toml` as `EXPECT_VERSION`, as the image has no `pyproject.toml` |
+| Hub of `compose.hub.yaml` (`tests/hub.sh`) | All checks passed, among them the running hub's service info with the id from Compose and the version of `pyproject.toml` |
+| Chart for Rahti (`tests/chart.sh`) | All checks passed, among them the `serviceInfo` values, the id from `kitsHost` in reverse by default, and refused values |

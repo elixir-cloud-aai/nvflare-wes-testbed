@@ -17,6 +17,12 @@ export WES_OIDC_ALLOW_HTTP=1
 # Starting runs needs the entitlement that the fake identity provider releases
 # at userinfo (#70)
 export WES_OIDC_REQUIRED_ENTITLEMENTS='urn:geant:testbed.invalid:group:fl-users#testbed.invalid'
+# The service info's id of this deployment, unlike FL_SERVER_NAME in reverse,
+# so that only Compose passing it on gives it; and the version the image must
+# report, from `pyproject.toml` (#71)
+export WES_SERVICE_ID=invalid.testbed.hub-under-test
+EXPECT_VERSION="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+export EXPECT_VERSION
 hub=(docker compose -f compose.hub.yaml -f tests/compose.hub-test.yaml --project-directory .)
 trap '"${hub[@]}" --profile test down -v' EXIT
 
@@ -42,6 +48,7 @@ echo "[ok] no Docker socket, admin port or TES in the hub's Compose file"
 "${hub[@]}" --profile test run --rm -T auth-check
 "${hub[@]}" --profile test run --rm -T cors-check
 "${hub[@]}" --profile test run --rm -T entitlement-check
+"${hub[@]}" --profile test run --rm -T service-info-check
 "${hub[@]}" --profile test run --rm -T e2e
 # Between runs, the probe responder answers on the FL port, as the arbitrary user. It may
 # take a retry to bind, while the run's FL server goes away
@@ -50,6 +57,15 @@ for try in $(seq 1 10); do
     [[ "${try}" == 10 ]] && exit 1
     sleep 1
 done
+# The running hub's service info: the id from Compose, the image's version
+info="$("${hub[@]}" exec -T hub python3 -c \
+    'import urllib.request as u; print(u.urlopen("http://localhost:8080/ga4gh/wes/v1/service-info").read().decode())')"
+got="$(python3 -c 'import json, sys; i = json.loads(sys.argv[1]); print(i["id"], i["version"])' "${info}")"
+if [[ "${got}" != "${WES_SERVICE_ID} ${EXPECT_VERSION}" ]]; then
+    echo "[FAIL] the hub's service info: got id and version '${got}', expected '${WES_SERVICE_ID} ${EXPECT_VERSION}'"
+    exit 1
+fi
+echo "[ok] the hub's service info has the id from Compose and version ${EXPECT_VERSION}"
 "${hub[@]}" up -d --wait proxy
 "${hub[@]}" --profile test run --rm -T proxy-check
 "${hub[@]}" --profile test run --rm -T outside-check

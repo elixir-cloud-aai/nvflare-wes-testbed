@@ -30,6 +30,8 @@ in memory.
 import contextlib
 import errno
 import hashlib
+import importlib.metadata
+import ipaddress
 import json
 import logging
 import os
@@ -446,6 +448,124 @@ CORS_ALLOWED_ORIGINS = parse_cors_origins(os.environ.get("WES_CORS_ALLOWED_ORIGI
 if CORS_ALLOWED_ORIGINS:
     app.add_middleware(WesCorsMiddleware, origins=CORS_ALLOWED_ORIGINS)
     logger.info("CORS: pages of %s may call %s", ", ".join(CORS_ALLOWED_ORIGINS), WES_PREFIX)
+
+# The distribution whose version the service info reports: the image installs
+# its metadata (`images/Dockerfile.flare`), so the version is the one in
+# `pyproject.toml`, which a release sets
+DISTRIBUTION = "nvflare-wes-testbed"
+
+
+def package_version(distribution: str = DISTRIBUTION) -> str:
+    """Read the version of the installed package, for the service info.
+
+    Args:
+        distribution: The distribution's name.
+
+    Returns:
+        Its version, or `unknown` if it isn't installed, as when the WES runs
+        from a checkout without `pip install .`.
+    """
+    try:
+        return importlib.metadata.version(distribution)
+    except importlib.metadata.PackageNotFoundError:
+        logger.warning("Service info: package %s isn't installed, so its version is unknown", distribution)
+        return "unknown"
+
+
+# What a setting of the service info must look like, as the chart's schema
+# has it: for the id, letters, digits, `.`, `_` and `-`, starting and ending
+# with a letter or digit (characters only, not a check of reverse-domain
+# notation); a word for the environment; https (or, for the contact, mailto)
+# URLs. Other settings take any text
+SERVICE_ID_FORMAT = re.compile(r"[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?")
+SERVICE_ENVIRONMENT_FORMAT = re.compile(r"[A-Za-z0-9._-]+")
+# A host, an optional port, and anything after a path, query or fragment
+HTTPS_URL = re.compile(r"https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#]\S*)?")
+CONTACT_URL = re.compile(
+    r"https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#]\S*)?|mailto:[^@\s]+@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?"
+)
+
+
+def service_setting(name: str, default: str, form: re.Pattern[str] | None = None) -> str:
+    """Read a setting of the service info, with spaces around it dropped.
+
+    Args:
+        name: The environment variable.
+        default: Its value if unset or empty, as a chart passes values it has none of.
+        form: What the value must look like, if anything.
+
+    Returns:
+        The value, or the default.
+
+    Raises:
+        ValueError: The value doesn't look like `form`, which registries would
+            import as it is. The message names the variable and the value.
+    """
+    value = os.environ.get(name, "").strip() or default
+    if form is not None and not form.fullmatch(value):
+        raise ValueError(f"{name} isn't valid: {value!r}")
+    return value
+
+
+def default_service_id(server_name: str | None) -> str:
+    """The service info's id of a deployment that doesn't set one: its public name in reverse.
+
+    As GA4GH services name themselves (`fi.rahtiapp.poiesis`), so that two
+    deployments differ without a setting.
+
+    Args:
+        server_name: `FL_SERVER_NAME`, the hub's public name, if set.
+
+    Returns:
+        The name in reverse, if it is a domain name (with a dot) that gives
+        a valid id, or else an id under the org's domain, as for local runs
+        or a name with a port.
+    """
+    # Lower case, as DNS names compare, so that one name always gives one id
+    name = (server_name or "").strip().rstrip(".").lower()
+    derived = ".".join(reversed(name.split(".")))
+    try:
+        ipaddress.ip_address(name)
+        is_address = True
+    except ValueError:
+        is_address = False
+    if "." not in name or is_address or not SERVICE_ID_FORMAT.fullmatch(derived):
+        # Never a reason not to start: only a WES_SERVICE_ID set by hand is refused
+        if name:
+            logger.warning(
+                "Service info: FL_SERVER_NAME %r gives no id of its own; set WES_SERVICE_ID before registering", name
+            )
+        return "cloud.elixir-on.nvflare-wes-testbed"
+    return derived
+
+
+# What the service info says about this deployment (#71), for registries such
+# as the Cloud Registry, which import it and keep syncing it. `id` should stay
+# the same for a deployment, and differ from other deployments'
+# Derived only without a setting, so that it warns only then
+SERVICE_ID = (
+    service_setting("WES_SERVICE_ID", "", SERVICE_ID_FORMAT)
+    if os.environ.get("WES_SERVICE_ID", "").strip()
+    else default_service_id(os.environ.get("FL_SERVER_NAME"))
+)
+SERVICE_NAME = service_setting("WES_SERVICE_NAME", "Thin WES for NVFlare (sandbox)")
+SERVICE_DESCRIPTION = service_setting(
+    "WES_SERVICE_DESCRIPTION",
+    "Sandbox GA4GH WES that runs NVIDIA FLARE federated learning jobs (workflow types NVFLARE and FEDAVG),"
+    " with one GA4GH TES task per site. For tests only",
+)
+SERVICE_ENVIRONMENT = service_setting("WES_SERVICE_ENVIRONMENT", "test", SERVICE_ENVIRONMENT_FORMAT)
+SERVICE_ORGANIZATION_NAME = service_setting("WES_SERVICE_ORGANIZATION_NAME", "ELIXIR On-Cloud")
+SERVICE_ORGANIZATION_URL = service_setting("WES_SERVICE_ORGANIZATION_URL", "https://elixir-on.cloud/", HTTPS_URL)
+SERVICE_CONTACT_URL = service_setting(
+    "WES_SERVICE_CONTACT_URL", "https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues", CONTACT_URL
+)
+SERVICE_DOCUMENTATION_URL = service_setting(
+    "WES_SERVICE_DOCUMENTATION_URL",
+    "https://nvflare-wes-testbed.readthedocs.io/en/latest/setup/real-sites/#the-wes-api-in-public",
+    HTTPS_URL,
+)
+SERVICE_VERSION = package_version()
 
 RUNS: dict[str, dict[str, Any]] = {}
 KITS: dict[str, pathlib.Path] = {}
@@ -1634,17 +1754,21 @@ ENTITLED_DEPENDENCY = Depends(entitled)
 
 @app.get("/ga4gh/wes/v1/service-info")
 def service_info() -> dict[str, Any]:
-    """Describe the service.
+    """Describe the service, with the settings `WES_SERVICE_*` and the package's version.
 
     Returns:
         The service info of WES 1.1.
     """
     return {
-        "id": "org.example.nvflare-thin-wes",
-        "name": "Thin WES for NVFlare (sandbox)",
+        "id": SERVICE_ID,
+        "name": SERVICE_NAME,
         "type": {"group": "org.ga4gh", "artifact": "wes", "version": "1.1.0"},
-        "organization": {"name": "ELIXIR Cloud & AAI (sandbox)", "url": "https://elixir-cloud-aai.github.io"},
-        "version": "0.0.0",
+        "description": SERVICE_DESCRIPTION,
+        "organization": {"name": SERVICE_ORGANIZATION_NAME, "url": SERVICE_ORGANIZATION_URL},
+        "contactUrl": SERVICE_CONTACT_URL,
+        "documentationUrl": SERVICE_DOCUMENTATION_URL,
+        "environment": SERVICE_ENVIRONMENT,
+        "version": SERVICE_VERSION,
         "workflow_type_versions": {
             "NVFLARE": {"workflow_type_version": ["2.9"]},
             fedavg.WORKFLOW_TYPE: {"workflow_type_version": [fedavg.WORKFLOW_TYPE_VERSION]},
