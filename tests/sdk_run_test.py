@@ -67,6 +67,8 @@ elif args[:2] == ["wes", "status"]:
     states = scenario.get("states", ["QUEUED", "RUNNING", "COMPLETE"])
     print(states[min(count, len(states)) - 1])
 elif args[:2] == ["wes", "get"]:
+    if scenario.get("get_status"):
+        fail(scenario["get_status"])
     print(json.dumps({
         "run_id": args[2], "state": scenario.get("states", ["COMPLETE"])[-1],
         "run_log": {"system_logs": [], "start_time": "2026-11-29T10:00:00Z", "end_time": "2026-11-29T10:01:32Z"},
@@ -384,7 +386,16 @@ class RunTest(Fixture):
             "[FAIL] the run's state couldn't be read (ga4gh-cli wes status failed: Error: HTTP status 502)", out
         )
         self.assertIn("-> follow the run again later with --run-id 0123456789abcdef", out)
-        self.assertTrue(self.row)
+        self.assertIn("own access token: state not read. Failed: the run's state couldn't be read", self.row)
+
+    def test_log_lost(self) -> None:
+        """A run log that can't be read after the run's end gives a row and a hint, not just STOP."""
+        with mock.patch("time.sleep"):
+            status, out, _ = self.main(scenario={"get_status": 502})
+        self.assertEqual(status, 1)
+        self.assertIn("[FAIL] the run's log couldn't be read (ga4gh-cli wes get failed: Error: HTTP status 502)", out)
+        self.assertIn("-> follow the run again later with --run-id 0123456789abcdef", out)
+        self.assertIn("`COMPLETE`", self.row)
 
     def test_unknown_site(self) -> None:
         """Sites the hub doesn't have are refused before submitting."""

@@ -426,7 +426,7 @@ class Cli:
         except ValueError:
             value = None
         if not isinstance(value, dict):
-            raise Stop(f"ga4gh-cli {' '.join(args[:2])} printed no JSON object: {scrub(out[:200], self.token)}")
+            raise Stop(f"ga4gh-cli {' '.join(args[:2])} printed no JSON object: {scrub(out, self.token)[:200]}")
         return value
 
 
@@ -501,6 +501,27 @@ def submit(cli: Cli, job: str, sites: list[str]) -> str:
     return str(run_id)
 
 
+def retried(call: Callable[[], Any], sleep: Callable[[float], None]) -> Any:
+    """Call something that may fail for a moment, a few times, with growing pauses.
+
+    Args:
+        call: What to call.
+        sleep: Waits for some seconds.
+
+    Returns:
+        What it returned.
+
+    Raises:
+        Stop: It failed every time; the last failure.
+    """
+    for attempt in range(STATUS_TRIES - 1):
+        try:
+            return call()
+        except Stop:
+            sleep(5 * 2**attempt)
+    return call()
+
+
 def follow(
     cli: Cli,
     outcome: Outcome,
@@ -522,17 +543,12 @@ def follow(
     sleep = sleep or time.sleep
     start = clock()
     while True:
-        state = ""
-        for attempt in range(STATUS_TRIES):
-            try:
-                state = cli("wes", "status", outcome.run_id)
-                break
-            except Stop as error:
-                if attempt == STATUS_TRIES - 1:
-                    outcome.failures.append(f"the run's state couldn't be read ({explain_refusal(str(error))})")
-                    outcome.hints.append(f"follow the run again later with --run-id {outcome.run_id}")
-                    return
-                sleep(5 * 2**attempt)
+        try:
+            state = retried(lambda: cli("wes", "status", outcome.run_id), sleep)
+        except Stop as error:
+            outcome.failures.append(f"the run's state couldn't be read ({explain_refusal(str(error))})")
+            outcome.hints.append(f"follow the run again later with --run-id {outcome.run_id}")
+            return
         outcome.seconds = clock() - start
         if state not in outcome.seen:
             outcome.seen[state] = time.strftime("%H:%M:%S", time.gmtime())
@@ -710,10 +726,10 @@ def results_row(outcome: Outcome, nodes: str, gateway_checked: bool, today: str 
     if outcome.picked_up:
         # The states were seen later, not as they happened: the WES's own times only
         times = f"started {start or '?'}, ended {end or '?'} by the WES's run log"
-        sentences = [f"{run}: `{outcome.state}`, {times}"]
+        sentences = [f"{run}: `{outcome.state or 'state not read'}`, {times}"]
     else:
         states = ", ".join(f"`{state}` {seen}" for state, seen in outcome.seen.items())
-        sentences = [f"{run}: {states} UTC, about {outcome.seconds:.0f} s"]
+        sentences = [f"{run}: {states} UTC, about {outcome.seconds:.0f} s" if states else f"{run}: state not read"]
     if outcome.job_status:
         sentences.append(f"NVFlare job `{outcome.job_status}`")
     tasks = []
@@ -818,7 +834,12 @@ def run(args: argparse.Namespace, token: str, cli_path: pathlib.Path | None, wor
         # Still running, or its state unknown: nothing to check yet
         return outcome
 
-    log = cli.json("wes", "get", outcome.run_id)
+    try:
+        log = retried(lambda: cli.json("wes", "get", outcome.run_id), time.sleep)
+    except Stop as error:
+        outcome.failures.append(f"the run's log couldn't be read ({explain_refusal(str(error))})")
+        outcome.hints.append(f"follow the run again later with --run-id {outcome.run_id}")
+        return outcome
     run_log = log.get("run_log") or {}
     outcome.wes_times = (str(run_log.get("start_time") or ""), str(run_log.get("end_time") or ""))
     outcome.job_status = str((log.get("outputs") or {}).get("flare_job_status") or "")
