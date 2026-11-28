@@ -22,7 +22,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{/* The service info's id of this deployment: `serviceInfo.id`, or the kits
 host in reverse, as GA4GH services name themselves (`fi.rahtiapp.poiesis`) */}}
 {{- define "hub.serviceId" -}}
-{{- .Values.serviceInfo.id | default (.Values.kitsHost | splitList "." | reverse | join ".") -}}
+{{- dig "id" "" (.Values.serviceInfo | default dict) | default (.Values.kitsHost | splitList "." | reverse | join ".") -}}
 {{- end -}}
 
 {{/* The image, for the hub and for the tasks at the sites */}}

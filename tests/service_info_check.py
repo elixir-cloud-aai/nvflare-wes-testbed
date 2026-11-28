@@ -4,7 +4,7 @@ The Cloud Registry imports the service info and keeps syncing it, so its
 values must be real: a reverse-domain `id`, the released version, the org's
 current website, and description, documentation and contact. Imports the WES
 in processes of their own, as it reads its settings on import, so it needs no
-network. Runs in the image (`service-info-check` in `compose.yaml` and
+network. Runs in the image (`service-info-check` in
 `tests/compose.hub-test.yaml`, which `tests/hub.sh` runs) or with the WES's
 dependencies and the package installed (`pip install --no-deps .`):
 
@@ -41,7 +41,8 @@ def service_info(environ: dict[str, str]) -> dict[str, Any]:
     """Import the WES in a process of its own, with settings, and get its service info.
 
     Args:
-        environ: Settings for the service info; all others of `SETTINGS` are unset.
+        environ: Settings for the service info; all others of `SETTINGS`, and
+            `FL_SERVER_NAME`, are unset.
 
     Returns:
         The service info.
@@ -50,7 +51,7 @@ def service_info(environ: dict[str, str]) -> dict[str, Any]:
         RuntimeError: The WES didn't start, with its error output.
     """
     with tempfile.TemporaryDirectory() as base:
-        env = {key: value for key, value in os.environ.items() if key not in SETTINGS}
+        env = {key: value for key, value in os.environ.items() if key not in (*SETTINGS, "FL_SERVER_NAME")}
         env.update({"WES_WORKDIR": base, "FL_PROBE_RESPONDER": "0", **environ})
         result = subprocess.run(
             [sys.executable, "-c", SCRIPT], cwd=ROOT, env=env, capture_output=True, text=True, check=False
@@ -121,6 +122,9 @@ def main() -> None:
         "WES_SERVICE_ORGANIZATION_URL": "https://example.org/",
         "WES_SERVICE_CONTACT_URL": "mailto:wes@example.org",
         "WES_SERVICE_DOCUMENTATION_URL": "https://docs.example.org/wes",
+        # Not a setting: the version is always the package's
+        "WES_SERVICE_VERSION": "9.9.9",
+        "SERVICE_VERSION": "9.9.9",
     }
     custom = service_info(overrides)
     checks["the id from WES_SERVICE_ID"] = custom["id"] == "org.example.wes"
@@ -143,8 +147,30 @@ def main() -> None:
         empty.get(key) == defaults.get(key)
         for key in ("id", "name", "description", "environment", "organization", "contactUrl", "documentationUrl")
     )
+    named = service_info({"FL_SERVER_NAME": "flare-wes.example.org"})
+    checks["the id from the hub's public name in reverse, if it has one"] = named["id"] == "org.example.flare-wes"
+    single = service_info({"FL_SERVER_NAME": "fl-hub"})
+    checks["the org's id for a name without a domain"] = single["id"] == defaults["id"]
+    both = service_info({"FL_SERVER_NAME": "flare-wes.example.org", "WES_SERVICE_ID": "org.example.wes"})
+    checks["WES_SERVICE_ID over the hub's name"] = both["id"] == "org.example.wes"
     spaced = service_info({"WES_SERVICE_ID": " org.example.wes "})
     checks["spaces around a setting dropped"] = spaced["id"] == "org.example.wes"
+
+    # What registries would import as it is: the WES doesn't start, and names the setting
+    for name, bad in (
+        ("WES_SERVICE_ID", "org.example wes"),
+        ("WES_SERVICE_ID", ".org.example"),
+        ("WES_SERVICE_ENVIRONMENT", "test service"),
+        ("WES_SERVICE_ORGANIZATION_URL", "http://example.org/"),
+        ("WES_SERVICE_DOCUMENTATION_URL", "docs.example.org"),
+        ("WES_SERVICE_CONTACT_URL", "wes@example.org"),
+    ):
+        try:
+            service_info({name: bad})
+            refused = ""
+        except RuntimeError as error:
+            refused = str(error)
+        checks[f"refuses {name}={bad!r}"] = f"{name} isn't valid" in refused
 
     # Without the package's metadata, as from a checkout that isn't installed
     probe = subprocess.run(

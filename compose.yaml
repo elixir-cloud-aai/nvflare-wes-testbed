@@ -215,16 +215,6 @@ services:
     command: ["python3", "/app/tests/entitlement_check.py"]
     network_mode: none
 
-  # The service info's values and their settings, and the package's version
-  # (#71): `EXPECT_VERSION`, as CI reads it from `pyproject.toml`. No network
-  service-info-check:
-    image: nvflare-testbed:local
-    profiles: [test]
-    command: ["python3", "/app/tests/service_info_check.py"]
-    environment:
-      EXPECT_VERSION: ${EXPECT_VERSION:-}
-    network_mode: none
-
   # The same gate, over real HTTP, through the fake identity provider (H5)
   auth-e2e-check:
     image: nvflare-testbed:local

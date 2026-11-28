@@ -309,6 +309,15 @@ expect "the service id from the kits host in reverse by default" \
     "${env} | select(.name == \"WES_SERVICE_ID\") | .value" "fi.rahtiapp.example.flare-wes-kits"
 expect "the WES's own service info otherwise by default" \
     "[${env} | select(.name | test(\"^WES_SERVICE_\")) | .name] | join(\",\")" "WES_SERVICE_ID"
+# A release from before `serviceInfo`, upgraded with `--reuse-values`, has none
+for missing in serviceInfo serviceInfo.organization; do
+    if helm template hub "${chart}" "${args[@]}" --set "${missing}=null" >"${out}" 2>&1; then
+        expect "renders without ${missing}, as after --reuse-values" \
+            "${env} | select(.name == \"WES_SERVICE_ID\") | .value" "fi.rahtiapp.example.flare-wes-kits"
+    else
+        fail "renders without ${missing}, as after --reuse-values: $(head -c 300 "${out}")"
+    fi
+done
 
 # Non-default OIDC values, to see them arrive
 helm template hub "${chart}" "${args[@]}" --set oidcAudience=other-aud --set 'oidcAlgorithms=RS256\,ES256' \

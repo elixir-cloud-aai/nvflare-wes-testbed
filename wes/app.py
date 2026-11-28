@@ -471,38 +471,77 @@ def package_version(distribution: str = DISTRIBUTION) -> str:
         return "unknown"
 
 
-def setting(name: str, default: str) -> str:
+# What a setting of the service info must look like, as the chart's schema
+# has it: an id in reverse-domain style, a word for the environment, and https
+# (or, for the contact, mailto) URLs. Other settings take any text
+SERVICE_ID_FORMAT = re.compile(r"[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?")
+SERVICE_ENVIRONMENT_FORMAT = re.compile(r"[A-Za-z0-9._-]+")
+HTTPS_URL = re.compile(r"https://\S+")
+CONTACT_URL = re.compile(r"(https://|mailto:)\S+")
+
+
+def service_setting(name: str, default: str, form: re.Pattern[str] | None = None) -> str:
     """Read a setting of the service info, with spaces around it dropped.
 
     Args:
         name: The environment variable.
         default: Its value if unset or empty, as a chart passes values it has none of.
+        form: What the value must look like, if anything.
 
     Returns:
         The value, or the default.
+
+    Raises:
+        ValueError: The value doesn't look like `form`, which registries would
+            import as it is. The message names the variable and the value.
     """
-    return os.environ.get(name, "").strip() or default
+    value = os.environ.get(name, "").strip() or default
+    if form is not None and not form.fullmatch(value):
+        raise ValueError(f"{name} isn't valid: {value!r}")
+    return value
 
 
 # What the service info says about this deployment (#71), for registries such
 # as the Cloud Registry, which import it and keep syncing it. `id` should stay
 # the same for a deployment, and differ from other deployments'
-SERVICE_ID = setting("WES_SERVICE_ID", "cloud.elixir-on.nvflare-wes-testbed")
-SERVICE_NAME = setting("WES_SERVICE_NAME", "Thin WES for NVFlare (sandbox)")
-SERVICE_DESCRIPTION = setting(
+
+
+def default_service_id(server_name: str | None) -> str:
+    """The service info's id of a deployment that doesn't set one: its public name in reverse.
+
+    As GA4GH services name themselves (`fi.rahtiapp.poiesis`), so that two
+    deployments differ without a setting.
+
+    Args:
+        server_name: `FL_SERVER_NAME`, the hub's public name, if set.
+
+    Returns:
+        The name in reverse, if it is a domain name (with a dot), or else an
+        id under the org's domain, as for local runs.
+    """
+    name = (server_name or "").strip().rstrip(".")
+    if "." not in name:
+        return "cloud.elixir-on.nvflare-wes-testbed"
+    return ".".join(reversed(name.split(".")))
+
+
+SERVICE_ID = service_setting("WES_SERVICE_ID", default_service_id(os.environ.get("FL_SERVER_NAME")), SERVICE_ID_FORMAT)
+SERVICE_NAME = service_setting("WES_SERVICE_NAME", "Thin WES for NVFlare (sandbox)")
+SERVICE_DESCRIPTION = service_setting(
     "WES_SERVICE_DESCRIPTION",
     "Sandbox GA4GH WES that runs NVIDIA FLARE federated learning jobs (workflow types NVFLARE and FEDAVG),"
     " with one GA4GH TES task per site. For tests only",
 )
-SERVICE_ENVIRONMENT = setting("WES_SERVICE_ENVIRONMENT", "test")
-SERVICE_ORGANIZATION_NAME = setting("WES_SERVICE_ORGANIZATION_NAME", "ELIXIR On-Cloud")
-SERVICE_ORGANIZATION_URL = setting("WES_SERVICE_ORGANIZATION_URL", "https://elixir-on.cloud/")
-SERVICE_CONTACT_URL = setting(
-    "WES_SERVICE_CONTACT_URL", "https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues"
+SERVICE_ENVIRONMENT = service_setting("WES_SERVICE_ENVIRONMENT", "test", SERVICE_ENVIRONMENT_FORMAT)
+SERVICE_ORGANIZATION_NAME = service_setting("WES_SERVICE_ORGANIZATION_NAME", "ELIXIR On-Cloud")
+SERVICE_ORGANIZATION_URL = service_setting("WES_SERVICE_ORGANIZATION_URL", "https://elixir-on.cloud/", HTTPS_URL)
+SERVICE_CONTACT_URL = service_setting(
+    "WES_SERVICE_CONTACT_URL", "https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues", CONTACT_URL
 )
-SERVICE_DOCUMENTATION_URL = setting(
+SERVICE_DOCUMENTATION_URL = service_setting(
     "WES_SERVICE_DOCUMENTATION_URL",
     "https://nvflare-wes-testbed.readthedocs.io/en/latest/setup/real-sites/#the-wes-api-in-public",
+    HTTPS_URL,
 )
 SERVICE_VERSION = package_version()
 

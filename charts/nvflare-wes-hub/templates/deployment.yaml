@@ -75,13 +75,15 @@ spec:
             # The service info of this deployment; the WES's defaults for what's empty
             - name: WES_SERVICE_ID
               value: {{ include "hub.serviceId" . | quote }}
-            {{- $info := .Values.serviceInfo }}
+            {{- /* `default dict`: a release upgraded with --reuse-values has no serviceInfo */}}
+            {{- $info := .Values.serviceInfo | default dict }}
+            {{- $organization := $info.organization | default dict }}
             {{- range $name, $value := dict
                   "WES_SERVICE_NAME" $info.name
                   "WES_SERVICE_DESCRIPTION" $info.description
                   "WES_SERVICE_ENVIRONMENT" $info.environment
-                  "WES_SERVICE_ORGANIZATION_NAME" $info.organization.name
-                  "WES_SERVICE_ORGANIZATION_URL" $info.organization.url
+                  "WES_SERVICE_ORGANIZATION_NAME" $organization.name
+                  "WES_SERVICE_ORGANIZATION_URL" $organization.url
                   "WES_SERVICE_CONTACT_URL" $info.contactUrl
                   "WES_SERVICE_DOCUMENTATION_URL" $info.documentationUrl }}
             {{- with $value }}
