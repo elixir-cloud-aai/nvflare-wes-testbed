@@ -10,12 +10,15 @@
 # create the GitHub release with the curated notes followed by GitHub's
 # generated notes (`publish`, shared action
 # `elixir-cloud-aai/.github/actions/publish-release`), a pre-release until
-# 1.0.0. `push` and `release-image` each need approval in the `release`
+# 1.0.0. Independently of `publish`, register the image at Pubgrade
+# (`notify`), if it is configured (repository variable `PUBGRADE_URL`).
+# `push` and `release-image` each need approval in the `release`
 # environment (required reviewer, Docker Hub secrets `DOCKERHUB_LOGIN` and
-# `DOCKERHUB_TOKEN`). Re-running all jobs builds, scans and signs a new
-# digest, but stops before building if the version tag of the image exists
-# (released images don't change); re-running failed jobs reuses the digest
-# of the earlier attempt. `prepare` fails if a published release of the tag
+# `DOCKERHUB_TOKEN`), and so does `notify` if Pubgrade is configured.
+# Re-running all jobs builds, scans and signs a new digest, but stops
+# before building if the version tag of the image exists (released images
+# don't change); re-running failed jobs reuses the digest of the earlier
+# attempt. `prepare` fails if a published release of the tag
 # exists already. The image has no settings: they are passed when it
 # starts. Nothing is tagged `latest`: CI tags `dev` and `sha-<commit>`. The
 # Helm chart of the hub isn't released: it's installed from the repository.
@@ -350,3 +353,36 @@ jobs:
         with:
           notes: docs/releases/${{ needs.prepare.outputs.version }}.md
           commit: ${{ needs.prepare.outputs.sha }}
+
+  # Registers the image at Pubgrade (publish mode, elixir-cloud-aai/Pubgrade#33)
+  # with Pubgrade's action `actions/notify`, which notifies the subscribed
+  # deployments, once the version tag of the image exists (`release-image`);
+  # it doesn't wait for the GitHub release (`publish`). The action checks its
+  # inputs, masks the token and retries only requests that never reached
+  # Pubgrade (no connection), so that one run registers the build at most
+  # once; a failed run says so, and re-running this job sends it again. The
+  # token is a secret of the `release` environment, like the other release
+  # credentials, so this job needs an approval there, too. The job only runs
+  # if the variable `PUBGRADE_URL` is set for the repository: variables of an
+  # environment aren't visible to a job's `if:` (it is evaluated before the
+  # job enters the environment), and a check in a step would leave every
+  # release without Pubgrade waiting for an approval that serves nothing. The
+  # step fails if `PUBGRADE_REPOSITORY_ID` or `PUBGRADE_TOKEN` is missing or
+  # invalid. See "Releasing" in `docs/about/index.md` for where to set them.
+  notify:
+    name: Notify Pubgrade
+    needs: [prepare, release-image]
+    if: vars.PUBGRADE_URL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions: {}
+    steps:
+      - name: Notify Pubgrade
+        uses: elixir-cloud-aai/Pubgrade/actions/notify@344a58adc1c871135f86c404eb33ed91011886ad # v0.3.0
+        with:
+          url: ${{ vars.PUBGRADE_URL }}
+          repository-id: ${{ vars.PUBGRADE_REPOSITORY_ID }}
+          token: ${{ secrets.PUBGRADE_TOKEN }}
+          image: ${{ vars.DOCKERHUB_ORG || 'elixircloud' }}/nvflare-wes-testbed:${{ needs.prepare.outputs.version }}
+          git-tag: ${{ github.ref_name }}
