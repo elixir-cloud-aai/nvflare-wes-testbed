@@ -327,7 +327,7 @@ helm upgrade hub charts/nvflare-wes-hub --reset-then-reuse-values \
 curl -s https://<kits name>/ga4gh/wes/v1/service-info | jq '{id, version, organization, environment}'
 ```
 
-Then register it by its URL, `https://<kits name>/ga4gh/wes/v1`.
+Then register it by its URL, `https://<kits name>/ga4gh/wes/v1`. Like any update, changing these values restarts the pod, which forgets its runs ([H2](../testbed/shortcuts.md#h2)): change them between runs.
 
 **Check from outside**, from a machine outside Rahti, with `flPort` as the FL port (see [Checking the hub from outside](#checking-the-hub-from-outside)):
 

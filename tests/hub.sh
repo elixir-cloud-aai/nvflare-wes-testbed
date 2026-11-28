@@ -17,9 +17,10 @@ export WES_OIDC_ALLOW_HTTP=1
 # Starting runs needs the entitlement that the fake identity provider releases
 # at userinfo (#70)
 export WES_OIDC_REQUIRED_ENTITLEMENTS='urn:geant:testbed.invalid:group:fl-users#testbed.invalid'
-# The service info's id of this deployment, and the version the image must
+# The service info's id of this deployment, unlike FL_SERVER_NAME in reverse,
+# so that only Compose passing it on gives it; and the version the image must
 # report, from `pyproject.toml` (#71)
-export WES_SERVICE_ID=invalid.testbed.hub
+export WES_SERVICE_ID=invalid.testbed.hub-under-test
 EXPECT_VERSION="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
 export EXPECT_VERSION
 hub=(docker compose -f compose.hub.yaml -f tests/compose.hub-test.yaml --project-directory .)

@@ -479,8 +479,11 @@ def package_version(distribution: str = DISTRIBUTION) -> str:
 # URLs. Other settings take any text
 SERVICE_ID_FORMAT = re.compile(r"[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?")
 SERVICE_ENVIRONMENT_FORMAT = re.compile(r"[A-Za-z0-9._-]+")
-HTTPS_URL = re.compile(r"https://\S+")
-CONTACT_URL = re.compile(r"(https://|mailto:)\S+")
+# A host, an optional port, and anything after a path, query or fragment
+HTTPS_URL = re.compile(r"https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#]\S*)?")
+CONTACT_URL = re.compile(
+    r"https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#]\S*)?|mailto:[^@\s]+@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?"
+)
 
 
 def service_setting(name: str, default: str, form: re.Pattern[str] | None = None) -> str:
@@ -539,7 +542,12 @@ def default_service_id(server_name: str | None) -> str:
 # What the service info says about this deployment (#71), for registries such
 # as the Cloud Registry, which import it and keep syncing it. `id` should stay
 # the same for a deployment, and differ from other deployments'
-SERVICE_ID = service_setting("WES_SERVICE_ID", default_service_id(os.environ.get("FL_SERVER_NAME")), SERVICE_ID_FORMAT)
+# Derived only without a setting, so that it warns only then
+SERVICE_ID = (
+    service_setting("WES_SERVICE_ID", "", SERVICE_ID_FORMAT)
+    if os.environ.get("WES_SERVICE_ID", "").strip()
+    else default_service_id(os.environ.get("FL_SERVER_NAME"))
+)
 SERVICE_NAME = service_setting("WES_SERVICE_NAME", "Thin WES for NVFlare (sandbox)")
 SERVICE_DESCRIPTION = service_setting(
     "WES_SERVICE_DESCRIPTION",

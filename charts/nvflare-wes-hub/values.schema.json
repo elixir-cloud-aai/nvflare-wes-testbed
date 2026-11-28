@@ -121,11 +121,11 @@
           "additionalProperties": false,
           "properties": {
             "name": {"type": "string"},
-            "url": {"type": "string", "pattern": "^$|^https://\\S+$"}
+            "url": {"type": "string", "pattern": "^$|^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#]\\S*)?$"}
           }
         },
-        "contactUrl": {"type": "string", "pattern": "^$|^(https://|mailto:)\\S+$"},
-        "documentationUrl": {"type": "string", "pattern": "^$|^https://\\S+$"}
+        "contactUrl": {"type": "string", "pattern": "^$|^(https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#]\\S*)?|mailto:[^@\\s]+@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?)$"},
+        "documentationUrl": {"type": "string", "pattern": "^$|^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#]\\S*)?$"}
       }
     },
     "tesGateway": {

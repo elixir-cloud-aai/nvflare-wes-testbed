@@ -87,7 +87,10 @@ def main() -> None:
         defaults["id"] == "cloud.elixir-on.nvflare-wes-testbed"
     )
     checks["the name by default"] = defaults["name"] == "Thin WES for NVFlare (sandbox)"
-    checks["a description by default"] = "NVIDIA FLARE" in defaults.get("description", "")
+    checks["a description by default"] = defaults.get("description") == (
+        "Sandbox GA4GH WES that runs NVIDIA FLARE federated learning jobs (workflow types NVFLARE and FEDAVG),"
+        " with one GA4GH TES task per site. For tests only"
+    )
     checks["a test service by default"] = defaults.get("environment") == "test"
     checks["the org by default, by its current name"] = defaults["organization"] == {
         "name": "ELIXIR On-Cloud",
@@ -172,6 +175,9 @@ def main() -> None:
         ("WES_SERVICE_ORGANIZATION_URL", "http://example.org/"),
         ("WES_SERVICE_DOCUMENTATION_URL", "docs.example.org"),
         ("WES_SERVICE_CONTACT_URL", "wes@example.org"),
+        ("WES_SERVICE_CONTACT_URL", "mailto:nobody"),
+        ("WES_SERVICE_ORGANIZATION_URL", "https://"),
+        ("WES_SERVICE_DOCUMENTATION_URL", "https://-docs.example.org/"),
     ):
         try:
             service_info({name: bad})
