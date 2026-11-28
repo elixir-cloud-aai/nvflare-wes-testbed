@@ -9,6 +9,7 @@ dependencies installed:
 """
 
 import io
+import json
 import logging
 import os
 import pathlib
@@ -19,7 +20,7 @@ import time
 import types
 import urllib.parse
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import anyio
@@ -66,6 +67,22 @@ class FakeResponse:
             raise self.body
         return self.body
 
+    def iter_content(self, chunk_size: int) -> Iterator[bytes]:
+        """Stream the body, as the WES reads userinfo.
+
+        Args:
+            chunk_size: Bytes per chunk.
+
+        Yields:
+            The body as JSON, or text that isn't JSON, in chunks.
+        """
+        data = b"<html>not JSON</html>" if isinstance(self.body, ValueError) else json.dumps(self.body).encode()
+        for start in range(0, len(data), chunk_size):
+            yield data[start : start + chunk_size]
+
+    def close(self) -> None:
+        """Release the connection, which a fake doesn't have."""
+
 
 class FakeUserinfo:
     """Stands in for `requests` in the WES: answers userinfo requests by token, and counts them."""
@@ -98,7 +115,7 @@ class FakeUserinfo:
 
 
 def form_call(app: Callable[..., Any], path: str, value: str | None, form: dict[str, str] | None) -> int:
-    """Send one request to the WES over ASGI, in process.
+    """Send one request to the WES over ASGI, in process, for its status.
 
     Args:
         app: The application.
@@ -108,6 +125,21 @@ def form_call(app: Callable[..., Any], path: str, value: str | None, form: dict[
 
     Returns:
         The status of the answer.
+    """
+    return asgi_call(app, path, value, form)[0]
+
+
+def asgi_call(app: Callable[..., Any], path: str, value: str | None, form: dict[str, str] | None) -> tuple[int, bytes]:
+    """Send one request to the WES over ASGI, in process.
+
+    Args:
+        app: The application.
+        path: The path.
+        value: The bearer token, if any.
+        form: The form to POST; `None` for a GET.
+
+    Returns:
+        The status and the body of the answer.
     """
     body = urllib.parse.urlencode(form).encode() if form is not None else b""
     headers = [(b"content-type", b"application/x-www-form-urlencoded")] if form is not None else []
@@ -136,7 +168,8 @@ def form_call(app: Callable[..., Any], path: str, value: str | None, form: dict[
         messages.append(message)
 
     anyio.run(app, scope, receive, send)
-    return next(m for m in messages if m["type"] == "http.response.start")["status"]
+    status = next(m for m in messages if m["type"] == "http.response.start")["status"]
+    return status, b"".join(m.get("body", b"") for m in messages if m["type"] == "http.response.body")
 
 
 def refuses_to_start(environ: dict[str, str]) -> str:
@@ -267,6 +300,9 @@ def main() -> None:
             "userinfo redirects": FakeResponse(302, {}),
             "userinfo isn't JSON": FakeResponse(200, ValueError("not JSON")),
             "userinfo isn't an object": FakeResponse(200, [EOC]),
+            "userinfo answers with too much": FakeResponse(
+                200, {"sub": "researcher-1", CLAIM: [EOC], "padding": "x" * (1 << 21)}
+            ),
             "userinfo is about another subject": member_info("someone-else"),
             "userinfo has no subject": FakeResponse(200, {CLAIM: [EOC]}),
             "the issuer is out of reach": ConnectionError("unreachable"),
@@ -304,6 +340,10 @@ def main() -> None:
             "isn't an object": FakeResponse(200, [good]),
             "is for another issuer": FakeResponse(200, {**good, "issuer": "https://else.test/"}),
             "names no jwks_uri": FakeResponse(200, {"issuer": ISSUER, "userinfo_endpoint": USERINFO}),
+            "names a jwks_uri over http": FakeResponse(200, {**good, "jwks_uri": "http://issuer.test/jwk"}),
+            "names no userinfo endpoint, which entitlements need": FakeResponse(
+                200, {"issuer": ISSUER, "jwks_uri": good["jwks_uri"]}
+            ),
         }.items():
             wes._discovery = None
             userinfo.answers[""] = answer
@@ -320,6 +360,28 @@ def main() -> None:
         checks["discovery follows no redirects"] = userinfo.calls[-1].get("allow_redirects") is False
         del userinfo.answers[""]
         wes._discovery = None
+
+        # Two requests for one token: the one asked later wins, also if its
+        # answer comes back first, so a revoked membership isn't overwritten
+        race_value, race_claims = make()
+        later = FakeResponse(200, {"sub": "researcher-1", CLAIM: [ECP]})
+        earlier = member_info()
+
+        def answer_earlier_after_later(url: str, **kwargs: Any) -> FakeResponse:
+            if not getattr(answer_earlier_after_later, "nested", False):
+                answer_earlier_after_later.nested = True  # type: ignore[attr-defined]
+                # While the first request waits, a second one asks and is answered
+                wes.requests = types.SimpleNamespace(get=lambda url, **kwargs: later)
+                checks["the later request, answered first, sees the revocation"] = (
+                    status(race_value, race_claims) == 403
+                )
+                wes.requests = types.SimpleNamespace(get=answer_earlier_after_later)
+            return earlier
+
+        wes.requests = types.SimpleNamespace(get=answer_earlier_after_later)
+        checks["the earlier request, answered last, doesn't overwrite it"] = status(race_value, race_claims) == 403
+        wes.requests = types.SimpleNamespace(get=userinfo.get)
+        checks["the cache keeps the later answer"] = status(race_value, race_claims) == 403
 
         # The cache lasts no longer than the token
         short_value, short_claims = make(lifetime=1)
@@ -379,8 +441,10 @@ def main() -> None:
             form_call(wes.app, runs, outsider_by_userinfo, bad_run) == 403
         )
         wes.RUNS["run-of-outsider"] = {"state": "COMPLETE", "sub": "outsider-1", "submitter": "outsider-1@x.invalid"}
-        checks["a non-member still lists runs, its own only"] = form_call(wes.app, runs, outsider, None) == 200 and [
-            r["run_id"] for r in wes.list_runs(wes.Identity("outsider-1", "x"))["runs"]
+        wes.RUNS["run-of-member"] = {"state": "COMPLETE", "sub": "researcher-1", "submitter": "researcher-1@x.invalid"}
+        listed_status, listed = asgi_call(wes.app, runs, outsider, None)
+        checks["a non-member still lists runs, its own only"] = listed_status == 200 and [
+            r["run_id"] for r in json.loads(listed)["runs"]
         ] == ["run-of-outsider"]
         checks["a non-member still reads its own run"] = (
             form_call(wes.app, f"{runs}/run-of-outsider/status", outsider, None) == 200

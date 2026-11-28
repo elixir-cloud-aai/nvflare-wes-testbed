@@ -324,6 +324,8 @@ USERINFO_CACHE_SECONDS = 300
 USERINFO_CACHE_SIZE = 1024
 # Seconds to wait for the issuer's discovery document and userinfo endpoint
 OIDC_TIMEOUT = 10
+# Bytes of a userinfo answer, at most: entitlements of many groups fit
+USERINFO_MAX_BYTES = 1048576
 
 
 def start_responder() -> None:
@@ -1261,6 +1263,11 @@ def oidc_discovery() -> dict[str, Any]:
             raise ValueError("The issuer's discovery document is for another issuer")
         if not isinstance(document.get("jwks_uri"), str):
             raise ValueError("The issuer's discovery document names no jwks_uri")
+        if not OIDC_ALLOW_HTTP:
+            tokens.check_url(document["jwks_uri"], "the issuer's jwks_uri")
+        if REQUIRED_ENTITLEMENTS:
+            # Checked here too, so that a document without it isn't kept
+            check_userinfo_endpoint(document.get("userinfo_endpoint"))
         _discovery = document
     return _discovery
 
@@ -1434,8 +1441,9 @@ def identity(claims: dict[str, Any] = AUTH_DEPENDENCY) -> Identity:
 IDENTITY_DEPENDENCY = Depends(identity)
 
 # Entitlements from userinfo, by the SHA-256 of the token they were asked for,
-# with when the answer expires. Never the token itself, nor the whole answer
-_userinfo_cache: dict[str, tuple[float, frozenset[str]]] = {}
+# with when the answer expires and when it was asked for. Never the token
+# itself, nor the whole answer
+_userinfo_cache: dict[str, tuple[float, frozenset[str], float]] = {}
 _userinfo_lock = threading.Lock()
 
 
@@ -1456,6 +1464,30 @@ def entitlements_in(value: object) -> frozenset[str]:
     return frozenset()
 
 
+def read_bounded(reply: requests.Response, deadline: float) -> bytes:
+    """Read the body of a streamed answer, at most `USERINFO_MAX_BYTES` and until a deadline.
+
+    Args:
+        reply: The answer, fetched with `stream=True`.
+        deadline: When to give up, by `time.monotonic()`; a read in progress
+            may still take up to its own timeout.
+
+    Returns:
+        The body.
+
+    Raises:
+        ValueError: The body is larger, or takes longer.
+    """
+    body = bytearray()
+    for chunk in reply.iter_content(chunk_size=65536):
+        body += chunk
+        if len(body) > USERINFO_MAX_BYTES:
+            raise ValueError("userinfo answered with too much")
+        if time.monotonic() > deadline:
+            raise ValueError("userinfo answered too slowly")
+    return bytes(body)
+
+
 def userinfo_endpoint() -> str:
     """Get the userinfo endpoint of `OIDC_ISSUER`, from its discovery document.
 
@@ -1466,7 +1498,22 @@ def userinfo_endpoint() -> str:
         ValueError: The issuer names none, or one that isn't https, and
             `WES_OIDC_ALLOW_HTTP` isn't set: the caller's token goes there.
     """
-    endpoint = oidc_discovery().get("userinfo_endpoint")
+    return check_userinfo_endpoint(oidc_discovery().get("userinfo_endpoint"))
+
+
+def check_userinfo_endpoint(endpoint: object) -> str:
+    """Check the userinfo endpoint a discovery document names.
+
+    Args:
+        endpoint: The document's `userinfo_endpoint`.
+
+    Returns:
+        The endpoint's URL.
+
+    Raises:
+        ValueError: It names none, or one that isn't https, and
+            `WES_OIDC_ALLOW_HTTP` isn't set: the caller's token goes there.
+    """
     if not isinstance(endpoint, str) or not endpoint:
         raise ValueError("The issuer names no userinfo endpoint")
     if not OIDC_ALLOW_HTTP:
@@ -1495,10 +1542,10 @@ def userinfo_entitlements(token: str, sub: str, expires: float) -> frozenset[str
             entitlements can't be known, so it isn't allowed.
     """
     key = hashlib.sha256(token.encode()).hexdigest()
-    now = time.time()
+    asked = time.time()
     with _userinfo_lock:
         cached = _userinfo_cache.get(key)
-        if cached is not None and cached[0] > now:
+        if cached is not None and cached[0] > asked:
             return cached[1]
     try:
         reply = requests.get(
@@ -1507,10 +1554,15 @@ def userinfo_entitlements(token: str, sub: str, expires: float) -> frozenset[str
             timeout=OIDC_TIMEOUT,
             # The token goes to the endpoint the issuer names, and nowhere else
             allow_redirects=False,
+            # Read below, bounded in size and time
+            stream=True,
         )
-        if reply.status_code != 200:
-            raise ValueError(f"userinfo answered {reply.status_code}")
-        info = reply.json()
+        try:
+            if reply.status_code != 200:
+                raise ValueError(f"userinfo answered {reply.status_code}")
+            info = json.loads(read_bounded(reply, time.monotonic() + OIDC_TIMEOUT))
+        finally:
+            reply.close()
     except Exception as error:  # noqa: BLE001 - out of reach, refused, not JSON: never allowed
         # Only what failed, never the token or the answer
         logger.warning("Auth: couldn't ask userinfo about subject %r: %s", sub, type(error).__name__)  # nosemgrep
@@ -1522,12 +1574,17 @@ def userinfo_entitlements(token: str, sub: str, expires: float) -> frozenset[str
     entitlements = entitlements_in(info.get(ENTITLEMENT_CLAIM))
     with _userinfo_lock:
         now = time.time()
-        for stale in [k for k, (until, _) in _userinfo_cache.items() if until <= now]:
+        newer = _userinfo_cache.get(key)
+        if newer is not None and newer[2] > asked and newer[0] > now:
+            # Asked later, by a request for the same token that came back
+            # first: its answer is the newer one, such as a membership revoked
+            return newer[1]
+        for stale in [k for k, (until, _, _) in _userinfo_cache.items() if until <= now]:
             del _userinfo_cache[stale]
         while len(_userinfo_cache) >= USERINFO_CACHE_SIZE:
             # Dicts keep their order: the oldest answer goes first
             del _userinfo_cache[next(iter(_userinfo_cache))]
-        _userinfo_cache[key] = (min(expires, now + USERINFO_CACHE_SECONDS), entitlements)
+        _userinfo_cache[key] = (min(expires, now + USERINFO_CACHE_SECONDS), entitlements, asked)
     return entitlements
 
 

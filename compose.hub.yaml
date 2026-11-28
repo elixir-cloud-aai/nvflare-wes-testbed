@@ -33,7 +33,7 @@ services:
       # Entitlements, one of which starting a run needs, comma-separated, and
       # the claim that carries them: none by default
       WES_OIDC_REQUIRED_ENTITLEMENTS: ${WES_OIDC_REQUIRED_ENTITLEMENTS:-}
-      WES_OIDC_ENTITLEMENT_CLAIM: ${WES_OIDC_ENTITLEMENT_CLAIM:-eduperson_entitlement}
+      WES_OIDC_ENTITLEMENT_CLAIM: ${WES_OIDC_ENTITLEMENT_CLAIM-eduperson_entitlement}
       # Origins whose pages may call the WES API (CORS), comma-separated: none by default
       WES_CORS_ALLOWED_ORIGINS: ${WES_CORS_ALLOWED_ORIGINS:-}
       # For tests only: the sandbox's own fake identity provider has no TLS
