@@ -1230,11 +1230,11 @@ _discovery: dict[str, Any] | None = None
 def oidc_discovery() -> dict[str, Any]:
     """Get the discovery document of `OIDC_ISSUER`, fetching it once.
 
-    Returns:
-        The document.
-
     Only a good document is kept: a failed fetch is tried again on the next
     request, rather than kept until the WES restarts.
+
+    Returns:
+        The document.
 
     Raises:
         ValueError: The issuer isn't reachable over https, and
