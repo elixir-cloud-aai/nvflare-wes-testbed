@@ -50,6 +50,8 @@ echo "[ok] no Docker socket, admin port or TES in the hub's Compose file"
 "${hub[@]}" --profile test run --rm -T entitlement-check
 "${hub[@]}" --profile test run --rm -T service-info-check
 "${hub[@]}" --profile test run --rm -T e2e
+# The same job from the GA4GH SDK CLI, with the script for users (#73)
+"${hub[@]}" --profile test run --rm -T sdk-run-check
 # Between runs, the probe responder answers on the FL port, as the arbitrary user. It may
 # take a retry to bind, while the run's FL server goes away
 for try in $(seq 1 10); do

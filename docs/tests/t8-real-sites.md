@@ -36,6 +36,8 @@ These are what we hope for. Anything else is a result.
 
 5. Follow it with `curl -H "Authorization: Bearer <token>" https://<hub>/ga4gh/wes/v1/runs/<id>`, and at the node with its operator.
 
+As a user would, from a WES client: `scripts/sdk_run.py` starts the run with the GA4GH SDK CLI and the user's own token, follows it, and checks the tasks and the accuracy (see [Running a job from the GA4GH SDK CLI](../setup/real-sites.md#running-a-job-from-the-ga4gh-sdk-cli)).
+
 ## Questions it answers
 
 - Does a TES task at this node get out? Through what?
