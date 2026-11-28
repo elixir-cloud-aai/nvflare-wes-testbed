@@ -73,6 +73,23 @@ services:
       - ./testset/data:/testset-data:ro
     networks: [control]
 
+  # The script of #73 with the real GA4GH SDK CLI, which it downloads, as a
+  # member and as someone without the entitlement
+  sdk-run-check:
+    image: nvflare-testbed:local
+    profiles: [test]
+    command: ["python3", "/app/tests/sdk_run_check.py"]
+    environment:
+      WES_URL: http://hub:8080/ga4gh/wes/v1
+      WES_OIDC_TOKEN_URL: http://fake-idp:8080/oidc/token
+    depends_on:
+      hub:
+        condition: service_healthy
+    volumes:
+      - ./scripts:/app/scripts:ro
+      - ./testset/data:/testset-data:ro
+    networks: [control]
+
   # Plays someone on the internet, in front of the proxy. Only on `hub`: the
   # hub service's own alias for `${FL_SERVER_NAME}` on `control` would
   # otherwise collide with the proxy's, on a container that joins both
