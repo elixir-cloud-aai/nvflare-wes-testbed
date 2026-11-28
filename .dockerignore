@@ -1,6 +1,9 @@
 # Deny by default: only what the images need goes into the build context.
 # No site data, no secrets.
 *
+!pyproject.toml
+!README.md
+!LICENSE
 !wes/*.py
 !images/*.sh
 !testset/job

@@ -94,6 +94,12 @@ refuse "an empty entitlement claim" "${args[@]}" --set-string oidcEntitlementCla
 refuse "an entitlement claim with spaces" "${args[@]}" --set-string 'oidcEntitlementClaim=eduperson entitlement'
 refuse "an open WES that isn't on or off" "${args[@]}" --set-string wesRoute.allowAnySubject=yes
 refuse "an unknown key of the WES Route" "${args[@]}" --set wesRoute.path=/
+refuse "a service id with spaces" "${args[@]}" --set 'serviceInfo.id=fi.rahtiapp.flare wes'
+refuse "an organization URL that isn't https" "${args[@]}" --set serviceInfo.organization.url=http://example.invalid/
+refuse "a documentation URL that isn't https" "${args[@]}" --set serviceInfo.documentationUrl=docs.example.invalid
+refuse "a contact that is neither https nor mailto" "${args[@]}" --set serviceInfo.contactUrl=wes@example.invalid
+refuse "an environment with spaces" "${args[@]}" --set-string 'serviceInfo.environment=test service'
+refuse "an unknown key of the service info" "${args[@]}" --set serviceInfo.version=1.0.0
 refuse "any origin for CORS" "${args[@]}" --set 'corsAllowedOrigins=*'
 refuse "an origin without a scheme" "${args[@]}" --set corsAllowedOrigins=portal.example.invalid
 refuse "an origin with a path" "${args[@]}" --set corsAllowedOrigins=https://portal.example.invalid/app
@@ -247,6 +253,26 @@ expect "the allow-list with the entitlements" "${env} | select(.name == \"WES_OI
 expect "entitlements" "${env} | select(.name == \"WES_OIDC_REQUIRED_ENTITLEMENTS\") | .value" "urn:x:a#y,urn:x:b#y"
 expect "another entitlement claim" "${env} | select(.name == \"WES_OIDC_ENTITLEMENT_CLAIM\") | .value" "entitlements"
 
+# The service info of this deployment, for registries (#71): every value
+# arrives, and the version stays the image's
+info=https://docs.example.invalid/wes
+helm template hub "${chart}" "${args[@]}" --set serviceInfo.id=invalid.example.wes \
+    --set 'serviceInfo.name=Example WES' --set 'serviceInfo.description=A WES\, for tests' \
+    --set serviceInfo.environment=prod --set 'serviceInfo.organization.name=Example org' \
+    --set serviceInfo.organization.url=https://example.invalid/ \
+    --set serviceInfo.contactUrl=mailto:wes@example.invalid --set "serviceInfo.documentationUrl=${info}" >"${out}"
+expect "the service id" "${env} | select(.name == \"WES_SERVICE_ID\") | .value" "invalid.example.wes"
+expect "the service name" "${env} | select(.name == \"WES_SERVICE_NAME\") | .value" "Example WES"
+expect "the service description" "${env} | select(.name == \"WES_SERVICE_DESCRIPTION\") | .value" "A WES, for tests"
+expect "the service environment" "${env} | select(.name == \"WES_SERVICE_ENVIRONMENT\") | .value" "prod"
+expect "the organization's name" "${env} | select(.name == \"WES_SERVICE_ORGANIZATION_NAME\") | .value" \
+    "Example org"
+expect "the organization's URL" "${env} | select(.name == \"WES_SERVICE_ORGANIZATION_URL\") | .value" \
+    "https://example.invalid/"
+expect "the contact" "${env} | select(.name == \"WES_SERVICE_CONTACT_URL\") | .value" "mailto:wes@example.invalid"
+expect "the documentation" "${env} | select(.name == \"WES_SERVICE_DOCUMENTATION_URL\") | .value" "${info}"
+expect "no version from the chart" "[${env} | select(.name == \"WES_SERVICE_VERSION\")] | length" "0"
+
 # Names stay within 63 characters, with the longest release name of Helm (53)
 helm template "$(printf 'r%.0s' {1..53})" "${chart}" "${args[@]}" --set wesRoute.enabled=true \
     --set wesRoute.allowAnySubject=true >"${out}"
@@ -277,6 +303,12 @@ expect "no entitlement by default" "[${env} | select(.name == \"WES_OIDC_REQUIRE
 expect "no entitlement claim without entitlements" \
     "[${env} | select(.name == \"WES_OIDC_ENTITLEMENT_CLAIM\")] | length" "0"
 expect "no CORS by default" "[${env} | select(.name == \"WES_CORS_ALLOWED_ORIGINS\")] | length" "0"
+# A service id of this deployment's own, from its public name, as GA4GH
+# services name themselves (`fi.rahtiapp.poiesis`); the WES's defaults for the rest
+expect "the service id from the kits host in reverse by default" \
+    "${env} | select(.name == \"WES_SERVICE_ID\") | .value" "fi.rahtiapp.example.flare-wes-kits"
+expect "the WES's own service info otherwise by default" \
+    "[${env} | select(.name | test(\"^WES_SERVICE_\")) | .name] | join(\",\")" "WES_SERVICE_ID"
 
 # Non-default OIDC values, to see them arrive
 helm template hub "${chart}" "${args[@]}" --set oidcAudience=other-aud --set 'oidcAlgorithms=RS256\,ES256' \

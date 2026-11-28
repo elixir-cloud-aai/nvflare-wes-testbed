@@ -36,6 +36,16 @@ services:
       WES_OIDC_ENTITLEMENT_CLAIM: ${WES_OIDC_ENTITLEMENT_CLAIM-eduperson_entitlement}
       # Origins whose pages may call the WES API (CORS), comma-separated: none by default
       WES_CORS_ALLOWED_ORIGINS: ${WES_CORS_ALLOWED_ORIGINS:-}
+      # What the service info says about this deployment, for registries: the
+      # WES's defaults when empty. Give each deployment an `id` of its own
+      WES_SERVICE_ID: ${WES_SERVICE_ID:-}
+      WES_SERVICE_NAME: ${WES_SERVICE_NAME:-}
+      WES_SERVICE_DESCRIPTION: ${WES_SERVICE_DESCRIPTION:-}
+      WES_SERVICE_ENVIRONMENT: ${WES_SERVICE_ENVIRONMENT:-}
+      WES_SERVICE_ORGANIZATION_NAME: ${WES_SERVICE_ORGANIZATION_NAME:-}
+      WES_SERVICE_ORGANIZATION_URL: ${WES_SERVICE_ORGANIZATION_URL:-}
+      WES_SERVICE_CONTACT_URL: ${WES_SERVICE_CONTACT_URL:-}
+      WES_SERVICE_DOCUMENTATION_URL: ${WES_SERVICE_DOCUMENTATION_URL:-}
       # For tests only: the sandbox's own fake identity provider has no TLS
       WES_OIDC_ALLOW_HTTP: ${WES_OIDC_ALLOW_HTTP:-}
     # The WES talks to its FL server by the name in the kits, so that name has to

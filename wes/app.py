@@ -30,6 +30,7 @@ in memory.
 import contextlib
 import errno
 import hashlib
+import importlib.metadata
 import json
 import logging
 import os
@@ -446,6 +447,64 @@ CORS_ALLOWED_ORIGINS = parse_cors_origins(os.environ.get("WES_CORS_ALLOWED_ORIGI
 if CORS_ALLOWED_ORIGINS:
     app.add_middleware(WesCorsMiddleware, origins=CORS_ALLOWED_ORIGINS)
     logger.info("CORS: pages of %s may call %s", ", ".join(CORS_ALLOWED_ORIGINS), WES_PREFIX)
+
+# The distribution whose version the service info reports: the image installs
+# its metadata (`images/Dockerfile.flare`), so the version is the one in
+# `pyproject.toml`, which a release sets
+DISTRIBUTION = "nvflare-wes-testbed"
+
+
+def package_version(distribution: str = DISTRIBUTION) -> str:
+    """Read the version of the installed package, for the service info.
+
+    Args:
+        distribution: The distribution's name.
+
+    Returns:
+        Its version, or `unknown` if it isn't installed, as when the WES runs
+        from a checkout without `pip install .`.
+    """
+    try:
+        return importlib.metadata.version(distribution)
+    except importlib.metadata.PackageNotFoundError:
+        logger.warning("Service info: package %s isn't installed, so its version is unknown", distribution)
+        return "unknown"
+
+
+def setting(name: str, default: str) -> str:
+    """Read a setting of the service info, with spaces around it dropped.
+
+    Args:
+        name: The environment variable.
+        default: Its value if unset or empty, as a chart passes values it has none of.
+
+    Returns:
+        The value, or the default.
+    """
+    return os.environ.get(name, "").strip() or default
+
+
+# What the service info says about this deployment (#71), for registries such
+# as the Cloud Registry, which import it and keep syncing it. `id` should stay
+# the same for a deployment, and differ from other deployments'
+SERVICE_ID = setting("WES_SERVICE_ID", "cloud.elixir-on.nvflare-wes-testbed")
+SERVICE_NAME = setting("WES_SERVICE_NAME", "Thin WES for NVFlare (sandbox)")
+SERVICE_DESCRIPTION = setting(
+    "WES_SERVICE_DESCRIPTION",
+    "Sandbox GA4GH WES that runs NVIDIA FLARE federated learning jobs (workflow types NVFLARE and FEDAVG),"
+    " with one GA4GH TES task per site. For tests only",
+)
+SERVICE_ENVIRONMENT = setting("WES_SERVICE_ENVIRONMENT", "test")
+SERVICE_ORGANIZATION_NAME = setting("WES_SERVICE_ORGANIZATION_NAME", "ELIXIR On-Cloud")
+SERVICE_ORGANIZATION_URL = setting("WES_SERVICE_ORGANIZATION_URL", "https://elixir-on.cloud/")
+SERVICE_CONTACT_URL = setting(
+    "WES_SERVICE_CONTACT_URL", "https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues"
+)
+SERVICE_DOCUMENTATION_URL = setting(
+    "WES_SERVICE_DOCUMENTATION_URL",
+    "https://nvflare-wes-testbed.readthedocs.io/en/latest/setup/real-sites/#the-wes-api-in-public",
+)
+SERVICE_VERSION = package_version()
 
 RUNS: dict[str, dict[str, Any]] = {}
 KITS: dict[str, pathlib.Path] = {}
@@ -1634,17 +1693,21 @@ ENTITLED_DEPENDENCY = Depends(entitled)
 
 @app.get("/ga4gh/wes/v1/service-info")
 def service_info() -> dict[str, Any]:
-    """Describe the service.
+    """Describe the service, with the settings `WES_SERVICE_*` and the package's version.
 
     Returns:
         The service info of WES 1.1.
     """
     return {
-        "id": "org.example.nvflare-thin-wes",
-        "name": "Thin WES for NVFlare (sandbox)",
+        "id": SERVICE_ID,
+        "name": SERVICE_NAME,
         "type": {"group": "org.ga4gh", "artifact": "wes", "version": "1.1.0"},
-        "organization": {"name": "ELIXIR Cloud & AAI (sandbox)", "url": "https://elixir-cloud-aai.github.io"},
-        "version": "0.0.0",
+        "description": SERVICE_DESCRIPTION,
+        "organization": {"name": SERVICE_ORGANIZATION_NAME, "url": SERVICE_ORGANIZATION_URL},
+        "contactUrl": SERVICE_CONTACT_URL,
+        "documentationUrl": SERVICE_DOCUMENTATION_URL,
+        "environment": SERVICE_ENVIRONMENT,
+        "version": SERVICE_VERSION,
         "workflow_type_versions": {
             "NVFLARE": {"workflow_type_version": ["2.9"]},
             fedavg.WORKFLOW_TYPE: {"workflow_type_version": [fedavg.WORKFLOW_TYPE_VERSION]},

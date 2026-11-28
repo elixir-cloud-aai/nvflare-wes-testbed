@@ -163,6 +163,13 @@ Caddy gets a certificate for that name, which needs ports 80 and 443 reachable. 
 | `WES_OIDC_REQUIRED_ENTITLEMENTS` | None, no entitlement needed | Entitlements, one of which a caller needs to start runs, comma-separated, each matched exactly (no prefixes or wildcards): see [The WES API in public](#the-wes-api-in-public). From the token's `WES_OIDC_ENTITLEMENT_CLAIM`, or from the issuer's userinfo endpoint if the token has no such claim. Without one, `POST /runs` gets `403`; reading runs stays with their owner. With `WES_OIDC_ALLOWED_SUBS`, both must hold. A value of only commas or spaces stops the hub from starting |
 | `WES_OIDC_ENTITLEMENT_CLAIM` | `eduperson_entitlement` | The claim that carries the entitlements. Empty, with `WES_OIDC_REQUIRED_ENTITLEMENTS` set, stops the hub from starting |
 | `WES_CORS_ALLOWED_ORIGINS` | None | Origins whose pages may call the WES API from a browser (CORS), comma-separated, such as `https://portal.example.org`: see [The WES API in public](#the-wes-api-in-public). Only for `/ga4gh/wes/v1`; the proxy still lets the WES through from `WES_ALLOWED_IPS` alone. An entry that isn't an origin, such as `*`, stops the hub from starting |
+| `WES_SERVICE_ID` | `cloud.elixir-on.nvflare-wes-testbed` | The `id` in the [service info](#the-wes-api-in-public), for registries. Give each deployment one of its own, in reverse-domain notation, such as its public name in reverse, and keep it once registered |
+| `WES_SERVICE_NAME` | `Thin WES for NVFlare (sandbox)` | The `name` in the service info |
+| `WES_SERVICE_DESCRIPTION` | What the WES does, and that it's for tests only | The `description` in the service info |
+| `WES_SERVICE_ENVIRONMENT` | `test` | The `environment` in the service info, such as `prod`, `test`, `dev` or `staging` |
+| `WES_SERVICE_ORGANIZATION_NAME`, `WES_SERVICE_ORGANIZATION_URL` | `ELIXIR On-Cloud`, `https://elixir-on.cloud/` | The `organization` in the service info: who runs the deployment |
+| `WES_SERVICE_CONTACT_URL` | `https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues` | The `contactUrl` in the service info: a URL, or `mailto:` and an address |
+| `WES_SERVICE_DOCUMENTATION_URL` | [The WES API in public](#the-wes-api-in-public), on Read the Docs | The `documentationUrl` in the service info |
 | `WES_OIDC_ALLOW_HTTP` | None, https required | Local tests only: allows the issuer and its JWKS over plain HTTP. Never set it on a real deployment; an on-path attacker with it set could forge tokens |
 | `WES_INTERNAL_URL` | `https://<FL_SERVER_NAME>` | Base of the links to kits. Keep it `https`, as kits hold private keys |
 | `WES_SITES_FILE` | `./sites.json` | The sites file: name, `tes` and `data`. Add a [token source](#tokens-for-the-tes-of-the-sites) for a TES that needs one, which must then be at an `https` URL, and a `backend` for a site [through proTES](#through-protes) |
@@ -255,6 +262,10 @@ The Route must say `Admitted=True`. If another project already has its name, the
 | `wesRoute.enabled` | `false` | A Route for the WES API, `/ga4gh/wes/v1` alone, on `kitsHost`: see [The WES API in public](#the-wes-api-in-public). Needs `oidcRequiredEntitlements`, `oidcAllowedSubs`, or `wesRoute.allowAnySubject` |
 | `wesRoute.allowAnySubject` | `false` | `true` allows the Route with empty `oidcRequiredEntitlements` and `oidcAllowedSubs`: anyone the issuer vouches for may then start runs ([H22](../testbed/shortcuts.md#h22)) |
 | `corsAllowedOrigins` | Empty, none | Origins whose pages may call the WES API from a browser (CORS), comma-separated, such as `https://portal.example.org`: scheme, host and an optional port, no path, no wildcard. `WES_CORS_ALLOWED_ORIGINS` of the WES |
+| `serviceInfo.id` | Empty: `kitsHost` in reverse, such as `fi.rahtiapp.2.flare-wes` | `WES_SERVICE_ID`: the deployment's `id` in the [service info](#the-wes-api-in-public). Set it once you register the WES, so that it stays if `kitsHost` changes |
+| `serviceInfo.name`, `serviceInfo.description`, `serviceInfo.environment` | Empty: the WES's defaults | `WES_SERVICE_NAME`, `WES_SERVICE_DESCRIPTION`, `WES_SERVICE_ENVIRONMENT` |
+| `serviceInfo.organization.name`, `serviceInfo.organization.url` | Empty: the WES's defaults | `WES_SERVICE_ORGANIZATION_NAME`, `WES_SERVICE_ORGANIZATION_URL` (https) |
+| `serviceInfo.contactUrl`, `serviceInfo.documentationUrl` | Empty: the WES's defaults | `WES_SERVICE_CONTACT_URL` (https or `mailto:`), `WES_SERVICE_DOCUMENTATION_URL` (https) |
 | `tesGateway.url` | Empty, straight to each TES | A TES gateway (proTES), `https`, that all tasks go through: see [Through proTES](#through-protes) |
 | `tesGateway.tokenFile` | Empty | The gateway's token: a key of `tokenSecret` with a token file. Or: |
 | `tesGateway.oauth` | Empty | The gateway's token from an OAuth provider, with the keys of [`oauth`](#tokens-for-the-tes-of-the-sites) in the sites file (secrets by variable name only), and its secrets from `envSecret`, which it then needs. One of `tokenFile` and `oauth` is required with a gateway, and neither works without one; the chart takes no token or secret as a value |
@@ -306,6 +317,17 @@ curl -s -o /dev/null -w '%{http_code}\n' -X OPTIONS https://<kits name>/ga4gh/we
 ```
 
 Or, for a list of subjects instead, `--set 'oidcAllowedSubs=<sub 1>\,<sub 2>'`. Several origins go with an escaped comma, as `--set 'corsAllowedOrigins=https://a.example.org\,https://b.example.org'`. Then run the [checks from outside](#checking-the-hub-from-outside) with `--wes-public`. To take the WES API off again, `--set wesRoute.enabled=false`.
+
+**The service info, for registries:** `/ga4gh/wes/v1/service-info` describes the deployment, without a token, so that a GA4GH Service Registry, such as ELIXIR On-Cloud's Cloud Registry, can import it and keep it in sync: `id`, `name`, `description`, `organization`, `contactUrl`, `documentationUrl` and `environment` come from `serviceInfo` (`WES_SERVICE_*` of the WES; the defaults are in the tables above), and `version` is the version of the package in the image, from `pyproject.toml` (an image of `dev` reports the version of the last release prepared there). The `id` names the deployment in the registry: give each deployment one of its own, and don't change it once it's registered. The chart takes the kits name in reverse by default; set `serviceInfo.id` to keep it if the kits name changes. For example (Fish):
+
+```fish
+helm upgrade hub charts/nvflare-wes-hub --reset-then-reuse-values \
+    --set serviceInfo.id=<kits name in reverse, such as fi.rahtiapp.2.flare-wes> \
+    --set 'serviceInfo.description=<what the deployment is for, and who may use it>'
+curl -s https://<kits name>/ga4gh/wes/v1/service-info | jq '{id, version, organization, environment}'
+```
+
+Then register it by its URL, `https://<kits name>/ga4gh/wes/v1`.
 
 **Check from outside**, from a machine outside Rahti, with `flPort` as the FL port (see [Checking the hub from outside](#checking-the-hub-from-outside)):
 

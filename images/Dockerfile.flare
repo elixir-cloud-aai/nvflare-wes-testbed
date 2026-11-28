@@ -17,6 +17,10 @@ RUN apt-get update \
         "uvicorn>=0.30,<1" \
         "requests>=2.32,<3" \
         "pyjwt[crypto]>=2.9,<3"
+# The package's metadata alone (it has no modules), so that the WES reports the
+# version of `pyproject.toml` in its service info
+COPY pyproject.toml README.md LICENSE /tmp/package/
+RUN pip install --no-cache-dir --no-deps /tmp/package && rm -rf /tmp/package
 COPY images/fl-client.sh /usr/local/bin/fl-client
 COPY images/fl-server.sh /usr/local/bin/fl-server
 COPY wes /app/wes

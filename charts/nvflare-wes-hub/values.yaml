@@ -97,6 +97,28 @@ wesRoute:
 # port, no path, no wildcard. For `/ga4gh/wes/v1` only. Empty: none
 corsAllowedOrigins: ""
 
+# What the WES's service info (`/ga4gh/wes/v1/service-info`) says about this
+# deployment, for registries such as a GA4GH Service Registry, which import it
+# and keep syncing it. Empty: the WES's defaults (`WES_SERVICE_*` in
+# docs/setup/real-sites.md). The version is always the image's
+serviceInfo:
+  # The deployment's id, which should never change once registered, and differ
+  # from other deployments'. Empty: `kitsHost` in reverse, such as
+  # `fi.rahtiapp.2.flare-wes` for `flare-wes.2.rahtiapp.fi`
+  id: ""
+  name: ""
+  description: ""
+  # Such as `prod`, `test`, `dev` or `staging`
+  environment: ""
+  organization:
+    name: ""
+    # https
+    url: ""
+  # https or mailto
+  contactUrl: ""
+  # https
+  documentationUrl: ""
+
 # Optional: a TES gateway (proTES) that all tasks go through, pinned to the TES
 # of their site (or its `backend` in the sites file). See "Through proTES" in
 # docs/setup/real-sites.md. Empty `url`: tasks go straight to the TES of each
