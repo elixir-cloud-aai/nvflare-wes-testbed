@@ -19,6 +19,12 @@ The hub {{ .Values.hubName }} is starting. Sandbox only.
    The Route must say Admitted=True:
 
      oc get route {{ include "hub.fullname" . }}-wes -o jsonpath='{.status.ingress[0].conditions[0].type}={.status.ingress[0].conditions[0].status}'
+{{- if .Values.oidcRequiredEntitlements }}
+
+   Starting runs needs one of these entitlements, in the token's claim
+   {{ .Values.oidcEntitlementClaim }} or at the issuer's userinfo:
+   {{ .Values.oidcRequiredEntitlements }}
+{{- end }}
 {{- if .Values.corsAllowedOrigins }}
 
    Pages of {{ .Values.corsAllowedOrigins }} may call it from a browser.

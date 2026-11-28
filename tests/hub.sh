@@ -14,6 +14,9 @@ export WES_INTERNAL_URL="http://${FL_SERVER_NAME}:8080"
 # provider, which has no TLS of its own
 export WES_OIDC_ISSUER=http://fake-idp:8080/oidc/
 export WES_OIDC_ALLOW_HTTP=1
+# Starting runs needs the entitlement that the fake identity provider releases
+# at userinfo (#70)
+export WES_OIDC_REQUIRED_ENTITLEMENTS='urn:geant:testbed.invalid:group:fl-users#testbed.invalid'
 hub=(docker compose -f compose.hub.yaml -f tests/compose.hub-test.yaml --project-directory .)
 trap '"${hub[@]}" --profile test down -v' EXIT
 
@@ -38,6 +41,7 @@ echo "[ok] no Docker socket, admin port or TES in the hub's Compose file"
 "${hub[@]}" --profile test run --rm -T probe-responder-check
 "${hub[@]}" --profile test run --rm -T auth-check
 "${hub[@]}" --profile test run --rm -T cors-check
+"${hub[@]}" --profile test run --rm -T entitlement-check
 "${hub[@]}" --profile test run --rm -T e2e
 # Between runs, the probe responder answers on the FL port, as the arbitrary user. It may
 # take a retry to bind, while the run's FL server goes away

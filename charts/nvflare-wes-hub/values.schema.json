@@ -61,6 +61,16 @@
       "type": "string",
       "pattern": "^$|^[^,\\s]+(,[^,\\s]+)*$"
     },
+    "oidcRequiredEntitlements": {
+      "description": "Entitlements, one of which starting a run needs, comma-separated without spaces or empty entries, each matched exactly, or empty for none",
+      "type": "string",
+      "pattern": "^$|^[^,\\s]+(,[^,\\s]+)*$"
+    },
+    "oidcEntitlementClaim": {
+      "description": "The claim that carries the entitlements, in the token or at userinfo",
+      "type": "string",
+      "pattern": "^[^,\\s]+$"
+    },
     "sitesSecret": {"type": "string", "minLength": 1},
     "tokenSecret": {
       "description": "Secret with token files, mounted at /run/secrets/tes-tokens, or empty",
@@ -79,7 +89,7 @@
       "properties": {
         "enabled": {"type": "boolean"},
         "allowAnySubject": {
-          "description": "Allow a public WES with an empty oidcAllowedSubs, open to anyone the issuer vouches for",
+          "description": "Allow a public WES with empty oidcAllowedSubs and oidcRequiredEntitlements, open to anyone the issuer vouches for",
           "type": "boolean"
         }
       }

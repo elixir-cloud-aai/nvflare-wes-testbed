@@ -32,6 +32,8 @@ All of them, in one place, each with the proper way. Their numbers are referred 
 
 **Update:** with the WES API public on Rahti (`wesRoute.enabled`, see [The WES API in public](../setup/real-sites.md#the-wes-api-in-public)), an empty list opens the WES to anyone with an account at the issuer, so the chart refuses that unless `wesRoute.allowAnySubject=true` says so. Public too: `service-info` names the sites to anyone, without a token.
 
+**Update:** starting runs can now need an entitlement, the claim check above: `WES_OIDC_REQUIRED_ENTITLEMENTS` (chart: `oidcRequiredEntitlements`), such as the LS Login group EOC-Compute that ELIXIR On-Cloud's other compute services admit, from the token's `eduperson_entitlement` or, as LS Login releases it only there, from the issuer's userinfo, cached per token for at most 5 minutes ([#70](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/70)). The chart accepts it instead of a list of subjects for a public WES; the list stays as an optional extra restriction. What's left of the shortcut: one group, matched exactly, only for starting runs; reading stays with each run's owner, and nothing maps a group to FLARE's roles. A member removed from the group can start runs for up to 5 more minutes with a token it already has.
+
 ### H23
 
 **No rate limiting anywhere.** Not at the WES, not at the reverse proxy: any authenticated caller can submit requests as fast as it likes. The one-run-at-a-time lock ([H2](#h2)) keeps a flood of `POST /runs` cheap to refuse, but every gated request still costs a signature verification that didn't exist before the OIDC gate ([H5](#h5)) — a cost an attacker can spend at will, with nothing to slow them down. **Proper way:** rate limiting at the proxy or the WES, per subject or per address.
@@ -68,7 +70,7 @@ All of them, in one place, each with the proper way. Their numbers are referred 
 
 **Update:** now that starting a run needs an identity ([H5](#h5)), the single run slot is also a way for one authenticated caller to shut everyone else out: resubmit the instant each run ends, and no one else ever gets a turn. There's no cancel or evict endpoint to recover the slot from them either. A queue (above) would fix the starvation; a cancel endpoint would at least let an operator recover without a restart.
 
-**Update:** with the WES API public on Rahti (`wesRoute.enabled`), that caller no longer needs access to the Rahti project, only a token the WES accepts: one more reason to keep `oidcAllowedSubs` ([H22](#h22)) short.
+**Update:** with the WES API public on Rahti (`wesRoute.enabled`), that caller no longer needs access to the Rahti project, only a token the WES accepts: one more reason to keep `oidcAllowedSubs` ([H22](#h22)) short, or the group of `oidcRequiredEntitlements` small.
 
 ### H6
 

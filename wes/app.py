@@ -22,7 +22,9 @@ option C4). For a run of `NVFLARE`, it:
 Every shortcut in here is listed in `docs/testbed/shortcuts.md`. Authentication
 is mandatory, OIDC bearer tokens against one trusted issuer (H5); a caller
 only sees and acts on its own runs, and may also be checked against a static
-allow-list (H22). One run at a time, state in memory.
+allow-list (H22); starting a run may need an entitlement, such as an LS Login
+group, from the token or the issuer's userinfo (#70). One run at a time, state
+in memory.
 """
 
 import contextlib
@@ -276,6 +278,54 @@ OIDC_ALLOW_HTTP = bool(os.environ.get("WES_OIDC_ALLOW_HTTP", ""))
 ALLOWED_SUBS = {s.strip() for s in os.environ.get("WES_OIDC_ALLOWED_SUBS", "").split(",") if s.strip()}
 if not OIDC_ISSUER:
     logger.warning("No WES_OIDC_ISSUER is configured: every run and most endpoints will be refused")
+
+
+def parse_entitlements(value: str, claim: str) -> frozenset[str]:
+    """Read the entitlements that admit a caller to start runs, from `WES_OIDC_REQUIRED_ENTITLEMENTS`.
+
+    Args:
+        value: Entitlements, comma-separated, each matched exactly, such as
+            `urn:geant:lifescience-ri.eu:group:elixir:ECP_CLN:EOC-Compute#aai.lifescience-ri.eu`.
+            Spaces around entries are dropped. Empty: no entitlement is needed.
+        claim: The claim that carries them (`WES_OIDC_ENTITLEMENT_CLAIM`).
+
+    Returns:
+        The entitlements, any one of which admits a caller.
+
+    Raises:
+        ValueError: The setting is there but names no entitlement (such as `,`),
+            or the claim's name is empty while entitlements are required: a
+            typo must not silently leave the WES open.
+    """
+    entitlements = frozenset(e.strip() for e in value.split(",") if e.strip())
+    if value and not entitlements:
+        raise ValueError("WES_OIDC_REQUIRED_ENTITLEMENTS is set, but names no entitlement")
+    if entitlements and not claim:
+        raise ValueError("WES_OIDC_ENTITLEMENT_CLAIM is empty, but WES_OIDC_REQUIRED_ENTITLEMENTS needs it")
+    return entitlements
+
+
+# The claim that carries a caller's entitlements: in the access token, or else
+# at the issuer's userinfo endpoint, where LS Login releases it
+ENTITLEMENT_CLAIM = os.environ.get("WES_OIDC_ENTITLEMENT_CLAIM", "eduperson_entitlement").strip()
+# Starting a run needs one of these (#70). Empty: any caller allowed by
+# `ALLOWED_SUBS` may start runs, as before. Reading runs stays with their owner
+REQUIRED_ENTITLEMENTS = parse_entitlements(os.environ.get("WES_OIDC_REQUIRED_ENTITLEMENTS", ""), ENTITLEMENT_CLAIM)
+if REQUIRED_ENTITLEMENTS:
+    # How many, not which: the log names no entitlement
+    logger.info(
+        "Starting runs needs one of %d entitlements in the claim %r", len(REQUIRED_ENTITLEMENTS), ENTITLEMENT_CLAIM
+    )
+# How long a userinfo answer is kept, at most: never beyond its token's
+# expiry, and short enough that a member removed from the group at the issuer
+# can't start runs for long
+USERINFO_CACHE_SECONDS = 300
+# Answers kept at most, of different tokens
+USERINFO_CACHE_SIZE = 1024
+# Seconds to wait for the issuer's discovery document and userinfo endpoint
+OIDC_TIMEOUT = 10
+# Bytes of a userinfo answer, at most: entitlements of many groups fit
+USERINFO_MAX_BYTES = 1048576
 
 
 def start_responder() -> None:
@@ -1176,10 +1226,54 @@ def execute_fedavg(run_id: str, name: str, sites: list[str], rounds: int) -> Non
 
 
 _jwk_client: jwt.PyJWKClient | None = None
+_discovery: dict[str, Any] | None = None
+
+
+def oidc_discovery() -> dict[str, Any]:
+    """Get the discovery document of `OIDC_ISSUER`, fetching it once.
+
+    Only a good document is kept: a failed fetch is tried again on the next
+    request, rather than kept until the WES restarts.
+
+    Returns:
+        The document.
+
+    Raises:
+        ValueError: The issuer isn't reachable over https, and
+            `WES_OIDC_ALLOW_HTTP` isn't set; it answers otherwise than with
+            `200` (redirects included, which could lead to plain http); or the
+            document isn't a JSON object for this issuer with a `jwks_uri`
+            (OpenID Connect Discovery 1.0, 4.3).
+    """
+    global _discovery
+    if _discovery is None:
+        if not OIDC_ALLOW_HTTP:
+            tokens.check_url(OIDC_ISSUER, "WES_OIDC_ISSUER")
+        reply = requests.get(
+            f"{OIDC_ISSUER.rstrip('/')}/.well-known/openid-configuration", timeout=OIDC_TIMEOUT, allow_redirects=False
+        )
+        if reply.status_code != 200:
+            raise ValueError(f"The issuer's discovery document answered {reply.status_code}")
+        document = reply.json()
+        if not isinstance(document, dict):
+            raise ValueError("The issuer's discovery document isn't a JSON object")
+        # Trailing slashes aside: tokens' `iss` is checked against `OIDC_ISSUER` exactly anyway
+        issuer = document.get("issuer")
+        if not isinstance(issuer, str) or issuer.rstrip("/") != OIDC_ISSUER.rstrip("/"):
+            raise ValueError("The issuer's discovery document is for another issuer")
+        if not isinstance(document.get("jwks_uri"), str):
+            raise ValueError("The issuer's discovery document names no jwks_uri")
+        if not OIDC_ALLOW_HTTP:
+            tokens.check_url(document["jwks_uri"], "the issuer's jwks_uri")
+        if REQUIRED_ENTITLEMENTS:
+            # Checked here too, so that a document without it isn't kept
+            check_userinfo_endpoint(document.get("userinfo_endpoint"))
+        _discovery = document
+    return _discovery
 
 
 def jwk_client() -> jwt.PyJWKClient:
-    """Get this process's JWKS client for `OIDC_ISSUER`, fetching its discovery document once.
+    """Get this process's JWKS client for `OIDC_ISSUER`, from its discovery document.
 
     Returns:
         The client, caching the issuer's keys.
@@ -1192,10 +1286,7 @@ def jwk_client() -> jwt.PyJWKClient:
     """
     global _jwk_client
     if _jwk_client is None:
-        if not OIDC_ALLOW_HTTP:
-            tokens.check_url(OIDC_ISSUER, "WES_OIDC_ISSUER")
-        discovery = requests.get(f"{OIDC_ISSUER.rstrip('/')}/.well-known/openid-configuration", timeout=10).json()
-        jwks_uri = discovery["jwks_uri"]
+        jwks_uri = oidc_discovery()["jwks_uri"]
         if not OIDC_ALLOW_HTTP:
             tokens.check_url(jwks_uri, "the issuer's jwks_uri")
         _jwk_client = jwt.PyJWKClient(jwks_uri)
@@ -1349,6 +1440,197 @@ def identity(claims: dict[str, Any] = AUTH_DEPENDENCY) -> Identity:
 
 IDENTITY_DEPENDENCY = Depends(identity)
 
+# Entitlements from userinfo, by the SHA-256 of the token they were asked for,
+# with when the answer expires and when it was asked for. Never the token
+# itself, nor the whole answer
+_userinfo_cache: dict[str, tuple[float, frozenset[str], float]] = {}
+_userinfo_lock = threading.Lock()
+
+
+def entitlements_in(value: object) -> frozenset[str]:
+    """Read the entitlements of a claim's value.
+
+    Args:
+        value: The value: a string or a list of them, as `eduperson_entitlement`
+            comes; anything else counts as none.
+
+    Returns:
+        The entitlements; entries that aren't strings are left out.
+    """
+    if isinstance(value, str):
+        return frozenset({value})
+    if isinstance(value, list):
+        return frozenset(entry for entry in value if isinstance(entry, str))
+    return frozenset()
+
+
+def read_bounded(reply: requests.Response, deadline: float) -> bytes:
+    """Read the body of a streamed answer, at most `USERINFO_MAX_BYTES` and until a deadline.
+
+    Args:
+        reply: The answer, fetched with `stream=True`.
+        deadline: When to give up, by `time.monotonic()`; a read in progress
+            may still take up to its own timeout.
+
+    Returns:
+        The body.
+
+    Raises:
+        ValueError: The body is larger, or takes longer.
+    """
+    body = bytearray()
+    for chunk in reply.iter_content(chunk_size=65536):
+        body += chunk
+        if len(body) > USERINFO_MAX_BYTES:
+            raise ValueError("userinfo answered with too much")
+        if time.monotonic() > deadline:
+            raise ValueError("userinfo answered too slowly")
+    return bytes(body)
+
+
+def userinfo_endpoint() -> str:
+    """Get the userinfo endpoint of `OIDC_ISSUER`, from its discovery document.
+
+    Returns:
+        The endpoint's URL.
+
+    Raises:
+        ValueError: The issuer names none, or one that isn't https, and
+            `WES_OIDC_ALLOW_HTTP` isn't set: the caller's token goes there.
+    """
+    return check_userinfo_endpoint(oidc_discovery().get("userinfo_endpoint"))
+
+
+def check_userinfo_endpoint(endpoint: object) -> str:
+    """Check the userinfo endpoint a discovery document names.
+
+    Args:
+        endpoint: The document's `userinfo_endpoint`.
+
+    Returns:
+        The endpoint's URL.
+
+    Raises:
+        ValueError: It names none, or one that isn't https, and
+            `WES_OIDC_ALLOW_HTTP` isn't set: the caller's token goes there.
+    """
+    if not isinstance(endpoint, str) or not endpoint:
+        raise ValueError("The issuer names no userinfo endpoint")
+    if not OIDC_ALLOW_HTTP:
+        tokens.check_url(endpoint, "the issuer's userinfo_endpoint")
+    return endpoint
+
+
+def userinfo_entitlements(token: str, sub: str, expires: float) -> frozenset[str]:
+    """Ask the issuer's userinfo endpoint for a caller's entitlements, or take them from the cache.
+
+    Only for a token that has already been validated, and only at the issuer
+    that signed it. Answers are cached per token, until the token expires, and
+    `USERINFO_CACHE_SECONDS` at most; failures aren't cached.
+
+    Args:
+        token: The caller's access token.
+        sub: The token's subject, which the answer must be about.
+        expires: When the token expires (its `exp`), in seconds since the epoch.
+
+    Returns:
+        The entitlements in the answer's `ENTITLEMENT_CLAIM`, if any.
+
+    Raises:
+        HTTPException: 401 if the issuer can't be asked, refuses the token, or
+            answers otherwise than with a JSON object about `sub`: the caller's
+            entitlements can't be known, so it isn't allowed.
+    """
+    key = hashlib.sha256(token.encode()).hexdigest()
+    asked = time.time()
+    with _userinfo_lock:
+        cached = _userinfo_cache.get(key)
+        if cached is not None and cached[0] > asked:
+            return cached[1]
+    try:
+        reply = requests.get(
+            userinfo_endpoint(),
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            timeout=OIDC_TIMEOUT,
+            # The token goes to the endpoint the issuer names, and nowhere else
+            allow_redirects=False,
+            # Read below, bounded in size and time
+            stream=True,
+        )
+        try:
+            if reply.status_code != 200:
+                raise ValueError(f"userinfo answered {reply.status_code}")
+            info = json.loads(read_bounded(reply, time.monotonic() + OIDC_TIMEOUT))
+        finally:
+            reply.close()
+    except Exception as error:  # noqa: BLE001 - out of reach, refused, not JSON: never allowed
+        # Only what failed, never the token or the answer
+        logger.warning("Auth: couldn't ask userinfo about subject %r: %s", sub, type(error).__name__)  # nosemgrep
+        raise HTTPException(401, "Couldn't check this identity's entitlements at the issuer") from None
+    if not isinstance(info, dict) or info.get("sub") != sub:
+        # OpenID Connect Core 1.0, 5.3.2: the answer's `sub` must be the token's
+        logger.warning("Auth: userinfo about subject %r wasn't about that subject", sub)
+        raise HTTPException(401, "Couldn't check this identity's entitlements at the issuer")
+    entitlements = entitlements_in(info.get(ENTITLEMENT_CLAIM))
+    with _userinfo_lock:
+        now = time.time()
+        newer = _userinfo_cache.get(key)
+        if newer is not None and newer[2] > asked and newer[0] > now:
+            # Asked later, by a request for the same token that came back
+            # first: its answer is the newer one, such as a membership revoked
+            return newer[1]
+        for stale in [k for k, (until, _, _) in _userinfo_cache.items() if until <= now]:
+            del _userinfo_cache[stale]
+        while len(_userinfo_cache) >= USERINFO_CACHE_SIZE:
+            # Dicts keep their order: the oldest answer goes first
+            del _userinfo_cache[next(iter(_userinfo_cache))]
+        _userinfo_cache[key] = (min(expires, now + USERINFO_CACHE_SECONDS), entitlements, asked)
+    return entitlements
+
+
+def entitled(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
+    claims: dict[str, Any] = AUTH_DEPENDENCY,
+    caller: Identity = IDENTITY_DEPENDENCY,
+) -> Identity:
+    """The identity of a caller that may start runs: allowed (H22), and with a required entitlement (#70).
+
+    The entitlement comes from the token's `ENTITLEMENT_CLAIM` if it has that
+    claim at all; only if it hasn't, from the issuer's userinfo endpoint.
+
+    Args:
+        credentials: The `Authorization` header, already validated by `authenticated`.
+        claims: The caller's validated claims.
+        caller: The caller's identity, already checked against `ALLOWED_SUBS`.
+
+    Returns:
+        The caller's identity.
+
+    Raises:
+        HTTPException: 403 if `REQUIRED_ENTITLEMENTS` is set and the caller has
+            none of them; 401 if the token is missing, or userinfo can't tell.
+    """
+    if not REQUIRED_ENTITLEMENTS:
+        return caller
+    if ENTITLEMENT_CLAIM in claims:
+        entitlements = entitlements_in(claims[ENTITLEMENT_CLAIM])
+    else:
+        if credentials is None:  # `authenticated` refuses that first
+            raise HTTPException(401, "Bearer token required")
+        entitlements = userinfo_entitlements(credentials.credentials, caller.sub, float(claims["exp"]))
+    if entitlements.isdisjoint(REQUIRED_ENTITLEMENTS):
+        # The subject only: never the token or its entitlements
+        logger.warning("Auth: subject %r has no entitlement that allows starting runs", caller.sub)
+        raise HTTPException(
+            403,
+            f"Starting runs on this WES needs membership in a group it admits (claim {ENTITLEMENT_CLAIM!r});"
+            " this identity has none",
+        )
+    return caller
+
+
+ENTITLED_DEPENDENCY = Depends(entitled)
+
 
 @app.get("/ga4gh/wes/v1/service-info")
 def service_info() -> dict[str, Any]:
@@ -1422,9 +1704,9 @@ def run_workflow(
     workflow_url: Annotated[str, Form(max_length=256)],
     workflow_params: Annotated[str, Form(max_length=8192)] = "{}",
     tags: Annotated[str, Form(max_length=8192)] = "{}",
-    caller: Identity = IDENTITY_DEPENDENCY,
+    caller: Identity = ENTITLED_DEPENDENCY,
 ) -> dict[str, str]:
-    """Start a run.
+    """Start a run, if the caller may (`entitled`).
 
     Args:
         workflow_type: `NVFLARE`, or `FEDAVG` (`wes/fedavg.py`).

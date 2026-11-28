@@ -53,6 +53,18 @@ oidcAlgorithms: RS256
 # real access control (H22). Empty: any subject the issuer vouches for
 oidcAllowedSubs: ""
 
+# Entitlements, one of which a caller needs to start runs, comma-separated,
+# each matched exactly, such as LS Login's group
+# `urn:geant:lifescience-ri.eu:group:elixir:ECP_CLN:EOC-Compute#aai.lifescience-ri.eu`.
+# The WES looks for them in the token's `oidcEntitlementClaim`, or, if the
+# token has no such claim, at the issuer's userinfo endpoint (LS Login
+# releases them only there). Reading runs stays with their owner. With
+# `oidcAllowedSubs` too, both must hold. Empty: no entitlement needed
+oidcRequiredEntitlements: ""
+
+# The claim that carries the entitlements, with `oidcRequiredEntitlements`
+oidcEntitlementClaim: eduperson_entitlement
+
 # The Secret with the sites file under the key `sites.json` (see
 # `compose/sites.example.json`). Not part of the chart: create it with `oc
 # create secret`, and never commit it
@@ -75,8 +87,9 @@ envSecret: ""
 # every caller's token itself (`oidcIssuer`); nothing else of it is routed
 wesRoute:
   enabled: false
-  # With an empty `oidcAllowedSubs`, anyone the issuer vouches for could start
-  # runs at the sites (H22): the chart refuses that, unless this says so
+  # With empty `oidcAllowedSubs` and `oidcRequiredEntitlements`, anyone the
+  # issuer vouches for could start runs at the sites (H22): the chart refuses
+  # that, unless this says so
   allowAnySubject: false
 
 # Origins whose pages may call the WES API from a browser (CORS), such as

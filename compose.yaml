@@ -58,6 +58,9 @@ services:
       WES_OIDC_TOKEN_URL: http://fake-idp:8080/oidc/token
       # Pages of this origin may call the WES API, for `auth-e2e-check`
       WES_CORS_ALLOWED_ORIGINS: https://portal.testbed.invalid
+      # Starting runs needs this entitlement, which the fake identity provider
+      # releases at userinfo, to every subject but `outsider*` (#70)
+      WES_OIDC_REQUIRED_ENTITLEMENTS: urn:geant:testbed.invalid:group:fl-users#testbed.invalid
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://localhost:8080/ga4gh/wes/v1/service-info')"]
       interval: 3s
@@ -202,6 +205,14 @@ services:
     image: nvflare-testbed:local
     profiles: [test]
     command: ["python3", "/app/tests/cors_check.py"]
+    network_mode: none
+
+  # Who may start runs: the entitlement, from the token or userinfo (#70). No
+  # network needed, the keys and userinfo are faked
+  entitlement-check:
+    image: nvflare-testbed:local
+    profiles: [test]
+    command: ["python3", "/app/tests/entitlement_check.py"]
     network_mode: none
 
   # The same gate, over real HTTP, through the fake identity provider (H5)

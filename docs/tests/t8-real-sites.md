@@ -21,7 +21,7 @@ These are what we hope for. Anything else is a result.
 
 1. Deploy the hub, following [Real sites](../setup/real-sites.md#deploying-the-hub).
 2. Run the probe task at each node.
-3. Get a bearer token from the trusted OIDC issuer (`WES_OIDC_ISSUER`), for a subject the hub allows ([H22](../testbed/shortcuts.md#h22) if `WES_OIDC_ALLOWED_SUBS` is set): every request below needs one, mandatory, with no local-only bypass ([H5](../testbed/shortcuts.md#h5)).
+3. Get a bearer token from the trusted OIDC issuer (`WES_OIDC_ISSUER`), for a subject the hub allows ([H22](../testbed/shortcuts.md#h22) if `WES_OIDC_ALLOWED_SUBS` is set) and, if `WES_OIDC_REQUIRED_ENTITLEMENTS` is set, one with the entitlement to start runs, in the token or at the issuer's userinfo (see [The WES API in public](../setup/real-sites.md#the-wes-api-in-public)): every request below needs one, mandatory, with no local-only bypass ([H5](../testbed/shortcuts.md#h5)).
 4. Start a run with one site, then with two, then with all sites that passed the probe:
 
     ```sh
