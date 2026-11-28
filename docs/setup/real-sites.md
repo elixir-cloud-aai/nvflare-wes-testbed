@@ -483,6 +483,34 @@ On Rahti, for a hub that sends its tasks through proTES with a token file (the t
 helm upgrade hub charts/nvflare-wes-hub --reset-then-reuse-values --set tokenSecret=<secret> --set tesGateway.url=https://<protes> --set tesGateway.tokenFile=gateway
 ```
 
+### Running a job from the GA4GH SDK CLI
+
+The way a user takes ([#73](https://github.com/elixir-cloud-aai/nvflare-wes-testbed/issues/73)): a WES client, the [GA4GH SDK](https://github.com/ga4gh/ga4gh-sdk)'s CLI `ga4gh-cli`, with the user's own access token, against the hub's [public WES API](#the-wes-api-in-public). `scripts/sdk_run.py` does it in one go, with Python 3.12 or later and a clone of this repository:
+
+```sh
+python3 scripts/sdk_run.py --wes https://<kits name>/ga4gh/wes/v1 \
+    --gateway https://<protes>/ga4gh/tes/v1 --sites site-1,site-2 \
+    --nodes "<Node of site 1> (site 1) and <Node of site 2> (site 2)"
+```
+
+It asks for the access token without showing it (`--token-stdin` reads it from standard input instead), and refuses one with less than 5 minutes left. With LS Login, the token must be for the client that the hub takes as its audience (`oidcAudience`), such as a portal's, and its owner needs the entitlement of `oidcRequiredEntitlements`. Then it:
+
+1. downloads `ga4gh-cli` 0.1.0 for this machine (Linux or macOS, x86-64 or ARM) from the SDK's release, and runs it only if its SHA-256 matches the one in the script; `--cli <path>` uses another;
+2. gives the CLI a configuration of its own, in a temporary folder that is removed at the end (`~/.ga4gh-cli` isn't touched), which names the variable with the token, so the token is in the CLI's environment only, never in its arguments, files or the output;
+3. checks the WES's service info (`ga4gh-cli service-info`): `NVFLARE`, and the sites;
+4. submits `logreg-fedavg` (`--job`) with `workflow_type` `NVFLARE`, version 2.9, and `workflow_params` `{"sites": [...]}` (`ga4gh-cli wes run`), and follows the run's state (`ga4gh-cli wes status`) until it is final, or for 20 minutes (`--timeout`);
+5. reads the run log (`ga4gh-cli wes get`) for the state of each site's task; with `--gateway`, asks proTES with the same token (`ga4gh-cli tes get`) where each task ran (`gateway.backend`), and whether that is the TES it was pinned to (`gateway.backends`);
+6. downloads the global model from the hub's `/outputs` and computes its holdout accuracy with `testset/evaluate.py` (with NumPy, or with `uv` if there's no NumPy), expecting `--expect` (0.975 by default, for two or three sites; 1.000 for four);
+7. prints the run ID, its state, the tasks and the accuracy, and writes a row for [Results](../outcomes/results.md) to `sdk-run-<run>.md` (`--out`): without the token, and without any host name or URL, or it isn't written.
+
+It ends with 0 if the run ended `COMPLETE` and every check passed, otherwise with 1, after `STOP:` and what to do for a problem before the run's end: `401` for a token the WES doesn't take (expired, or for another audience), `403` for an owner without the entitlement, `409` while another run is active. A run that doesn't end in time can be followed again with `--run-id <run>`, which submits nothing.
+
+**On Rahti,** only `/ga4gh/wes/v1` is routed (see [The WES API in public](#the-wes-api-in-public)), so the model can't be downloaded from outside: the script says so and fails. Fetch it through a port forward to the WES's Service, `oc port-forward service/<release>-nvflare-wes-hub-wes 8080:8080`, and run the script again with `--run-id <run> --outputs-url http://localhost:8080`. Plain HTTP goes only to this host, as the token goes along (`--allow-http` lifts that, for tests only).
+
+**Through proTES,** the hub sends every user's tasks with the one token it holds ([H25](../testbed/shortcuts.md#h25)), so that token must still be valid when the run starts: with a token file, renew it right before the run. proTES then shows the tasks only to the owner of that token: for anyone else, the script prints that the gateway didn't show the task, and the row says where the tasks ran is unknown.
+
+`tests/hub.sh` runs the script against its hub, with the real CLI, which it downloads: as a member of the fake identity provider's group, whose run must end `COMPLETE` with the accuracy of T1 and a row without the token or the hub's name, and as a caller without the entitlement, who must be refused with `403`. Its unit tests, with a fake CLI and a fake hub, also cover the checks through a gateway: `python3 tests/sdk_run_test.py`.
+
 ### Checking the hub from outside
 
 `tests/outside_check.py` checks a deployed hub as a node, or anyone on the internet, sees it. Run it from a machine outside the hub's network that isn't in `WES_ALLOWED_IPS`, with Python 3.12 or later and a clone of this repository; it needs nothing beyond the standard library. It takes the hub's name, as in the kits, and the host that serves `/kits` and `/sites`: with Compose, both are `FL_SERVER_NAME`.
