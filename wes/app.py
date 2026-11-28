@@ -472,8 +472,10 @@ def package_version(distribution: str = DISTRIBUTION) -> str:
 
 
 # What a setting of the service info must look like, as the chart's schema
-# has it: an id in reverse-domain style, a word for the environment, and https
-# (or, for the contact, mailto) URLs. Other settings take any text
+# has it: for the id, letters, digits, `.`, `_` and `-`, starting and ending
+# with a letter or digit (characters only, not a check of reverse-domain
+# notation); a word for the environment; https (or, for the contact, mailto)
+# URLs. Other settings take any text
 SERVICE_ID_FORMAT = re.compile(r"[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?")
 SERVICE_ENVIRONMENT_FORMAT = re.compile(r"[A-Za-z0-9._-]+")
 HTTPS_URL = re.compile(r"https://\S+")
@@ -501,11 +503,6 @@ def service_setting(name: str, default: str, form: re.Pattern[str] | None = None
     return value
 
 
-# What the service info says about this deployment (#71), for registries such
-# as the Cloud Registry, which import it and keep syncing it. `id` should stay
-# the same for a deployment, and differ from other deployments'
-
-
 def default_service_id(server_name: str | None) -> str:
     """The service info's id of a deployment that doesn't set one: its public name in reverse.
 
@@ -516,15 +513,21 @@ def default_service_id(server_name: str | None) -> str:
         server_name: `FL_SERVER_NAME`, the hub's public name, if set.
 
     Returns:
-        The name in reverse, if it is a domain name (with a dot), or else an
-        id under the org's domain, as for local runs.
+        The name in reverse, if it is a domain name (with a dot) that gives
+        a valid id, or else an id under the org's domain, as for local runs
+        or a name with a port.
     """
     name = (server_name or "").strip().rstrip(".")
-    if "." not in name:
+    derived = ".".join(reversed(name.split(".")))
+    if "." not in name or not SERVICE_ID_FORMAT.fullmatch(derived):
+        # Never a reason not to start: only a WES_SERVICE_ID set by hand is
         return "cloud.elixir-on.nvflare-wes-testbed"
-    return ".".join(reversed(name.split(".")))
+    return derived
 
 
+# What the service info says about this deployment (#71), for registries such
+# as the Cloud Registry, which import it and keep syncing it. `id` should stay
+# the same for a deployment, and differ from other deployments'
 SERVICE_ID = service_setting("WES_SERVICE_ID", default_service_id(os.environ.get("FL_SERVER_NAME")), SERVICE_ID_FORMAT)
 SERVICE_NAME = service_setting("WES_SERVICE_NAME", "Thin WES for NVFlare (sandbox)")
 SERVICE_DESCRIPTION = service_setting(

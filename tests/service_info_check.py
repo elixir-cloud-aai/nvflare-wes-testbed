@@ -149,6 +149,10 @@ def main() -> None:
     )
     named = service_info({"FL_SERVER_NAME": "flare-wes.example.org"})
     checks["the id from the hub's public name in reverse, if it has one"] = named["id"] == "org.example.flare-wes"
+    dotted = service_info({"FL_SERVER_NAME": "flare-wes.example.org."})
+    checks["the id without the trailing dot of a name"] = dotted["id"] == "org.example.flare-wes"
+    ported = service_info({"FL_SERVER_NAME": "flare-wes.example.org:8443"})
+    checks["the org's id, and no refusal, for a name that gives no valid id"] = ported["id"] == defaults["id"]
     single = service_info({"FL_SERVER_NAME": "fl-hub"})
     checks["the org's id for a name without a domain"] = single["id"] == defaults["id"]
     both = service_info({"FL_SERVER_NAME": "flare-wes.example.org", "WES_SERVICE_ID": "org.example.wes"})
