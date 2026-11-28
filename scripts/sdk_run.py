@@ -40,6 +40,7 @@ import json
 import os
 import pathlib
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -63,6 +64,10 @@ CLI_SHA256 = {
         "9c5892e89b302b1d95522d568672288ad466c9779b3c6aeea8118750fb7f625d",
     ),
     ("Linux", "aarch64"): (
+        "aarch64-unknown-linux-gnu",
+        "b26eca0e14806330731902484696d7e9d1df01bdefd366ef5b6765c2aa7620bb",
+    ),
+    ("Linux", "arm64"): (
         "aarch64-unknown-linux-gnu",
         "b26eca0e14806330731902484696d7e9d1df01bdefd366ef5b6765c2aa7620bb",
     ),
@@ -117,7 +122,11 @@ class Outcome:
         job_status: NVFlare's job status, from the run's outputs.
         tasks: The tasks of the sites.
         accuracy: The evaluation's line of accuracies, if any.
-        failures: Checks that failed.
+        failures: Checks that failed, as they go into the results row.
+        hints: What to do about them, printed but kept out of the row.
+        picked_up: Whether the run was submitted earlier (`--run-id`), so
+            that the states seen aren't its timeline.
+        wes_times: Start and end of the run, from the WES's run log.
     """
 
     run_id: str
@@ -128,6 +137,12 @@ class Outcome:
     tasks: list[SiteTask] = field(default_factory=list)
     accuracy: str = ""
     failures: list[str] = field(default_factory=list)
+    hints: list[str] = field(default_factory=list)
+    picked_up: bool = False
+    wes_times: tuple[str, str] = ("", "")
+
+
+STATUS_TRIES = 4
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -360,6 +375,7 @@ class Cli:
             token: The access token.
         """
         self.executable = executable
+        self.token = token
         drop = ("GA4GH_CLI_PROFILE", "RUST_LOG")
         self.env = {key: value for key, value in os.environ.items() if key not in drop}
         self.env.update({"HOME": str(home), TOKEN_ENV: token})
@@ -388,8 +404,43 @@ class Cli:
         except subprocess.TimeoutExpired:
             raise Stop(f"ga4gh-cli {' '.join(args[:2])} took over {CLI_TIMEOUT} s") from None
         if done.returncode != 0:
-            raise Stop(f"ga4gh-cli {' '.join(args[:2])} failed: {done.stderr.strip() or done.returncode}")
+            error = scrub(done.stderr.strip(), self.token) or done.returncode
+            raise Stop(f"ga4gh-cli {' '.join(args[:2])} failed: {error}")
         return done.stdout.strip()
+
+    def json(self, *args: str) -> dict[str, Any]:
+        """Run a command of the CLI that prints a JSON object.
+
+        Args:
+            *args: Its arguments.
+
+        Returns:
+            The object.
+
+        Raises:
+            Stop: It failed, or printed something else.
+        """
+        out = self(*args)
+        try:
+            value = json.loads(out)
+        except ValueError:
+            value = None
+        if not isinstance(value, dict):
+            raise Stop(f"ga4gh-cli {' '.join(args[:2])} printed no JSON object: {scrub(out[:200], self.token)}")
+        return value
+
+
+def scrub(text: str, token: str) -> str:
+    """Hide the token in a text, should a server or the CLI echo it.
+
+    Args:
+        text: The text.
+        token: The token.
+
+    Returns:
+        The text, with `***` for the token.
+    """
+    return text.replace(token, "***") if token else text
 
 
 def explain_refusal(message: str) -> str:
@@ -401,14 +452,14 @@ def explain_refusal(message: str) -> str:
     Returns:
         The error, with a hint for 401, 403 and 409.
     """
+    status = re.search(r"\bstatus:? (\d{3})\b", message)
     hints = {
         "401": "the WES didn't take the token: expired, or not for the WES's audience (take it from the portal)",
         "403": "the token is fine, but its owner may not start runs: not in the group the WES requires",
         "409": "another run is active at the hub: wait for it to end",
     }
-    for status, hint in hints.items():
-        if status in message:
-            return f"{message}\n  -> {hint}"
+    if status and status.group(1) in hints:
+        return f"{message}\n  -> {hints[status.group(1)]}"
     return message
 
 
@@ -427,7 +478,7 @@ def submit(cli: Cli, job: str, sites: list[str]) -> str:
         Stop: The WES refused it.
     """
     try:
-        out = cli(
+        answer = cli.json(
             "wes",
             "run",
             job,
@@ -444,9 +495,9 @@ def submit(cli: Cli, job: str, sites: list[str]) -> str:
         )
     except Stop as error:
         raise Stop(explain_refusal(str(error))) from None
-    run_id = json.loads(out).get("run_id", "")
+    run_id = answer.get("run_id", "")
     if not run_id:
-        raise Stop(f"no run ID in the WES's answer: {out}")
+        raise Stop(f"no run ID in the WES's answer: {answer}")
     return str(run_id)
 
 
@@ -456,7 +507,7 @@ def follow(
     timeout: float,
     interval: float,
     clock: Callable[[], float] = time.monotonic,
-    sleep: Callable[[float], None] = time.sleep,
+    sleep: Callable[[float], None] | None = None,
 ) -> None:
     """Poll the run's state until it is final, or the time is up.
 
@@ -466,11 +517,22 @@ def follow(
         timeout: Seconds to wait.
         interval: Seconds between requests.
         clock: Monotonic clock.
-        sleep: Waits for some seconds.
+        sleep: Waits for some seconds; `time.sleep` if `None`.
     """
+    sleep = sleep or time.sleep
     start = clock()
     while True:
-        state = cli("wes", "status", outcome.run_id)
+        state = ""
+        for attempt in range(STATUS_TRIES):
+            try:
+                state = cli("wes", "status", outcome.run_id)
+                break
+            except Stop as error:
+                if attempt == STATUS_TRIES - 1:
+                    outcome.failures.append(f"the run's state couldn't be read ({explain_refusal(str(error))})")
+                    outcome.hints.append(f"follow the run again later with --run-id {outcome.run_id}")
+                    return
+                sleep(5 * 2**attempt)
         outcome.seconds = clock() - start
         if state not in outcome.seen:
             outcome.seen[state] = time.strftime("%H:%M:%S", time.gmtime())
@@ -479,7 +541,8 @@ def follow(
         if state in TERMINAL:
             return
         if clock() - start >= timeout:
-            outcome.failures.append(f"no final state after {timeout:.0f} s (last {state}); follow it with --run-id")
+            outcome.failures.append(f"no final state after {timeout:.0f} s (last {state})")
+            outcome.hints.append(f"follow the run again later with --run-id {outcome.run_id}")
             return
         sleep(interval)
 
@@ -512,20 +575,20 @@ def check_pinning(cli: Cli, task: SiteTask) -> None:
         task: The task, whose gateway fields this fills in.
     """
     try:
-        record = json.loads(cli("tes", "get", task.task_id, "BASIC"))
+        record = cli.json("tes", "get", task.task_id, "BASIC")
     except Stop as error:
         task.note = f"the gateway didn't show the task ({error}); it's visible to its submitter at the gateway only"
-        return
-    except ValueError:
-        task.note = "the gateway's answer isn't JSON"
         return
     tags = record.get("tags") or {}
     task.gateway_state = str(record.get("state", ""))
     task.backend = str(tags.get("gateway.backend", ""))
     try:
-        allowed = json.loads(tags.get("gateway.backends", "")).get("backends", [])
-    except (ValueError, AttributeError):
-        task.note = "the task has no gateway.backends tag to check against"
+        pin = json.loads(tags.get("gateway.backends", ""))
+    except (ValueError, TypeError):
+        pin = None
+    allowed = pin.get("backends") if isinstance(pin, dict) and pin.get("type") == "allow" else None
+    if not isinstance(allowed, list):
+        task.note = "the task has no gateway.backends tag that allows a list of TES to check against"
         return
     task.pinned = bool(task.backend) and task.backend in allowed
 
@@ -548,7 +611,10 @@ def evaluate_command() -> list[str] | None:
 
 
 class NoRedirects(urllib.request.HTTPRedirectHandler):
-    """Refuses redirects, so that the token goes nowhere else."""
+    """Refuses redirects, so that the token goes nowhere else.
+
+    As in `tests/outside_check.py`, on purpose a copy: the script needs no other file.
+    """
 
     def redirect_request(self, *args: Any, **kwargs: Any) -> None:
         """Refuse to follow.
@@ -575,7 +641,11 @@ def fetch_model(outputs_url: str, run_id: str, token: str, path: pathlib.Path) -
         f"{outputs_url.rstrip('/')}/outputs/{urllib.parse.quote(run_id, safe='')}/global_model.npy",
         headers={"Authorization": f"Bearer {token}"},
     )
-    opener = urllib.request.build_opener(NoRedirects)
+    handlers: list[Any] = [NoRedirects]
+    if is_loopback(urllib.parse.urlsplit(outputs_url).hostname or ""):
+        # Straight to a port forward, never through a proxy from the environment
+        handlers.append(urllib.request.ProxyHandler({}))
+    opener = urllib.request.build_opener(*handlers)
     try:
         with opener.open(request, timeout=60) as reply:
             path.write_bytes(reply.read())
@@ -635,13 +705,15 @@ def results_row(outcome: Outcome, nodes: str, gateway_checked: bool, today: str 
     Returns:
         The row, as one line of Markdown.
     """
-    states = ", ".join(f"`{state}` {seen}" for state, seen in outcome.seen.items())
-    sentences = [
-        (
-            f"Run `{outcome.run_id[:8]}`, submitted with the GA4GH SDK CLI {CLI_VERSION} and the submitter's own"
-            f" access token: {states} UTC, about {outcome.seconds:.0f} s"
-        )
-    ]
+    start, end = outcome.wes_times
+    run = f"Run `{outcome.run_id[:8]}`, submitted with the GA4GH SDK CLI {CLI_VERSION} and the submitter's own access token"
+    if outcome.picked_up:
+        # The states were seen later, not as they happened: the WES's own times only
+        times = f"started {start or '?'}, ended {end or '?'} by the WES's run log"
+        sentences = [f"{run}: `{outcome.state}`, {times}"]
+    else:
+        states = ", ".join(f"`{state}` {seen}" for state, seen in outcome.seen.items())
+        sentences = [f"{run}: {states} UTC, about {outcome.seconds:.0f} s"]
     if outcome.job_status:
         sentences.append(f"NVFlare job `{outcome.job_status}`")
     tasks = []
@@ -702,6 +774,8 @@ def summarize(outcome: Outcome) -> None:
     print(f"holdout accuracy: {outcome.accuracy or '-'}")
     for failure in outcome.failures:
         print(f"[FAIL] {failure}")
+    for hint in outcome.hints:
+        print(f"  -> {hint}")
 
 
 def run(args: argparse.Namespace, token: str, cli_path: pathlib.Path | None, work: pathlib.Path) -> Outcome:
@@ -725,7 +799,7 @@ def run(args: argparse.Namespace, token: str, cli_path: pathlib.Path | None, wor
     cli = Cli(executable, home, token)
     print(f"[ok] {cli('--version')}")
 
-    info = json.loads(cli("service-info", "--service", "WES"))
+    info = cli.json("service-info", "--service", "WES")
     if "NVFLARE" not in (info.get("workflow_type_versions") or {}):
         raise Stop(f"the WES doesn't offer NVFLARE: {info.get('workflow_type_versions')}")
     offered = [site for site in str((info.get("tags") or {}).get("sites", "")).split(",") if site]
@@ -734,19 +808,24 @@ def run(args: argparse.Namespace, token: str, cli_path: pathlib.Path | None, wor
     print(f"[ok] the WES answers, offers NVFLARE and the sites {args.sites}")
 
     if args.run_id:
-        outcome = Outcome(run_id=args.run_id)
+        outcome = Outcome(run_id=args.run_id, picked_up=True)
         print(f"following run {outcome.run_id}")
     else:
         outcome = Outcome(run_id=submit(cli, args.job, args.sites))
         print(f"run {outcome.run_id} submitted")
     follow(cli, outcome, args.timeout, args.interval)
+    if outcome.state not in TERMINAL:
+        # Still running, or its state unknown: nothing to check yet
+        return outcome
 
-    log = json.loads(cli("wes", "get", outcome.run_id))
+    log = cli.json("wes", "get", outcome.run_id)
+    run_log = log.get("run_log") or {}
+    outcome.wes_times = (str(run_log.get("start_time") or ""), str(run_log.get("end_time") or ""))
     outcome.job_status = str((log.get("outputs") or {}).get("flare_job_status") or "")
     outcome.tasks = site_tasks(log)
     if outcome.state != "COMPLETE":
         outcome.failures.append(f"the run ended {outcome.state}")
-        errors = (log.get("run_log") or {}).get("system_logs") or []
+        errors = run_log.get("system_logs") or []
         if errors:
             print(f"the run's error: {errors[-1]}")
     if sorted(task.site for task in outcome.tasks) != sorted(args.sites):
@@ -763,9 +842,10 @@ def run(args: argparse.Namespace, token: str, cli_path: pathlib.Path | None, wor
         model = work / "global_model.npy"
         problem = fetch_model(args.outputs_url or outputs_base(args.wes), outcome.run_id, token, model)
         if problem:
-            outcome.failures.append(
-                f"the global model couldn't be fetched ({problem}): forward the hub's port (8080) and run again"
-                f" with --run-id {outcome.run_id} --outputs-url http://localhost:8080"
+            outcome.failures.append(f"the global model couldn't be fetched ({problem})")
+            outcome.hints.append(
+                f"forward the hub's port (8080) and run again with --run-id {outcome.run_id}"
+                " --outputs-url http://localhost:8080"
             )
         else:
             passed, output = evaluate(model, args.data, args.expect)
@@ -786,6 +866,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         The exit status.
     """
     args = parse_args(argv)
+    token = ""
     try:
         token = read_token(args.token_stdin)
         left = token_seconds_left(token)
@@ -803,7 +884,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         out.write_text(row + "\n")
         print(f"\nresults row for docs/outcomes/results.md (also in {out}):\n{row}")
     except Stop as error:
-        print(f"STOP: {error}", file=sys.stderr)
+        print(f"STOP: {scrub(str(error), token)}", file=sys.stderr)
         return 1
     if outcome.failures:
         return 1
