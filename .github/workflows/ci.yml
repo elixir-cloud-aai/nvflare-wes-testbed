@@ -98,6 +98,8 @@ jobs:
         run: python3 tests/probe_responder_test.py
       - name: Unit-test the plain FedAvg workflow (T10)
         run: python3 tests/fedavg_test.py
+      - name: Unit-test the script for a run from the GA4GH SDK CLI
+        run: python3 tests/sdk_run_test.py
       - name: Check that the image holds no site data or secrets
         run: tests/image-contents.sh
       - name: Build images
