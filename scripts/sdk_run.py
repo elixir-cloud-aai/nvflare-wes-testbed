@@ -143,6 +143,9 @@ class Outcome:
 
 
 STATUS_TRIES = 4
+# Larger answers are refused rather than read into memory
+MAX_CLI_BYTES = 256 * 1024 * 1024
+MAX_MODEL_BYTES = 16 * 1024 * 1024
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -166,7 +169,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--sites", default="site-1,site-2", help="Sites of the run, comma-separated (default: %(default)s)"
     )
-    parser.add_argument("--job", default="logreg-fedavg", help="Job in the hub's image (default: %(default)s)")
+    parser.add_argument(
+        "--job",
+        default="",
+        help="Job in the hub's image (default: logreg-fedavg for two sites, logreg-fedavg-<n> for n)",
+    )
     parser.add_argument(
         "--run-id",
         default="",
@@ -207,6 +214,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     args.sites = [site.strip() for site in args.sites.split(",") if site.strip()]
     if not args.sites:
         parser.error("--sites names no site")
+    if not args.job:
+        args.job = "logreg-fedavg" if len(args.sites) == 2 else f"logreg-fedavg-{len(args.sites)}"
     for name in ("wes", "gateway", "outputs_url"):
         value = getattr(args, name)
         if value:
@@ -314,6 +323,26 @@ def cli_asset() -> tuple[str, str]:
     return f"ga4gh-cli-{CLI_VERSION}-{target}.tar.gz", digest
 
 
+def save_bounded(reply: Any, path: pathlib.Path, limit: int) -> None:
+    """Save a response in chunks, up to a size.
+
+    Args:
+        reply: The response, with `read(size)`.
+        path: Where to save it.
+        limit: The most bytes to take.
+
+    Raises:
+        Stop: The response is larger.
+    """
+    size = 0
+    with path.open("wb") as file:
+        while chunk := reply.read(1024 * 1024):
+            size += len(chunk)
+            if size > limit:
+                raise Stop(f"the answer is larger than {limit // (1024 * 1024)} MiB: not taking it")
+            file.write(chunk)
+
+
 def download_cli(folder: pathlib.Path) -> pathlib.Path:
     """Download the CLI's release for this machine, and check its checksum.
 
@@ -330,7 +359,7 @@ def download_cli(folder: pathlib.Path) -> pathlib.Path:
     archive = folder / asset
     try:
         with urllib.request.urlopen(f"{CLI_RELEASE}/{asset}", timeout=120) as reply:  # a fixed HTTPS URL
-            archive.write_bytes(reply.read())
+            save_bounded(reply, archive, MAX_CLI_BYTES)
     except (urllib.error.URLError, OSError) as error:
         raise Stop(f"download of {asset} failed: {error}") from None
     if hashlib.sha256(archive.read_bytes()).hexdigest() != digest:
@@ -393,7 +422,9 @@ class Cli:
             Stop: It failed; with what it printed on standard error.
         """
         try:
-            done = subprocess.run(  # no shell; the CLI is checked or given
+            # An argument list, no shell; the CLI is checked against its checksum, or given by the user
+            # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit
+            done = subprocess.run(
                 [str(self.executable), *args],
                 env=self.env,
                 capture_output=True,
@@ -403,6 +434,8 @@ class Cli:
             )
         except subprocess.TimeoutExpired:
             raise Stop(f"ga4gh-cli {' '.join(args[:2])} took over {CLI_TIMEOUT} s") from None
+        except OSError as error:
+            raise Stop(f"ga4gh-cli can't be run ({error.strerror}): check --cli") from None
         if done.returncode != 0:
             error = scrub(done.stderr.strip(), self.token) or done.returncode
             raise Stop(f"ga4gh-cli {' '.join(args[:2])} failed: {error}")
@@ -494,19 +527,39 @@ def submit(cli: Cli, job: str, sites: list[str]) -> str:
             "json",
         )
     except Stop as error:
-        raise Stop(explain_refusal(str(error))) from None
+        message = explain_refusal(str(error))
+        if not re.search(r"\bstatus:? 4\d\d\b", message):
+            # Not refused: the WES may have taken it, and the answer got lost
+            message += "\n  -> the WES may have started the run anyway; your runs there:\n" + list_runs(cli)
+        raise Stop(message) from None
     run_id = answer.get("run_id", "")
     if not run_id:
         raise Stop(f"no run ID in the WES's answer: {answer}")
     return str(run_id)
 
 
-def retried(call: Callable[[], Any], sleep: Callable[[float], None]) -> Any:
+def list_runs(cli: Cli) -> str:
+    """List the caller's runs at the WES, for picking one up with `--run-id`.
+
+    Args:
+        cli: The CLI.
+
+    Returns:
+        The list, or why there is none.
+    """
+    try:
+        return cli("wes", "list")
+    except Stop as error:
+        return f"(couldn't list them: {error})"
+
+
+def retried(call: Callable[[], Any], sleep: Callable[[float], None], left: Callable[[], float] | None = None) -> Any:
     """Call something that may fail for a moment, a few times, with growing pauses.
 
     Args:
         call: What to call.
         sleep: Waits for some seconds.
+        left: Seconds left for trying; no limit if `None`.
 
     Returns:
         What it returned.
@@ -518,7 +571,10 @@ def retried(call: Callable[[], Any], sleep: Callable[[float], None]) -> Any:
         try:
             return call()
         except Stop:
-            sleep(5 * 2**attempt)
+            pause = 5 * 2**attempt
+            if left is not None and left() < pause:
+                raise
+            sleep(pause)
     return call()
 
 
@@ -544,7 +600,7 @@ def follow(
     start = clock()
     while True:
         try:
-            state = retried(lambda: cli("wes", "status", outcome.run_id), sleep)
+            state = retried(lambda: cli("wes", "status", outcome.run_id), sleep, lambda: timeout - (clock() - start))
         except Stop as error:
             outcome.failures.append(f"the run's state couldn't be read ({explain_refusal(str(error))})")
             outcome.hints.append(f"follow the run again later with --run-id {outcome.run_id}")
@@ -615,9 +671,9 @@ def evaluate_command() -> list[str] | None:
     Returns:
         The command to run Python with, or `None` if there's none.
     """
-    probe = subprocess.run(  # this Python, fixed arguments
-        [sys.executable, "-c", "import numpy"], capture_output=True, check=False
-    )
+    # This Python, with fixed arguments
+    # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit
+    probe = subprocess.run([sys.executable, "-c", "import numpy"], capture_output=True, check=False)
     if probe.returncode == 0:
         return [sys.executable]
     uv = shutil.which("uv")
@@ -664,9 +720,11 @@ def fetch_model(outputs_url: str, run_id: str, token: str, path: pathlib.Path) -
     opener = urllib.request.build_opener(*handlers)
     try:
         with opener.open(request, timeout=60) as reply:
-            path.write_bytes(reply.read())
+            save_bounded(reply, path, MAX_MODEL_BYTES)
     except urllib.error.HTTPError as error:
         return f"HTTP {error.code}"
+    except Stop as error:
+        return str(error)
     except (urllib.error.URLError, OSError, http.client.HTTPException) as error:
         return str(getattr(error, "reason", error))
     return ""
@@ -687,13 +745,18 @@ def evaluate(model: pathlib.Path, data: pathlib.Path, expect: str) -> tuple[bool
     if python is None:
         return False, "no Python with NumPy, and no uv: install NumPy or uv, then run again with --run-id"
     expect_args = ["--expect", expect] if expect else []
-    done = subprocess.run(  # no shell; the repository's own script
-        [*python, str(REPO / "testset" / "evaluate.py"), str(model), "--data", str(data), *expect_args],
-        capture_output=True,
-        text=True,
-        timeout=600,
-        check=False,
-    )
+    try:
+        # An argument list, no shell: the repository's own script, with this run's paths
+        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit
+        done = subprocess.run(
+            [*python, str(REPO / "testset" / "evaluate.py"), str(model), "--data", str(data), *expect_args],
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "the evaluation took over 600 s"
     return done.returncode == 0, (done.stdout + done.stderr).strip()
 
 
@@ -767,7 +830,8 @@ def check_secret_free(text: str, token: str, urls: Sequence[str]) -> None:
         Stop: It has one of them, or any URL.
     """
     hosts = {urllib.parse.urlsplit(url).hostname for url in urls if url}
-    if token in text or "://" in text or any(host and host in text for host in hosts):
+    folded = text.casefold()
+    if token in text or "://" in text or any(host and host.casefold() in folded for host in hosts):
         raise Stop("the results row would hold the token or a host name: not writing it")
 
 
@@ -848,9 +912,11 @@ def run(args: argparse.Namespace, token: str, cli_path: pathlib.Path | None, wor
         outcome.failures.append(f"the run ended {outcome.state}")
         errors = run_log.get("system_logs") or []
         if errors:
-            print(f"the run's error: {errors[-1]}")
-    if sorted(task.site for task in outcome.tasks) != sorted(args.sites):
-        outcome.failures.append(f"client tasks for {[task.site for task in outcome.tasks]}, not {args.sites}")
+            print(f"the run's error: {scrub(str(errors[-1]), token)}")
+    # The sites the run was submitted with, which differ from --sites if it was picked up with other options
+    sites = ((log.get("request") or {}).get("workflow_params") or {}).get("sites") or args.sites
+    if sorted(task.site for task in outcome.tasks) != sorted(sites):
+        outcome.failures.append(f"client tasks for {[task.site for task in outcome.tasks]}, not {sites}")
     for task in outcome.tasks:
         if task.state != "COMPLETE":
             outcome.failures.append(f"the task of {task.site} ended {task.state}")

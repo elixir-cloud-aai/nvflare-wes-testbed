@@ -59,6 +59,9 @@ elif args[:2] == ["wes", "run"]:
     if scenario.get("submit_status"):
         fail(scenario["submit_status"])
     print(json.dumps({"run_id": "0123456789abcdef"}))
+elif args[:2] == ["wes", "list"]:
+    print("RUN ID            State")
+    print("0123456789abcdef  RUNNING")
 elif args[:2] == ["wes", "status"]:
     count = pathlib.Path(os.environ["FAKE_CLI_LOG"]).read_text().count('"status"')
     if count <= scenario.get("status_failures", 0):
@@ -71,7 +74,8 @@ elif args[:2] == ["wes", "get"]:
         fail(scenario["get_status"])
     print(json.dumps({
         "run_id": args[2], "state": scenario.get("states", ["COMPLETE"])[-1],
-        "run_log": {"system_logs": [], "start_time": "2026-11-29T10:00:00Z", "end_time": "2026-11-29T10:01:32Z"},
+        "request": {"workflow_params": {"sites": scenario.get("ran_sites", ["site-1", "site-2"])}},
+        "run_log": {"system_logs": [scenario.get("run_error", "")], "start_time": "2026-11-29T10:00:00Z", "end_time": "2026-11-29T10:01:32Z"},
         "task_logs": [
             {"id": "task-s", "name": "fl-server", "system_logs": ["COMPLETE"]},
             {"id": "task-2", "name": "fl-client site-2", "system_logs": ["COMPLETE"]},
@@ -128,6 +132,12 @@ class Hub(http.server.BaseHTTPRequestHandler):
             self.send_response(302)
             self.send_header("Location", Hub.location)
             self.end_headers()
+            return
+        if Hub.status == 299:
+            body = b"x" * (sdk_run.MAX_MODEL_BYTES + 1)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(body)
             return
         if Hub.status != 200 or self.headers.get("Authorization") != f"Bearer {Hub.token}":
             self.send_response(Hub.status if Hub.status != 200 else 401)
@@ -341,6 +351,47 @@ class RunTest(Fixture):
         self.assertIn("couldn't be fetched (HTTP 302)", out)
         self.assertEqual(len(Hub.seen), 1)
 
+    def test_run_error_scrubbed(self) -> None:
+        """A run's error that holds the token is printed without it."""
+        status, out, _ = self.main(scenario={"states": ["SYSTEM_ERROR"], "run_error": f"401 for {self.token}"})
+        self.assertEqual(status, 1)
+        self.assertIn("the run's error: 401 for ***", out)
+        self.assertNotIn(SIGNATURE, out)
+
+    def test_submission_maybe_accepted(self) -> None:
+        """A submission that failed otherwise than with a refusal lists the caller's runs, to pick one up."""
+        status, _, err = self.main(scenario={"submit_status": 504})
+        self.assertEqual(status, 1)
+        self.assertIn("the WES may have started the run anyway; your runs there:", err)
+        self.assertIn("0123456789abcdef  RUNNING", err)
+
+    def test_missing_cli(self) -> None:
+        """A --cli that can't be run stops with a message, not a traceback."""
+        self.cli.unlink()
+        status, _, err = self.main()
+        self.assertEqual(status, 1)
+        self.assertIn("STOP: ga4gh-cli can't be run", err)
+
+    def test_model_too_large(self) -> None:
+        """A model larger than any of the test set's isn't read into memory."""
+        with hub(self.token, status=299) as outputs:
+            status, out, _ = self.main(outputs=outputs)
+        self.assertEqual(status, 1)
+        self.assertIn("couldn't be fetched (the answer is larger than 16 MiB: not taking it)", out)
+
+    def test_picked_up_with_other_sites(self) -> None:
+        """A run picked up with --run-id is checked against the sites it was submitted with."""
+        with hub(self.token) as outputs:
+            status, out, _ = self.main(
+                "--run-id",
+                "0123456789abcdef",
+                "--sites",
+                "site-1",
+                outputs=outputs,
+                scenario={"ran_sites": ["site-2", "site-1"]},
+            )
+        self.assertEqual(status, 0, out)
+
     def test_follow_existing_run(self) -> None:
         """--run-id follows a run without submitting one."""
         with hub(self.token) as outputs:
@@ -447,6 +498,42 @@ class PartsTest(unittest.TestCase):
         for text in ("tok", "flare-wes.example.org", "see https://elsewhere.org"):
             with self.subTest(text=text), self.assertRaises(sdk_run.Stop):
                 sdk_run.check_secret_free(text, "tok", [WES])
+
+    def test_job_by_sites(self) -> None:
+        """The job takes as many sites as named, unless --job says otherwise."""
+        self.assertEqual(sdk_run.parse_args(["--wes", WES]).job, "logreg-fedavg")
+        self.assertEqual(sdk_run.parse_args(["--wes", WES, "--sites", "a,b,c"]).job, "logreg-fedavg-3")
+        self.assertEqual(sdk_run.parse_args(["--wes", WES, "--sites", "a,b,c", "--job", "x"]).job, "x")
+
+    def test_host_case(self) -> None:
+        """A host name in other letter case doesn't get into the row either."""
+        with self.assertRaises(sdk_run.Stop):
+            sdk_run.check_secret_free("FLARE-WES.Example.ORG", "tok", [WES])
+
+    def test_retries_end_at_deadline(self) -> None:
+        """Retries stop when the time left wouldn't cover the next pause."""
+        calls = []
+
+        def failing() -> None:
+            calls.append(1)
+            raise sdk_run.Stop("down")
+
+        with self.assertRaises(sdk_run.Stop):
+            sdk_run.retried(failing, lambda _: None, lambda: 3)
+        self.assertEqual(len(calls), 1)
+        with self.assertRaises(sdk_run.Stop):
+            sdk_run.retried(failing, lambda _: None)
+        self.assertEqual(len(calls), 1 + sdk_run.STATUS_TRIES)
+
+    def test_evaluation_timeout(self) -> None:
+        """An evaluation that takes too long fails the check, without a traceback."""
+        with (
+            mock.patch.object(sdk_run, "evaluate_command", return_value=[sys.executable]),
+            mock.patch("subprocess.run", side_effect=sdk_run.subprocess.TimeoutExpired("x", 600)),
+        ):
+            self.assertEqual(
+                sdk_run.evaluate(pathlib.Path("m"), pathlib.Path("d"), ""), (False, "the evaluation took over 600 s")
+            )
 
     def test_outputs_base(self) -> None:
         """/outputs is next to the WES's API root."""
